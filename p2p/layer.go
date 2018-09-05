@@ -9,19 +9,11 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/discover"
 )
 
-type P2P interface {
+type Layer interface {
 
 }
 
-type Peer interface {
-	
-}
-
-type MsgReadWriter interface {
-	
-}
-
-type Runner func(peer Peer, rw MsgReadWriter) error
+type Runner func(peer Peer) error
 
 type Config struct {
 	// TODO: change this to simple json param, and then create actual ECDSA key at run time
@@ -52,15 +44,15 @@ type Config struct {
 	// Length should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength uint64
-
-	// Runner is called in a new groutine when the protocol has been
-	// negotiated with a peer. It should read and write messages from
-	// rw. The Payload for each message must be fully consumed.
-	//
-	// The peer connection is closed when Start returns. It should return
-	// any protocol-level error (such as an I/O error) that is
-	// encountered.
-	Runner Runner
+//
+//	// Runner is called in a new groutine when the protocol has been
+//	// negotiated with a peer. It should read and write messages from
+//	// rw. The Payload for each message must be fully consumed.
+//	//
+//	// The peer connection is closed when Start returns. It should return
+//	// any protocol-level error (such as an I/O error) that is
+//	// encountered.
+//	Runner Runner
 
 	// If ListenAddr is set to a non-nil address, the server
 	// will listen for incoming connections.
@@ -89,11 +81,6 @@ func (c *Config) nat() nat.Interface {
 	return nil
 }
 
-func (c *Config) protocols() []p2p.Protocol {
-	// TODO
-	return nil
-}
-
 func (c *Config) bootnodes() []*discover.Node {
 	// TODO
 	return nil
@@ -106,27 +93,50 @@ func (c *Config) toDEVp2pConfig() p2p.Config {
 		Name:           c.Name,
 		ListenAddr:     c.ListenAddr + ":" + c.Port,
 		NAT: 	        c.nat(),
-		Protocols:      c.protocols(),
+//		Protocols:      c.protocols(),
 		BootstrapNodes: c.bootnodes(),
 	}
 	return conf
 }
 
-type p2pImpl struct {
+type layerDEVp2p struct {
 	conf p2p.Config
 	srv* p2p.Server
-
-	// TODO: these two should be inside the run implementation for this p2pImpl, created as wrappers for Runner callback
-//	peer p2p.Peer
-//	rw   p2p.MsgReadWriter
+	runners []Runner
 }
 
 
-// create an instance of p2p layer using DEVp2p implementation
-func NewDEVp2pLayer(conf Config) *p2pImpl {
-	impl := &p2pImpl {
-		conf: conf.toDEVp2pConfig(),
+func (l *layerDEVp2p) runner(dPeer *p2p.Peer, dRw p2p.MsgReadWriter) error {
+	// TBD: lookup from in memory map -- since we'll also maintain state with the peer
+	peer := NewDEVp2pPeer(dPeer, dRw)
+	// run through all runners and run them (in parallel?)
+	for _,cb := range l.runners {
+		// TBD: handle error return (disconnect peer? or remove specific runner/protocol instance from that peer?)
+		cb(peer)
 	}
+	// TBD: when will we return non-nil error?
+	return nil
+}
+
+
+func (l *layerDEVp2p) makeDEVp2pProtocols(conf Config) []p2p.Protocol {
+	proto := p2p.Protocol {
+		Name: conf.ProtocolName,
+		Version: conf.ProtocolVersion,
+		Length: conf.ProtocolLength,
+		Run: l.runner,
+	}
+	return []p2p.Protocol{proto}
+}
+
+// create an instance of p2p layer using DEVp2p implementation
+func NewDEVp2pLayer(conf Config, runner Runner) *layerDEVp2p {
+	impl := &layerDEVp2p {
+		conf: conf.toDEVp2pConfig(),
+		runners: make([]Runner, 1),
+	}
+	impl.runners[0] = runner
+	impl.conf.Protocols = impl.makeDEVp2pProtocols(conf)
 	impl.srv = &p2p.Server{Config: impl.conf}
 	return impl
 }
