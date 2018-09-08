@@ -3,6 +3,7 @@
 package p2p
 
 import (
+//	"fmt"
 	"crypto/ecdsa"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/nat"
@@ -10,7 +11,7 @@ import (
 )
 
 type Layer interface {
-
+	AddRunner(runner Runner)
 }
 
 type Runner func(peer Peer) error
@@ -105,16 +106,38 @@ type layerDEVp2p struct {
 	runners []Runner
 }
 
+func (l *layerDEVp2p) AddRunner(r Runner) {
+	l.runners = append(l.runners, r)
+}
 
 func (l *layerDEVp2p) runner(dPeer *p2p.Peer, dRw p2p.MsgReadWriter) error {
 	// TBD: lookup from in memory map -- since we'll also maintain state with the peer
 	peer := NewDEVp2pPeer(dPeer, dRw)
 	// run through all runners and run them (in parallel?)
+	runningCount := 0
+	runningChan := make(chan error, len(l.runners))
 	for _,cb := range l.runners {
-		// TBD: handle error return (disconnect peer? or remove specific runner/protocol instance from that peer?)
-		cb(peer)
+		// all of the runners need to be started in separate go routine, and then wait for them to complete in current thread
+		// and then eventually return back after all runners have terminated
+		runningCount += 1
+		go func(cb Runner, count int) {
+			// TBD: handle error return (disconnect peer? or remove specific runner/protocol instance from that peer?)
+//			fmt.Printf("Starting runner # %d\n", count)
+			err := cb(peer)
+//			fmt.Printf("Stopping runner # %d\n", count)
+			runningChan <- err
+		}(cb, runningCount)
 	}
-	// TBD: when will we return non-nil error?
+	// TBD: wait on all runners to complete
+	for runningCount > 0 {
+		select {
+			case <- runningChan:
+				runningCount -= 1
+//				fmt.Printf("Runner count # %d\n", runningCount)
+		}
+	}
+	// TBD: when will we return non-nil error? when not all runners have completed?
+//	fmt.Printf("Done with runner, count # %d\n", runningCount)
 	return nil
 }
 

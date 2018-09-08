@@ -3,6 +3,7 @@ package p2p
 import (
     "testing"
     "fmt"
+    "time"
 )
 
 func testConfig() Config {
@@ -21,15 +22,39 @@ func TestDEVp2pInstance(t *testing.T) {
 }
 
 
-func TestDEVp2pRunner(t *testing.T) {
+func TestDEVp2pRunners(t *testing.T) {
 	// create an instance of DEVp2p layer
-	called := false
+	called1st := false
+	count := 0
 	layer := NewDEVp2pLayer(testConfig(), func(peer Peer) error {
-			called = true
+			count += 1
+			called1st = true
+			time.Sleep(100 * time.Millisecond)
+			return nil
+	})
+	layer.AddRunner(func(peer Peer) error {
+			// yet another runner
+			count += 1
+			time.Sleep(100 * time.Millisecond)
+			return nil
+	})
+	layer.AddRunner(func(peer Peer) error {
+			// yet another runner
+			count += 1
+			time.Sleep(100 * time.Millisecond)
+			return nil
+	})
+	layer.AddRunner(func(peer Peer) error {
+			// yet another runner
+			count += 1
+			time.Sleep(100 * time.Millisecond)
 			return nil
 	})
 	layer.runner(nil, nil)
-	if !called {
-		t.Errorf("Failed to call P2P layer's runner")
+	if count != len(layer.runners) {
+		t.Errorf("Failed to call P2P layer's all runners, expected %d, found %d", len(layer.runners), count)
+	}
+	if !called1st {
+		t.Errorf("Failed to set flag in the first runner")
 	}
 }
