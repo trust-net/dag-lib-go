@@ -21,7 +21,7 @@ func TestDEVp2pInstance(t *testing.T) {
 }
 
 
-func TestDEVp2pRunners(t *testing.T) {
+func TestDEVp2pRunner(t *testing.T) {
 	// create an instance of DEVp2p layer
 	called := false
 	layer := NewDEVp2pLayer(testConfig(), func(peer Peer) error {
