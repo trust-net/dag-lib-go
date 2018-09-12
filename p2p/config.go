@@ -3,8 +3,10 @@
 package p2p
 
 import (
+	"os"
 	"math/big"
 	"crypto/ecdsa"
+	"encoding/json"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -18,10 +20,11 @@ type ECDSAKey struct{
 }
 
 type Config struct {
-	// TODO: change this to simple json param, and then create actual ECDSA key at run time
-	// This field must be set to a valid secp256k1 private key.
-//	PrivateKey *ecdsa.PrivateKey `toml:"-"`
-	PrivateKey ECDSAKey
+	// path to private key for p2p layer node
+	KeyFile string
+
+	// type of private key for p2p layer node ("ECDSA_S256")
+	KeyType string
 
 	// MaxPeers is the maximum number of peers that can be
 	// connected. It must be greater than zero.
@@ -75,18 +78,57 @@ type Config struct {
 
 func (c *Config) key() *ecdsa.PrivateKey {
 	// basic validation checks
-	if c.PrivateKey.Curve != "S256" || len(c.PrivateKey.D) == 0 || len(c.PrivateKey.X) == 0 || len(c.PrivateKey.Y) == 0 {
+	if len(c.KeyFile) == 0 {
 		return nil
 	}
-	key := new(ecdsa.PrivateKey)
-	key.PublicKey.Curve = crypto.S256()
-	key.D = new(big.Int)
-	key.D.SetBytes(c.PrivateKey.D) 
-	key.PublicKey.X = new(big.Int)
-	key.PublicKey.X.SetBytes(c.PrivateKey.X)
-	key.PublicKey.Y = new(big.Int)
-	key.PublicKey.Y.SetBytes(c.PrivateKey.Y)
-	return key
+	switch c.KeyType {
+		case "ECDSA_S256":
+			// read the keyfile, if present, else create a new key and persist
+			if file, err := os.Open(c.KeyFile); err == nil {
+				// source the secret key from file
+				data := make([]byte, 1024)
+				if count, err := file.Read(data); err == nil && count <= 1024 {
+					data = data[:count]
+					ecdsaKey := ECDSAKey{}
+					if err := json.Unmarshal(data, &ecdsaKey); err != nil {
+						return nil
+					} else {
+						nodekey := new(ecdsa.PrivateKey)
+						nodekey.PublicKey.Curve = crypto.S256()
+						nodekey.D = new(big.Int)
+						nodekey.D.SetBytes(ecdsaKey.D) 
+						nodekey.PublicKey.X = new(big.Int)
+						nodekey.PublicKey.X.SetBytes(ecdsaKey.X)
+						nodekey.PublicKey.Y = new(big.Int)
+						nodekey.PublicKey.Y.SetBytes(ecdsaKey.Y)
+						return nodekey
+					}
+				} else {
+					return nil
+				}
+			} else {
+				// generate new secret key and persist to file
+				nodekey, _ := crypto.GenerateKey()
+				ecdsaKey := ECDSAKey {
+					Curve: "S256",
+					X: nodekey.X.Bytes(),
+					Y: nodekey.Y.Bytes(),
+					D: nodekey.D.Bytes(),
+				}
+				if data, err := json.Marshal(ecdsaKey); err == nil {
+					if file, err := os.Create(c.KeyFile); err == nil {
+						file.Write(data)
+					} else {
+						return nil
+					}
+				} else {
+					return nil
+				}
+				return nodekey
+			}
+		default:
+			return nil
+	}
 }
 
 func (c *Config) nat() nat.Interface {
