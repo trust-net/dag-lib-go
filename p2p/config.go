@@ -132,8 +132,11 @@ func (c *Config) key() *ecdsa.PrivateKey {
 }
 
 func (c *Config) nat() nat.Interface {
-	// TODO
-	return nil
+	if c.NAT {
+		return nat.Any()
+	} else {
+		return nil
+	}
 }
 
 func (c *Config) bootnodes() []*discover.Node {

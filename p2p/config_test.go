@@ -75,3 +75,29 @@ func TestEcdsaKeyNonExisting(t *testing.T) {
 		t.Errorf("Failed to get ECDSA key from config")
 	}
 }
+
+func TestNatEnabled(t *testing.T) {
+	config := Config {
+		NAT: true,
+	}
+	if nat := config.nat(); nat == nil {
+		t.Errorf("Failed to enable NAT from config")
+	}
+}
+
+func TestNatDisabled(t *testing.T) {
+	config := Config {
+		NAT: false,
+	}
+	if nat := config.nat(); nat != nil {
+		t.Errorf("Did not disable NAT from config")
+	}
+}
+
+func TestNatDefault(t *testing.T) {
+	config := Config {
+	}
+	if nat := config.nat(); nat != nil {
+		t.Errorf("By default did not disable NAT from config")
+	}
+}
