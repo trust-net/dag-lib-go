@@ -101,3 +101,32 @@ func TestNatDefault(t *testing.T) {
 		t.Errorf("By default did not disable NAT from config")
 	}
 }
+
+func TestBootnodes(t *testing.T) {
+	config := Config {
+		Bootnodes: []string{"enode://210cc150e40c5f9ea68d6e9c97d5fd01bc45c71c4aa41f3126d39b80d36e368b8bf51f2b27ce5f2dbac7f36d862517c57ac0f3bd853b3300910fee17546f39ba@192.168.1.114:57743"},
+	}
+	if bootnodes := config.bootnodes(); bootnodes == nil {
+		t.Errorf("Failed to read bootnodes from config")
+	}
+}
+
+func TestNoBootnodes(t *testing.T) {
+	config := Config {
+	}
+	if bootnodes := config.bootnodes(); bootnodes != nil {
+		t.Errorf("Unexpected bootnodes from config")
+	}
+}
+
+func TestInvalidBootnodes(t *testing.T) {
+	config := Config {
+		Bootnodes: []string{
+			"enode://210cc150e40c5f9ea68d6e9c97d5fd01bc45c71c4aa41f3126d39b80d36e368b8bf51f2b27ce5f2dbac7f36d862517c57ac0f3bd853b3300910fee17546f39ba@192.168.1.114:57743",
+			"enode://invalid_node",
+		},
+	}
+	if bootnodes := config.bootnodes(); len(bootnodes) != 1 {
+		t.Errorf("Failed to handle invalid bootnode from config")
+	}
+}

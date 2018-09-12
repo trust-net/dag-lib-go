@@ -37,7 +37,7 @@ type Config struct {
 	// BootstrapNodes are used to establish connectivity
 	// with the rest of the network.
 //	BootstrapNodes []*discover.Node
-	BootstrapNodes []string
+	Bootnodes []string
 
 	// Name should contain the official protocol name,
 	// often a three-letter word.
@@ -140,7 +140,19 @@ func (c *Config) nat() nat.Interface {
 }
 
 func (c *Config) bootnodes() []*discover.Node {
-	// TODO
+	// parse bootnodes from config, if present
+	if c.Bootnodes != nil {
+		bootnodes := make([]*discover.Node,0,len(c.Bootnodes))
+		for _, bootnode := range c.Bootnodes {
+			if enode, err := discover.ParseNode(bootnode); err == nil {
+				bootnodes = append(bootnodes, enode)
+			}
+		}
+		if len(bootnodes) > 0 {
+			return bootnodes
+		}
+	}
+	// we either did not have any bootnode config, or none of entry was valid
 	return nil
 }
 
