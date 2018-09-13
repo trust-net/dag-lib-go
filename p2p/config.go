@@ -22,28 +22,28 @@ type ECDSAKey struct{
 
 type Config struct {
 	// path to private key for p2p layer node
-	KeyFile string
+	KeyFile string `json:"key_file"       gencodec:"required"`
 
 	// type of private key for p2p layer node ("ECDSA_S256")
-	KeyType string
+	KeyType string `json:"key_type"       gencodec:"required"`
 
 	// MaxPeers is the maximum number of peers that can be
 	// connected. It must be greater than zero.
-	MaxPeers int
+	MaxPeers int `json:"max_peers"       gencodec:"required"`
 
 	// Name sets the node name of this server.
-	Name string `toml:"-"`
+	Name string  `json:"node_name"       gencodec:"required"`
 
 	// Bootnodes are used to establish connectivity
 	// with the rest of the network.
-	Bootnodes []string
+	Bootnodes []string `json:"boot_nodes"`
 
 	// Name should contain the official protocol name,
 	// often a three-letter word.
-	ProtocolName string
+	ProtocolName string `json:"proto_name"       gencodec:"required"`
 
 	// Version should contain the version number of the protocol.
-	ProtocolVersion uint
+	ProtocolVersion uint `json:"proto_ver"       gencodec:"required"`
 
 	// Length should contain the number of message codes used
 	// by the protocol.
@@ -51,16 +51,13 @@ type Config struct {
 
 	// If ListenAddr is set to a non-nil address, the server
 	// will listen for incoming connections.
-	ListenAddr string
+	ListenAddr string `json:"listen_addr"`
 
 	// If the port is zero, the operating system will pick a port. The
-	Port string
+	Port string `json:"listen_port"`
 
-	// TODO: change this to simple json boolean (or string), and then instantiate nat.Interface at run time
-	// If set to a non-nil value, the given NAT port mapper
-	// is used to make the listening port available to the
+	// If set to true, the listening port is made available to the
 	// Internet.
-//	NAT nat.Interface `toml:",omitempty"`
 	NAT bool
 }
 
