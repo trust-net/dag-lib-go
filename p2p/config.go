@@ -33,10 +33,8 @@ type Config struct {
 	// Name sets the node name of this server.
 	Name string `toml:"-"`
 
-	// TODO: change this to simple json string, and then create actual discover.Node at run time
-	// BootstrapNodes are used to establish connectivity
+	// Bootnodes are used to establish connectivity
 	// with the rest of the network.
-//	BootstrapNodes []*discover.Node
 	Bootnodes []string
 
 	// Name should contain the official protocol name,
@@ -49,23 +47,12 @@ type Config struct {
 	// Length should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength uint64
-//
-//	// Runner is called in a new groutine when the protocol has been
-//	// negotiated with a peer. It should read and write messages from
-//	// rw. The Payload for each message must be fully consumed.
-//	//
-//	// The peer connection is closed when Start returns. It should return
-//	// any protocol-level error (such as an I/O error) that is
-//	// encountered.
-//	Runner Runner
 
 	// If ListenAddr is set to a non-nil address, the server
 	// will listen for incoming connections.
-	//
-	// If the port is zero, the operating system will pick a port. The
-	// ListenAddr field will be updated with the actual address when
-	// the server is started.
 	ListenAddr string
+
+	// If the port is zero, the operating system will pick a port. The
 	Port string
 
 	// TODO: change this to simple json boolean (or string), and then instantiate nat.Interface at run time
@@ -139,6 +126,14 @@ func (c *Config) nat() nat.Interface {
 	}
 }
 
+func (c *Config) listenAddr() string {
+	if len(c.Port) != 0 {
+		return c.ListenAddr + ":" + c.Port
+	} else {
+		return c.ListenAddr
+	}
+}
+
 func (c *Config) bootnodes() []*discover.Node {
 	// parse bootnodes from config, if present
 	if c.Bootnodes != nil {
@@ -157,13 +152,16 @@ func (c *Config) bootnodes() []*discover.Node {
 }
 
 func (c *Config) toDEVp2pConfig() *p2p.Config {
+	key := c.key()
+	if key == nil || c.MaxPeers < 1 || len(c.ProtocolName) == 0 || len(c.Name) == 0 {
+		return nil
+	}
 	conf := p2p.Config {
 		MaxPeers:       c.MaxPeers,
-		PrivateKey:     c.key(),
+		PrivateKey:     key,
 		Name:           c.Name,
-		ListenAddr:     c.ListenAddr + ":" + c.Port,
-		NAT: 	        c.nat(),
-//		Protocols:      c.protocols(),
+		ListenAddr:     c.listenAddr(),
+		NAT:            c.nat(),
 		BootstrapNodes: c.bootnodes(),
 	}
 	return &conf

@@ -130,3 +130,53 @@ func TestInvalidBootnodes(t *testing.T) {
 		t.Errorf("Failed to handle invalid bootnode from config")
 	}
 }
+
+func TestToDEVp2pConfigInvalidKey(t *testing.T) {
+	config := testConfig()
+	config.KeyFile = "invalid_key_file.json"
+	if conf := config.toDEVp2pConfig(); conf != nil {
+		t.Errorf("Expected toDEVp2pConfig to fail due to invalid key")
+	}
+}
+
+func TestToDEVp2pConfigNoMaxPeers(t *testing.T) {
+	config := testConfig()
+	config.MaxPeers = 0
+	if conf := config.toDEVp2pConfig(); conf != nil {
+		t.Errorf("Expected toDEVp2pConfig to fail due to missing Max Peers")
+	}
+}
+
+func TestToDEVp2pConfigNoProtocolName(t *testing.T) {
+	config := testConfig()
+	config.ProtocolName = ""
+	if conf := config.toDEVp2pConfig(); conf != nil {
+		t.Errorf("Expected toDEVp2pConfig to fail due to missing Max Peers")
+	}
+}
+
+func TestToDEVp2pConfigNoName(t *testing.T) {
+	config := testConfig()
+	config.Name = ""
+	if conf := config.toDEVp2pConfig(); conf != nil {
+		t.Errorf("Expected toDEVp2pConfig to fail due to missing Name")
+	}
+}
+
+func TestToDEVp2pConfigNoPort(t *testing.T) {
+	config := testConfig()
+	config.ListenAddr = "test"
+	config.Port = ""
+	if addr := config.listenAddr(); addr != "test" {
+		t.Errorf("Incorrect listen address, expected: %s, got: %s", "test", addr)
+	}
+}
+
+func TestToDEVp2pConfigNoListenAddr(t *testing.T) {
+	config := testConfig()
+	config.ListenAddr = ""
+	config.Port = "1234"
+	if addr := config.listenAddr(); addr != ":1234" {
+		t.Errorf("Incorrect listen address, expected: %s, got: %s", ":1234", addr)
+	}
+}

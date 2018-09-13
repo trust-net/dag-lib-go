@@ -5,10 +5,6 @@ import (
     "fmt"
 )
 
-func testConfig() Config {
-	return Config{}
-}
-
 func TestDEVp2pInstance(t *testing.T) {
 	var p2p Layer
 	// test and validate p2pImpl is a P2P

@@ -8,6 +8,16 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/discover"
 )
 
+func testConfig() Config {
+	return Config{
+		KeyFile: "key_file.json",
+		KeyType: "ECDSA_S256",
+		MaxPeers: 1,
+		ProtocolName: "test-protocol",
+		Name: "test node",
+	}
+}
+
 type mockMsgReadWriter struct {
 	readCount  int
 	writeCount int

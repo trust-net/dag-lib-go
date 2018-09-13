@@ -15,8 +15,8 @@ type Runner func(peer Peer) error
 
 
 type layerDEVp2p struct {
-	conf p2p.Config
-	srv* p2p.Server
+	conf *p2p.Config
+	srv *p2p.Server
 	cb Runner
 }
 
@@ -39,11 +39,14 @@ func (l *layerDEVp2p) makeDEVp2pProtocols(conf Config) []p2p.Protocol {
 // create an instance of p2p layer using DEVp2p implementation
 func NewDEVp2pLayer(c Config, cb Runner) *layerDEVp2p {
 	conf := c.toDEVp2pConfig()
+	if conf == nil {
+		return nil
+	}
 	impl := &layerDEVp2p {
-		conf: *conf,
+		conf: conf,
 		cb: cb,
 	}
 	impl.conf.Protocols = impl.makeDEVp2pProtocols(c)
-	impl.srv = &p2p.Server{Config: impl.conf}
+	impl.srv = &p2p.Server{Config: *impl.conf}
 	return impl
 }
