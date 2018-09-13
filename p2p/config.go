@@ -64,7 +64,7 @@ type Config struct {
 func (c *Config) key() (*ecdsa.PrivateKey, error) {
 	// basic validation checks
 	if len(c.KeyFile) == 0 {
-		return nil, errors.New("missing KeyFile parameter")
+		return nil, errors.New("missing 'key_file' parameter")
 	}
 	switch c.KeyType {
 		case "ECDSA_S256":
@@ -112,7 +112,7 @@ func (c *Config) key() (*ecdsa.PrivateKey, error) {
 				return nodekey, nil
 			}
 		default:
-			return nil, errors.New("missing or unsupported key type")
+			return nil, errors.New("missing or unsupported 'key_type' parameter")
 	}
 }
 
@@ -155,11 +155,11 @@ func (c *Config) toDEVp2pConfig() (*p2p.Config, error) {
 		case key == nil:
 			return nil, err
 		case c.MaxPeers < 1:
-			return nil, errors.New("MaxPeers must be non zero")
+			return nil, errors.New("'max_peers' must be non zero")
 		case len(c.ProtocolName) == 0:
-			return nil, errors.New("missing ProtocolName parameter")
+			return nil, errors.New("missing 'proto_name' parameter")
 		case len(c.Name) == 0:
-			return nil, errors.New("missing Name parameter")
+			return nil, errors.New("missing 'node_name' parameter")
 	}
 	conf := p2p.Config {
 		MaxPeers:       c.MaxPeers,

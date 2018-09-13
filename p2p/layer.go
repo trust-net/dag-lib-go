@@ -8,7 +8,8 @@ import (
 )
 
 type Layer interface {
-
+	Start() error
+	Self() string
 }
 
 type Runner func(peer Peer) error
@@ -18,6 +19,15 @@ type layerDEVp2p struct {
 	conf *p2p.Config
 	srv *p2p.Server
 	cb Runner
+}
+
+func (l *layerDEVp2p) Start() error {
+	return l.srv.Start()
+}
+
+
+func (l *layerDEVp2p) Self() string {
+	return l.srv.Self().String()
 }
 
 // we are just wrapping the callback to hide the DEVp2p specific details

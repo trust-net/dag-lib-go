@@ -1,0 +1,9 @@
+{
+	"key_file": "key1.json",
+	"key_type": "ECDSA_S256",
+	"max_peers": 2,
+	"proto_name": "test",
+	"node_name": "test node 1",
+	"listen_port": "50883",
+	"boot_nodes": ["enode://c3da24ed70538b731b9734e4e0b8206e441089ab4fcd1d0faadb1031e736491b70de0b70e1d581958b28eb43444491b3b9091bd8a81d1767bf7d4ebc3e7bd108@127.0.0.1:50438"]
+}
