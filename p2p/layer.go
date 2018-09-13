@@ -37,10 +37,10 @@ func (l *layerDEVp2p) makeDEVp2pProtocols(conf Config) []p2p.Protocol {
 }
 
 // create an instance of p2p layer using DEVp2p implementation
-func NewDEVp2pLayer(c Config, cb Runner) *layerDEVp2p {
-	conf := c.toDEVp2pConfig()
-	if conf == nil {
-		return nil
+func NewDEVp2pLayer(c Config, cb Runner) (*layerDEVp2p, error) {
+	conf, err := c.toDEVp2pConfig()
+	if err != nil {
+		return nil, err
 	}
 	impl := &layerDEVp2p {
 		conf: conf,
@@ -48,5 +48,5 @@ func NewDEVp2pLayer(c Config, cb Runner) *layerDEVp2p {
 	}
 	impl.conf.Protocols = impl.makeDEVp2pProtocols(c)
 	impl.srv = &p2p.Server{Config: *impl.conf}
-	return impl
+	return impl, nil
 }

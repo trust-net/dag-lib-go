@@ -19,8 +19,8 @@ func TestEcdsaKey(t *testing.T) {
 		KeyFile: "key_file.json",
 		KeyType: "ECDSA_S256",
 	}
-	if key := config.key(); key == nil {
-		t.Errorf("Failed to get ECDSA key from config")
+	if _, err := config.key(); err != nil {
+		t.Errorf("Failed to get ECDSA key from config: %s", err)
 	}
 }
 
@@ -29,7 +29,7 @@ func TestEcdsaKeyTypeValidations(t *testing.T) {
 		KeyFile: "key_file.json",
 		KeyType: "random",
 	}
-	if config.key() != nil {
+	if _, err:= config.key(); err == nil {
 		t.Errorf("did not validate KeyType, should be ECDSA_S256")
 	}
 }
@@ -38,7 +38,7 @@ func TestEcdsaKeyFileRequiredValidations(t *testing.T) {
 	config := Config {
 		KeyType: "ECDSA_S256",
 	}
-	if config.key() != nil {
+	if _, err:= config.key(); err == nil {
 		t.Errorf("did not validate KeyFile, required parameter")
 	}
 }
@@ -48,7 +48,7 @@ func TestEcdsaKeyFileAccessValidations(t *testing.T) {
 		KeyFile: "path/to/non/accessible.json",
 		KeyType: "ECDSA_S256",
 	}
-	if config.key() != nil {
+	if _, err:= config.key(); err == nil {
 		t.Errorf("did not validate access to key file")
 	}
 }
@@ -58,7 +58,7 @@ func TestEcdsaKeyParseValidations(t *testing.T) {
 		KeyFile: "invalid_key_file.json",
 		KeyType: "ECDSA_S256",
 	}
-	if config.key() != nil {
+	if _, err:= config.key(); err == nil {
 		t.Errorf("did not handle key parse error")
 	}
 }
@@ -71,8 +71,8 @@ func TestEcdsaKeyNonExisting(t *testing.T) {
 		KeyFile: keyFile,
 		KeyType: "ECDSA_S256",
 	}
-	if key := config.key(); key == nil {
-		t.Errorf("Failed to get ECDSA key from config")
+	if _, err:= config.key(); err != nil {
+		t.Errorf("Failed to get ECDSA key from config: %s", err)
 	}
 }
 
@@ -134,7 +134,7 @@ func TestInvalidBootnodes(t *testing.T) {
 func TestToDEVp2pConfigInvalidKey(t *testing.T) {
 	config := testConfig()
 	config.KeyFile = "invalid_key_file.json"
-	if conf := config.toDEVp2pConfig(); conf != nil {
+	if _, err := config.toDEVp2pConfig(); err == nil {
 		t.Errorf("Expected toDEVp2pConfig to fail due to invalid key")
 	}
 }
@@ -142,7 +142,7 @@ func TestToDEVp2pConfigInvalidKey(t *testing.T) {
 func TestToDEVp2pConfigNoMaxPeers(t *testing.T) {
 	config := testConfig()
 	config.MaxPeers = 0
-	if conf := config.toDEVp2pConfig(); conf != nil {
+	if _, err := config.toDEVp2pConfig(); err == nil {
 		t.Errorf("Expected toDEVp2pConfig to fail due to missing Max Peers")
 	}
 }
@@ -150,7 +150,7 @@ func TestToDEVp2pConfigNoMaxPeers(t *testing.T) {
 func TestToDEVp2pConfigNoProtocolName(t *testing.T) {
 	config := testConfig()
 	config.ProtocolName = ""
-	if conf := config.toDEVp2pConfig(); conf != nil {
+	if _, err := config.toDEVp2pConfig(); err == nil {
 		t.Errorf("Expected toDEVp2pConfig to fail due to missing Max Peers")
 	}
 }
@@ -158,12 +158,12 @@ func TestToDEVp2pConfigNoProtocolName(t *testing.T) {
 func TestToDEVp2pConfigNoName(t *testing.T) {
 	config := testConfig()
 	config.Name = ""
-	if conf := config.toDEVp2pConfig(); conf != nil {
+	if _, err := config.toDEVp2pConfig(); err == nil {
 		t.Errorf("Expected toDEVp2pConfig to fail due to missing Name")
 	}
 }
 
-func TestToDEVp2pConfigNoPort(t *testing.T) {
+func TestListenAddrNoPort(t *testing.T) {
 	config := testConfig()
 	config.ListenAddr = "test"
 	config.Port = ""
@@ -172,7 +172,7 @@ func TestToDEVp2pConfigNoPort(t *testing.T) {
 	}
 }
 
-func TestToDEVp2pConfigNoListenAddr(t *testing.T) {
+func TestListenAddrNoListenAddr(t *testing.T) {
 	config := testConfig()
 	config.ListenAddr = ""
 	config.Port = "1234"

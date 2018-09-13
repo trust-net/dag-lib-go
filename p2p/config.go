@@ -4,6 +4,7 @@ package p2p
 
 import (
 	"os"
+	"errors"
 	"math/big"
 	"crypto/ecdsa"
 	"encoding/json"
@@ -63,10 +64,10 @@ type Config struct {
 	NAT bool
 }
 
-func (c *Config) key() *ecdsa.PrivateKey {
+func (c *Config) key() (*ecdsa.PrivateKey, error) {
 	// basic validation checks
 	if len(c.KeyFile) == 0 {
-		return nil
+		return nil, errors.New("missing KeyFile parameter")
 	}
 	switch c.KeyType {
 		case "ECDSA_S256":
@@ -78,7 +79,7 @@ func (c *Config) key() *ecdsa.PrivateKey {
 					data = data[:count]
 					ecdsaKey := ECDSAKey{}
 					if err := json.Unmarshal(data, &ecdsaKey); err != nil {
-						return nil
+						return nil, err
 					} else {
 						nodekey := new(ecdsa.PrivateKey)
 						nodekey.PublicKey.Curve = crypto.S256()
@@ -88,10 +89,10 @@ func (c *Config) key() *ecdsa.PrivateKey {
 						nodekey.PublicKey.X.SetBytes(ecdsaKey.X)
 						nodekey.PublicKey.Y = new(big.Int)
 						nodekey.PublicKey.Y.SetBytes(ecdsaKey.Y)
-						return nodekey
+						return nodekey, nil
 					}
 				} else {
-					return nil
+					return nil, errors.New("failed to read KeyFile")
 				}
 			} else {
 				// generate new secret key and persist to file
@@ -106,15 +107,15 @@ func (c *Config) key() *ecdsa.PrivateKey {
 					if file, err := os.Create(c.KeyFile); err == nil {
 						file.Write(data)
 					} else {
-						return nil
+						return nil, errors.New("failed to save KeyFile")
 					}
 				} else {
-					return nil
+					return nil, err
 				}
-				return nodekey
+				return nodekey, nil
 			}
 		default:
-			return nil
+			return nil, errors.New("missing or unsupported key type")
 	}
 }
 
@@ -151,10 +152,17 @@ func (c *Config) bootnodes() []*discover.Node {
 	return nil
 }
 
-func (c *Config) toDEVp2pConfig() *p2p.Config {
-	key := c.key()
-	if key == nil || c.MaxPeers < 1 || len(c.ProtocolName) == 0 || len(c.Name) == 0 {
-		return nil
+func (c *Config) toDEVp2pConfig() (*p2p.Config, error) {
+	key, err := c.key()
+	switch {
+		case key == nil:
+			return nil, err
+		case c.MaxPeers < 1:
+			return nil, errors.New("MaxPeers must be non zero")
+		case len(c.ProtocolName) == 0:
+			return nil, errors.New("missing ProtocolName parameter")
+		case len(c.Name) == 0:
+			return nil, errors.New("missing Name parameter")
 	}
 	conf := p2p.Config {
 		MaxPeers:       c.MaxPeers,
@@ -164,5 +172,5 @@ func (c *Config) toDEVp2pConfig() *p2p.Config {
 		NAT:            c.nat(),
 		BootstrapNodes: c.bootnodes(),
 	}
-	return &conf
+	return &conf, nil
 }
