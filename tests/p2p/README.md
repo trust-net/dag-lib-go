@@ -1,4 +1,6 @@
 ## Test application for P2P Layer
+This is a test application for end to end testing of P2P layer library. This is a very simple app, that instantiates the P2P layer and connects with another peer on network running with same protocol/network. Goal is to test the peer discovery and peer connection.
+
 Build and run the application as following:
 
 #### build an instance
@@ -10,13 +12,13 @@ go build
 #### run first instances
 
 ```
-./layer config1.json
+./p2p config1.json
 ```
 
 #### run second instance from a different terminal
 
 ```
-./layer config2.json
+./p2p config2.json
 ```
 #### let the two instances discover and connect with each other
 
