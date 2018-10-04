@@ -6,7 +6,7 @@ import (
 	"os"
 	"fmt"
 	"encoding/json"
-	"github.com/trust-net/dag-lib-go/p2p"
+	"github.com/trust-net/dag-lib-go/stack/p2p"
 )
 
 func main() {
