@@ -6,13 +6,14 @@ import (
 	"errors"
 	"sync"
 	"github.com/trust-net/dag-lib-go/db"
+	"github.com/trust-net/dag-lib-go/stack/p2p"
 )
 
 type AppConfig struct {
-	// public ID of the application node
-	NodeId []byte
-	// name of the application node
-	NodeName string
+	// public ID of the application instance (different from node ID used in p2p layer)
+	AppId []byte
+	// name of the application
+	Name string
 	// shard ID of the application (same for all nodes of application)
 	ShardId []byte
 	// protocol version for the shard (same for all nodes of application)
@@ -24,8 +25,8 @@ type Transaction struct {
 	Payload []byte
 	// transaction signature
 	Signature []byte
-	// transaction approver node's public ID
-	NodeId []byte
+	// transaction approver application instance ID
+	AppId []byte
 	// transaction submitter's public ID
 	Submitter []byte
 }
@@ -43,6 +44,8 @@ type DLT interface {
 	Unregister() error
 	// submit a transaction to the network
 	Submit(tx *Transaction) error
+	// start the controller
+	Start() error
 }
 
 type dlt struct {
@@ -88,15 +91,21 @@ func (d *dlt) Submit(tx *Transaction) error {
 			return errors.New("nil transaction payload")
 		case tx.Signature == nil:
 			return errors.New("nil transaction signature")
-		case tx.NodeId == nil:
-			return errors.New("nil transaction node ID")
+		case tx.AppId == nil:
+			return errors.New("nil transaction app ID")
+		case string(tx.AppId) != string(d.app.AppId):
+			return errors.New("transaction app ID does not match registered app ID")
 		case tx.Submitter == nil:
 			return errors.New("nil transaction submitter ID")
 	}
 	return nil
 }
 
-func NewDltStack(db db.Database) (*dlt, error) {
+func (d *dlt) Start() error {
+	return errors.New("not implemented")
+}
+
+func NewDltStack(conf p2p.Config, db db.Database) (*dlt, error) {
 	return &dlt {
 		db: db,
 	}, nil
