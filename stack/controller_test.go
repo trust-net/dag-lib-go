@@ -154,3 +154,32 @@ func TestStart(t *testing.T) {
 		t.Errorf("Controller failed to start: %s", err)
 	}
 }
+
+func TestAppPeerHandlerCallback(t *testing.T) {
+	// create an instance of stack controller
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+
+	// inject mock p2p module into stack
+	stack.p2p = p2p.TestP2PLayer("mock p2p")
+
+	// define peer handler call back for app
+	cbCalled := false
+	peerHandler := func (app AppConfig) bool {
+		cbCalled = true
+		return true
+	}
+
+	// define a default tx handler
+	txHandler := func (tx *Transaction) error {return nil}
+
+	// register app
+	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err != nil {
+		t.Errorf("Registration failed, err: %s", err)
+	}
+
+	// now simulate a new peer app connection
+	peer := p2p.NewDEVp2pPeer(p2p.TestMockPeer("test peer"), p2p.TestConn())
+	if err := stack.runner(peer); err != nil {
+		t.Errorf("app peer validation failed: %s", err)
+	}
+}

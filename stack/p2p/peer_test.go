@@ -83,3 +83,15 @@ func TestDEVp2pPeerSend(t *testing.T) {
 		t.Errorf("Failed to send message to Peer via connection")
 	}
 }
+
+func TestDEVp2pPeerReadMsg(t *testing.T) {
+	conn := TestConn()
+	peer := NewDEVp2pPeer(TestMockPeer("test peer"), conn)
+	m, _ := peer.ReadMsg()
+	if conn.ReadCount != 1 {
+		t.Errorf("Failed to read message from Peer via connection")
+	}
+	if m.(*msg) == nil || m.(*msg).p2pMsg == nil {
+		t.Errorf("message wrapper not initialized correctly")
+	}
+}

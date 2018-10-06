@@ -26,6 +26,8 @@ type Peer interface {
 	String() string
 	// send a message to peer node
 	Send(msgcode uint64, data interface{}) error
+	// read a message from peer node
+	ReadMsg() (Msg, error)
 }
 
 const (
@@ -93,4 +95,12 @@ func (p* peerDEVp2p) String() string {
 
 func (p* peerDEVp2p) Send(msgcode uint64, data interface{}) error {
 	return p2p.Send(p.rw, msgcode, data)
+}
+
+func (p* peerDEVp2p) ReadMsg() (Msg, error) {
+	if m, err := p.rw.ReadMsg(); err != nil {
+		return nil, err
+	} else {
+		return newMsg(&m), nil
+	}
 }
