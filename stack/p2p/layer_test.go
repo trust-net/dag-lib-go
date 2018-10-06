@@ -9,7 +9,7 @@ func TestDEVp2pInstance(t *testing.T) {
 	var p2p Layer
 	var err error
 	// test and validate p2pImpl is a P2P
-	p2p, err = NewDEVp2pLayer(testConfig(), func(peer Peer) error {return nil})
+	p2p, err = NewDEVp2pLayer(TestConfig(), func(peer Peer) error {return nil})
 	if err != nil {
 		t.Errorf("Failed to get P2P layer instance: %s", err)
 	}
@@ -31,7 +31,7 @@ func TestDEVp2pInstanceBadConfig(t *testing.T) {
 func TestDEVp2pRunner(t *testing.T) {
 	// create an instance of DEVp2p layer
 	called := false
-	layer,_ := NewDEVp2pLayer(testConfig(), func(peer Peer) error {
+	layer,_ := NewDEVp2pLayer(TestConfig(), func(peer Peer) error {
 			called = true
 			return nil
 	})

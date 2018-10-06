@@ -3,7 +3,6 @@ package stack
 import (
     "testing"
 	"github.com/trust-net/dag-lib-go/db"
-	"github.com/trust-net/dag-lib-go/stack/p2p"
 )
 
 func TestInitiatization(t *testing.T) {
@@ -24,7 +23,7 @@ func TestInitiatization(t *testing.T) {
 
 func TestRegister(t *testing.T) {
 	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
-	app := testAppConfig()
+	app := TestAppConfig()
 	peerHandler := func (app AppConfig) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}
 	
@@ -49,7 +48,7 @@ func TestPreRegistered(t *testing.T) {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 	
-	if err := stack.Register(testAppConfig(), peerHandler, txHandler); err == nil {
+	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err == nil {
 		t.Errorf("Registration did not check for already registered")
 	}
 }
@@ -59,7 +58,7 @@ func TestUnRegister(t *testing.T) {
 	peerHandler := func (app AppConfig) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}
 	
-	if err := stack.Register(testAppConfig(), peerHandler, txHandler); err != nil {
+	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 	if err := stack.Unregister(); err != nil {
@@ -80,51 +79,9 @@ func TestSubmitUnregistered(t *testing.T) {
 	}
 }
 
-func testTransaction() *Transaction {
-	return &Transaction {
-		Payload: []byte("test data"),
-		Signature: []byte("test signature"),
-		AppId: []byte("test app ID"),
-		Submitter: []byte("test submitter"),
-	}
-}
-
-func testAppConfig() AppConfig {
-	return AppConfig {
-		AppId: []byte("test app ID"),
-		ShardId: []byte ("test shard"),
-		Name: "test app",
-		Version: 1234,
-	}
-}
-
-func testP2PConfig() p2p.Config {
-	return p2p.Config{
-		KeyFile: "key_file.json",
-		KeyType: "ECDSA_S256",
-		MaxPeers: 1,
-		ProtocolName: "test-protocol",
-		Name: "test node",
-	}
-}
-
-type mockP2P struct {
-	isStarted bool
-	self string
-}
-
-func (p2p *mockP2P) Start() error {
-	p2p.isStarted = true
-	return nil
-}
-
-func (p2p *mockP2P) Self () string {
-	return p2p.self
-}
-
 func TestSubmitNilValues(t *testing.T) {
 	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
-	app := testAppConfig()
+	app := TestAppConfig()
 	peerHandler := func (app AppConfig) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}	
 	if err := stack.Register(app, peerHandler, txHandler); err != nil {
@@ -134,22 +91,22 @@ func TestSubmitNilValues(t *testing.T) {
 	if err := stack.Submit(nil); err == nil {
 		t.Errorf("Transaction submission did not check for nil transaction")
 	}
-	tx := testTransaction()
+	tx := TestTransaction()
 	tx.Payload = nil
 	if err := stack.Submit(tx); err == nil {
 		t.Errorf("Transaction submission did not check for nil payload")
 	}
-	tx = testTransaction()
+	tx = TestTransaction()
 	tx.Signature = nil
 	if err := stack.Submit(tx); err == nil {
 		t.Errorf("Transaction submission did not check for nil signature")
 	}
-	tx = testTransaction()
+	tx = TestTransaction()
 	tx.AppId = nil
 	if err := stack.Submit(tx); err == nil {
 		t.Errorf("Transaction submission did not check for nil app ID")
 	}
-	tx = testTransaction()
+	tx = TestTransaction()
 	tx.Submitter = nil
 	if err := stack.Submit(tx); err == nil {
 		t.Errorf("Transaction submission did not check for nil submitter ID")
@@ -158,14 +115,14 @@ func TestSubmitNilValues(t *testing.T) {
 
 func TestSubmitAppIdNoMatch(t *testing.T) {
 	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
-	app := testAppConfig()
+	app := TestAppConfig()
 	peerHandler := func (app AppConfig) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}
 	if err := stack.Register(app, peerHandler, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
-	tx := testTransaction()
+	tx := TestTransaction()
 	tx.AppId = []byte("some random app ID")
 	if err := stack.Submit(tx); err == nil {
 		t.Errorf("Transaction submission did not check for app ID match")
@@ -174,7 +131,7 @@ func TestSubmitAppIdNoMatch(t *testing.T) {
 
 func TestSubmit(t *testing.T) {
 	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
-	app := testAppConfig()
+	app := TestAppConfig()
 	peerHandler := func (app AppConfig) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}
 	
@@ -182,7 +139,7 @@ func TestSubmit(t *testing.T) {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
-	if err := stack.Submit(testTransaction()); err != nil {
+	if err := stack.Submit(TestTransaction()); err != nil {
 		t.Errorf("Transaction submission failed, err: %s", err)
 	}
 }
@@ -190,11 +147,9 @@ func TestSubmit(t *testing.T) {
 
 func TestStart(t *testing.T) {
 	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
-	p2p := &mockP2P {
-		self: "mock p2p layer",
-	}
+	p2p := testP2PLayer("mock p2p")
 	stack.p2p = p2p
-	if err := stack.Start(); err != nil || !p2p.isStarted {
+	if err := stack.Start(); err != nil || !p2p.IsStarted {
 		t.Errorf("Controller failed to start: %s", err)
 	}
 }

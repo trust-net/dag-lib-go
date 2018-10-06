@@ -7,7 +7,7 @@ import (
 
 func TestDEVp2pPeerInstance(t *testing.T) {
 	var peer Peer
-	peer = NewDEVp2pPeer(testDEVp2pPeer("test peer"), testConn())
+	peer = NewDEVp2pPeer(TestDEVp2pPeer("test peer"), TestConn())
 	if impl, ok := peer.(*peerDEVp2p); ok {
 		fmt.Printf("Peer type: %T\n", impl)
 	} else {
@@ -19,67 +19,67 @@ func TestDEVp2pPeerInstance(t *testing.T) {
 }
 
 func TestDEVp2pPeerID(t *testing.T) {
-	p2p := testMockPeer("test peer")
-	peer := NewDEVp2pPeer(p2p, testConn())
+	p2p := TestMockPeer("test peer")
+	peer := NewDEVp2pPeer(p2p, TestConn())
 	peer.ID()
-	if p2p.idCount != 1 {
+	if p2p.IdCount != 1 {
 		t.Errorf("Failed to get ID from Peer")
 	}
 }
 
 func TestDEVp2pPeerName(t *testing.T) {
-	p2p := testMockPeer("test peer")
-	peer := NewDEVp2pPeer(p2p, testConn())
+	p2p := TestMockPeer("test peer")
+	peer := NewDEVp2pPeer(p2p, TestConn())
 	peer.Name()
-	if p2p.nameCount != 1 {
+	if p2p.NameCount != 1 {
 		t.Errorf("Failed to get Name from Peer")
 	}
 }
 
 func TestDEVp2pPeerRemoteAddr(t *testing.T) {
-	p2p := testMockPeer("test peer")
-	peer := NewDEVp2pPeer(p2p, testConn())
+	p2p := TestMockPeer("test peer")
+	peer := NewDEVp2pPeer(p2p, TestConn())
 	peer.RemoteAddr()
-	if p2p.remoteCount != 1 {
+	if p2p.RemoteCount != 1 {
 		t.Errorf("Failed to get remote address from Peer")
 	}
 }
 
 func TestDEVp2pPeerLocalAddr(t *testing.T) {
-	p2p := testMockPeer("test peer")
-	peer := NewDEVp2pPeer(p2p, testConn())
+	p2p := TestMockPeer("test peer")
+	peer := NewDEVp2pPeer(p2p, TestConn())
 	peer.LocalAddr()
-	if p2p.localCount != 1 {
+	if p2p.LocalCount != 1 {
 		t.Errorf("Failed to get local address from Peer")
 	}
 }
 
 func TestDEVp2pPeerDisconnect(t *testing.T) {
-	p2p := testMockPeer("test peer")
-	peer := NewDEVp2pPeer(p2p, testConn())
+	p2p := TestMockPeer("test peer")
+	peer := NewDEVp2pPeer(p2p, TestConn())
 	peer.Disconnect()
 	if peer.Status() != Disconnected {
 		t.Errorf("Peer status not updated")
 	}
-	if p2p.disconnectCount != 1 {
+	if p2p.DisconnectCount != 1 {
 		t.Errorf("Failed to disconnect with Peer")
 	}
 }
 
 func TestDEVp2pPeerString(t *testing.T) {
-	p2p := testMockPeer("test peer")
-	peer := NewDEVp2pPeer(p2p, testConn())
+	p2p := TestMockPeer("test peer")
+	peer := NewDEVp2pPeer(p2p, TestConn())
 	peer.String()
-	if p2p.stringCount != 1 {
+	if p2p.StringCount != 1 {
 		t.Errorf("Failed to get string representation from Peer")
 	}
 }
 
 func TestDEVp2pPeerSend(t *testing.T) {
-	conn := testConn()
-	peer := NewDEVp2pPeer(testMockPeer("test peer"), conn)
+	conn := TestConn()
+	peer := NewDEVp2pPeer(TestMockPeer("test peer"), conn)
 	peer.Send(0, struct{}{})
-	if conn.writeCount != 1 {
+	if conn.WriteCount != 1 {
 		t.Errorf("Failed to send message to Peer via connection")
 	}
 }
