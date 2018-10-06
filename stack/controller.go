@@ -53,6 +53,7 @@ type dlt struct {
 	peerHandler PeerApprover
 	txHandler NetworkTxApprover
 	db db.Database
+	p2p p2p.Layer
 	lock   sync.RWMutex
 }
 
@@ -102,11 +103,22 @@ func (d *dlt) Submit(tx *Transaction) error {
 }
 
 func (d *dlt) Start() error {
-	return errors.New("not implemented")
+	return d.p2p.Start()
+}
+
+func (d *dlt) runner (peer p2p.Peer) error {
+	return nil
 }
 
 func NewDltStack(conf p2p.Config, db db.Database) (*dlt, error) {
-	return &dlt {
+	stack := &dlt {
 		db: db,
-	}, nil
+	}
+	if p2p, err := p2p.NewDEVp2pLayer(conf, stack.runner); err == nil {
+		stack.p2p = p2p
+	} else {
+		return nil, err
+	}
+	return stack, nil
+	
 }

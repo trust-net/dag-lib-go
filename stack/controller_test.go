@@ -17,6 +17,9 @@ func TestInitiatization(t *testing.T) {
 	if stack.(*dlt).db != testDb {
 		t.Errorf("Stack does not have correct DB reference expected: %s, actual: %s", testDb, stack.(*dlt).db)
 	}
+	if len(stack.(*dlt).p2p.Self()) == 0 {
+		t.Errorf("Stack does not have correct p2p layer")
+	}
 }
 
 func TestRegister(t *testing.T) {
@@ -96,7 +99,27 @@ func testAppConfig() AppConfig {
 }
 
 func testP2PConfig() p2p.Config {
-	return p2p.Config{}
+	return p2p.Config{
+		KeyFile: "key_file.json",
+		KeyType: "ECDSA_S256",
+		MaxPeers: 1,
+		ProtocolName: "test-protocol",
+		Name: "test node",
+	}
+}
+
+type mockP2P struct {
+	isStarted bool
+	self string
+}
+
+func (p2p *mockP2P) Start() error {
+	p2p.isStarted = true
+	return nil
+}
+
+func (p2p *mockP2P) Self () string {
+	return p2p.self
 }
 
 func TestSubmitNilValues(t *testing.T) {
@@ -167,7 +190,11 @@ func TestSubmit(t *testing.T) {
 
 func TestStart(t *testing.T) {
 	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
-	if err := stack.Start(); err != nil {
+	p2p := &mockP2P {
+		self: "mock p2p layer",
+	}
+	stack.p2p = p2p
+	if err := stack.Start(); err != nil || !p2p.isStarted {
 		t.Errorf("Controller failed to start: %s", err)
 	}
 }
