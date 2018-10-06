@@ -1,7 +1,6 @@
 package stack
 
 import (
-	"github.com/trust-net/dag-lib-go/stack/p2p"
 )
 
 
@@ -21,12 +20,4 @@ func TestAppConfig() AppConfig {
 		Name: "test app",
 		Version: 1234,
 	}
-}
-
-func testP2PConfig() p2p.Config {
-	return p2p.TestConfig()
-}
-
-func testP2PLayer(name string) *p2p.MockP2P {
-	return p2p.TestP2PLayer(name)
 }

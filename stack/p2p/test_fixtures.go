@@ -18,47 +18,47 @@ func TestConfig() Config {
 	}
 }
 
-type MockMsgReadWriter struct {
+type mockMsgReadWriter struct {
 	ReadCount  int
 	WriteCount int
 }
 
-func TestConn() *MockMsgReadWriter {
-	return &MockMsgReadWriter{}
+func TestConn() *mockMsgReadWriter {
+	return &mockMsgReadWriter{}
 }
 
-func (m *MockMsgReadWriter) ReadMsg() (p2p.Msg, error) {
+func (m *mockMsgReadWriter) ReadMsg() (p2p.Msg, error) {
 	m.ReadCount += 1
 	return p2p.Msg{}, nil
 }
 
-func (m *MockMsgReadWriter) WriteMsg(p2p.Msg) error {
+func (m *mockMsgReadWriter) WriteMsg(p2p.Msg) error {
 	m.WriteCount += 1
 	return nil
 }
 
-func TestP2PLayer(name string) *MockP2P {
-	return &MockP2P {
+func TestP2PLayer(name string) *mockP2P {
+	return &mockP2P {
 		Name: name,
 	}
 }
 
-type MockP2P struct {
+type mockP2P struct {
 	IsStarted bool
 	Name string
 }
 
-func (p2p *MockP2P) Start() error {
+func (p2p *mockP2P) Start() error {
 	p2p.IsStarted = true
 	return nil
 }
 
-func (p2p *MockP2P) Self () string {
+func (p2p *mockP2P) Self () string {
 	return p2p.Name
 }
 
 // implements peerDEVp2pWrapper interface, so can be used interchangeabily with DEVp2p.Peer 
-type MockPeer struct {
+type mockPeer struct {
 	IdCount int
 	NameCount int
 	RemoteCount int
@@ -67,26 +67,26 @@ type MockPeer struct {
 	StringCount int
 }
 
-func (p* MockPeer) ID() discover.NodeID {
+func (p* mockPeer) ID() discover.NodeID {
 	p.IdCount += 1
 	return discover.NodeID{}
 }
-func (p* MockPeer) Name() string {
+func (p* mockPeer) Name() string {
 	p.NameCount +=1
 	return ""
 }
-func (p* MockPeer) RemoteAddr() net.Addr {
+func (p* mockPeer) RemoteAddr() net.Addr {
 	p.RemoteCount += 1
 	return nil
 }
-func (p* MockPeer) LocalAddr() net.Addr {
+func (p* mockPeer) LocalAddr() net.Addr {
 	p.LocalCount += 1
 	return nil
 }
-func (p* MockPeer) Disconnect(reason p2p.DiscReason) {
+func (p* mockPeer) Disconnect(reason p2p.DiscReason) {
 	p.DisconnectCount += 1
 }
-func (p* MockPeer) String() string {
+func (p* mockPeer) String() string {
 	p.StringCount += 1
 	return ""
 }
@@ -95,6 +95,6 @@ func TestDEVp2pPeer(name string) *p2p.Peer {
 	return p2p.NewPeer(discover.NodeID{}, name, nil)
 }
 
-func TestMockPeer(name string) *MockPeer {
-	return &MockPeer{}
+func TestMockPeer(name string) *mockPeer {
+	return &mockPeer{}
 }

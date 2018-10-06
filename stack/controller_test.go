@@ -3,13 +3,14 @@ package stack
 import (
     "testing"
 	"github.com/trust-net/dag-lib-go/db"
+	"github.com/trust-net/dag-lib-go/stack/p2p"
 )
 
 func TestInitiatization(t *testing.T) {
 	var stack DLT
 	var err error
 	testDb := db.NewInMemDatabase()
-	stack, err = NewDltStack(testP2PConfig(), testDb)
+	stack, err = NewDltStack(p2p.TestConfig(), testDb)
 	if stack.(*dlt) == nil || err != nil {
 		t.Errorf("Initiatization validation failed, c: %s, err: %s", stack, err)
 	}
@@ -22,7 +23,7 @@ func TestInitiatization(t *testing.T) {
 }
 
 func TestRegister(t *testing.T) {
-	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
 	peerHandler := func (app AppConfig) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}
@@ -39,7 +40,7 @@ func TestRegister(t *testing.T) {
 }
 
 func TestPreRegistered(t *testing.T) {
-	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := AppConfig{}
 	peerHandler := func (app AppConfig) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}
@@ -54,7 +55,7 @@ func TestPreRegistered(t *testing.T) {
 }
 
 func TestUnRegister(t *testing.T) {
-	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	peerHandler := func (app AppConfig) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}
 	
@@ -73,14 +74,14 @@ func TestUnRegister(t *testing.T) {
 }
 
 func TestSubmitUnregistered(t *testing.T) {
-	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	if err := stack.Submit(nil); err == nil {
 		t.Errorf("Transaction submission did not check for unregistered")
 	}
 }
 
 func TestSubmitNilValues(t *testing.T) {
-	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
 	peerHandler := func (app AppConfig) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}	
@@ -114,7 +115,7 @@ func TestSubmitNilValues(t *testing.T) {
 }
 
 func TestSubmitAppIdNoMatch(t *testing.T) {
-	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
 	peerHandler := func (app AppConfig) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}
@@ -130,7 +131,7 @@ func TestSubmitAppIdNoMatch(t *testing.T) {
 }
 
 func TestSubmit(t *testing.T) {
-	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
 	peerHandler := func (app AppConfig) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}
@@ -146,8 +147,8 @@ func TestSubmit(t *testing.T) {
 
 
 func TestStart(t *testing.T) {
-	stack, _ := NewDltStack(testP2PConfig(), db.NewInMemDatabase())
-	p2p := testP2PLayer("mock p2p")
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	if err := stack.Start(); err != nil || !p2p.IsStarted {
 		t.Errorf("Controller failed to start: %s", err)
