@@ -9,28 +9,6 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 )
 
-type AppConfig struct {
-	// public ID of the application instance (different from node ID used in p2p layer)
-	AppId []byte
-	// name of the application
-	Name string
-	// shard ID of the application (same for all nodes of application)
-	ShardId []byte
-	// protocol version for the shard (same for all nodes of application)
-	Version uint64
-}
-
-type Transaction struct {
-	// serialized transaction payload
-	Payload []byte
-	// transaction signature
-	Signature []byte
-	// transaction approver application instance ID
-	AppId []byte
-	// transaction submitter's public ID
-	Submitter []byte
-}
-
 // approve if connection request is from a valid application peer
 type PeerApprover func (app AppConfig) bool
 
@@ -107,74 +85,64 @@ func (d *dlt) Start() error {
 }
 
 // perform handshake with the peer node
-func (d *dlt) Handshake(peer p2p.Peer) error {
-	// send our status to the peer
-	if err := peer.Send(Handshake, *status); err != nil {
-		return NewProtocolError(ErrorHandshakeFailed, err.Error())
-	}
-
-	var msg p2p.Msg
-	var err error
-	err = common.RunTimeBound(5, func() error {
-			msg, err = peer.ReadMsg()
-			return err
-		}, NewProtocolError(ErrorHandshakeFailed, "timed out waiting for handshake status"))
-	if err != nil {
-		return err
-	}
-
-	// make sure its a handshake status message
-	if msg.Code != Handshake {
-		return NewProtocolError(ErrorHandshakeFailed, "first message needs to be handshake status")
-	}
-	var handshake HandshakeMsg
-	err = msg.Decode(&handshake)
-	if err != nil {
-		return NewProtocolError(ErrorHandshakeFailed, err.Error())
-	}
-	
-	// validate handshake message
-	switch {
-		case handshake.NetworkId != status.NetworkId:
-			return NewProtocolError(ErrorHandshakeFailed, "network ID does not match")
-		case handshake.ShardId != status.ShardId:
-			return NewProtocolError(ErrorHandshakeFailed, "shard ID does not match")
-		case handshake.Genesis != status.Genesis:
-			return NewProtocolError(ErrorHandshakeFailed, "genesis does not match")
-	}
-
-	// add the peer into our DB
-	if err = mgr.db.RegisterPeerNode(peer); err != nil {
-		return err
-	} else {
-		mgr.peerCount++
-		peer.SetStatus(&handshake)
-	}
+func (d *dlt) handshake(peer p2p.Peer) error {
+	// Iteration 1 will not have any sync or protocol level handshake
 	return nil
 }
 
-
-// handle a new peer node connection from p2p layer
-func (d *dlt) runner (peer p2p.Peer) error {
-	// initiate handshake with peer's sharding layer
-	if err := d.Handshake(peer); err != nil {
-		mgr.logger.Error("%s: %s", peer.Name(), err)
-		return err
-	} else {
-		defer func() {
-			mgr.logger.Debug("Disconnecting from '%s'", peer.Name())
-			mgr.UnregisterPeer(node)
-//			close(node.GetBlockHashesChan)
-//			close(node.GetBlocksChan)
-		}()
-	}
-	// start listening on messages from peer node
+// listen on messages from the peer node
+func (d *dlt) listener (peer p2p.Peer) error {
 	for {
 		msg, err := peer.ReadMsg()
 		if err != nil {
 			return err
 		}
 		switch msg.Code() {
+			case AppConfigMsgCode:
+				// deserialize the application config message from payload
+				conf := AppConfig{}
+				if err := msg.Decode(&conf); err != nil {
+					return err
+				}
+				
+				// application config is passed to application layer, if present, for validation
+				if d.app != nil {
+					if !d.peerHandler(conf) {
+						// application says not a valid/compatible peer, should sharding layer filter out messages from this peer?
+						// also, how to handle token attack from a malacious node faking to be application peer, but failed validation here?
+						
+						// TBD, handle above concerns
+						return errors.New("app validation failed")
+					}
+				}
+			case TransactionMsgCode:
+				// deserialize the transaction message from payload
+				tx := &Transaction{}
+				if err := msg.Decode(tx); err != nil {
+					return err
+				}
+
+				// transaction message should go to sharding layer
+				// but, should'nt it go to endorsing layer first, to make sure its valid transaction?
+				// also, should sharding layer be invoking the application callback, or should it be invoked by controller?
+				// TBD, TBD, TBD ...
+				
+				// for iteration #1, there is only 1 message type, and always goes to application
+				if d.app == nil {
+					return errors.New("app not registered")
+				}
+				if err := d.txHandler(tx); err != nil {
+					// application says not a valid transaction, peer should have validated this before sending
+					// but, how can we prevent a distributed denial of service attack with this flow?
+					// because, a malacious application node can join, and submit an invalid transaction that may
+					// travel through the network via headless nodes, but then eventually get discarded here, in which case
+					// it will trigger chain reaction of peer connection resets (if we rolled back error here)
+					// also, additionally, how to preserve application account's utility token when such faulty transaction comes along?
+					
+					// TBD, handle above concerns
+					return err
+				}
+
 			// case 1 message type
 			
 			// case 2 message type
@@ -183,17 +151,33 @@ func (d *dlt) runner (peer p2p.Peer) error {
 			
 			default:
 				// error condition, unknown protocol message
-				err := protocol.NewProtocolError(protocol.ErrorUnknownMessageType, "unknown protocol message recieved")
-				return err
+				return errors.New("unknown protocol message recieved")
 		}
 	}
-	return errors.New("not implemented")
+}
+
+// handle a new peer node connection from p2p layer
+func (d *dlt) runner (peer p2p.Peer) error {
+	// initiate handshake with peer's sharding layer
+	if err := d.handshake(peer); err != nil {
+		return err
+	} else {
+		defer func() {
+			// TODO: perform any cleanup here upong exit
+		}()
+	}
+	// start listening on messages from peer node
+	return d.listener(peer)
 }
 
 func NewDltStack(conf p2p.Config, db db.Database) (*dlt, error) {
 	stack := &dlt {
 		db: db,
 	}
+	// update p2p.Config with protocol name, version and message count based on protocol specs
+	conf.ProtocolName = ProtocolName
+	conf.ProtocolVersion = ProtocolVersion
+	conf.ProtocolLength = ProtocolLength
 	if p2p, err := p2p.NewDEVp2pLayer(conf, stack.runner); err == nil {
 		stack.p2p = p2p
 	} else {

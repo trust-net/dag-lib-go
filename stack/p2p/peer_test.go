@@ -78,7 +78,7 @@ func TestDEVp2pPeerString(t *testing.T) {
 func TestDEVp2pPeerSend(t *testing.T) {
 	conn := TestConn()
 	peer := NewDEVp2pPeer(TestMockPeer("test peer"), conn)
-	peer.Send(0, struct{}{})
+	peer.Send(uint64(0), struct{}{})
 	if conn.WriteCount != 1 {
 		t.Errorf("Failed to send message to Peer via connection")
 	}
@@ -86,6 +86,7 @@ func TestDEVp2pPeerSend(t *testing.T) {
 
 func TestDEVp2pPeerReadMsg(t *testing.T) {
 	conn := TestConn()
+	conn.NextMsg(0, &struct{}{})
 	peer := NewDEVp2pPeer(TestMockPeer("test peer"), conn)
 	m, _ := peer.ReadMsg()
 	if conn.ReadCount != 1 {

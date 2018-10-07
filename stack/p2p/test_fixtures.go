@@ -4,8 +4,10 @@ package p2p
 
 import (
 	"net"
+	"errors"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/discover"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 func TestConfig() Config {
@@ -21,15 +23,27 @@ func TestConfig() Config {
 type mockMsgReadWriter struct {
 	ReadCount  int
 	WriteCount int
+	msgs []p2p.Msg
 }
 
 func TestConn() *mockMsgReadWriter {
 	return &mockMsgReadWriter{}
 }
 
+func (m *mockMsgReadWriter) NextMsg(msgcode uint64, data interface{}) {
+	size, r, _ := rlp.EncodeToReader(data)
+	msg := p2p.Msg {Code: msgcode, Size: uint32(size), Payload: r}
+	m.msgs = append(m.msgs, msg)
+}
+
 func (m *mockMsgReadWriter) ReadMsg() (p2p.Msg, error) {
 	m.ReadCount += 1
-	return p2p.Msg{}, nil
+	if len(m.msgs) > 0 {
+		msg := m.msgs[0]
+		m.msgs = m.msgs[1:]
+		return msg, nil
+	}
+	return p2p.Msg{}, errors.New("no more messages")
 }
 
 func (m *mockMsgReadWriter) WriteMsg(p2p.Msg) error {
