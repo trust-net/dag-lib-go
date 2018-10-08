@@ -5,8 +5,9 @@ import (
     "fmt"
     "crypto/ecdsa"
     "crypto/sha512"
-//    "crypto/rand"
+    "crypto/rand"
     "github.com/trust-net/go-trust-net/common"
+    "github.com/ethereum/go-ethereum/crypto"
 )
 
 func TestDEVp2pInstance(t *testing.T) {
@@ -24,7 +25,8 @@ func TestDEVp2pInstance(t *testing.T) {
 		t.Errorf("Failed to cast P2P layer into DEVp2p implementation")
 	}
 	// p2p node's ID should be initialized correctly
-	if string(p2p.Id()) != string(p2p.(*layerDEVp2p).srv.Self().ID.Bytes()) {
+//	if string(p2p.Id()) != string(p2p.(*layerDEVp2p).srv.Self().ID.Bytes()) {
+	if string(p2p.Id()) != string(crypto.FromECDSAPub(&p2p.(*layerDEVp2p).conf.PrivateKey.PublicKey)) {
 		t.Errorf("Did not initialize p2p node's ID")
 	}
 }
@@ -78,30 +80,26 @@ func TestDEVp2pSign(t *testing.T) {
 		}
 	}
 }
-//
-//func TestDEVp2pVerify(t *testing.T) {
-//	// create an instance of the p2p layer
-//	conf := TestConfig()
-//	p2p, _ := NewDEVp2pLayer(conf, func(peer Peer) error {return nil})
-//
-//	// create a test payload
-//	payload := []byte("test data")
-//	
-//	// get key from test config
-//	key, _ := conf.key()
-//	
-//	// sign the test payload using SHA512 hash and ECDSA signature
-//	s := signature{}
-//	var err error
-//	hash := sha512.Sum512(payload)
-//	if s.R,s.S, err = ecdsa.Sign(rand.Reader, key, hash[:]); err != nil {
-//		t.Errorf("Failed to sign payload: %s", err)
-//		return
-//	}
-//	signature, _ := common.Serialize(s)
-//
-////	// validate that p2p layer can verify the signature
-////	if !p2p.Verify(payload, signature) {
-////		t.Errorf("Failed to get verify signature")
-////	}
-//}
+
+func TestDEVp2pVerify(t *testing.T) {
+	// create an instance of the p2p layer
+	p2p, _ := NewDEVp2pLayer(TestConfig(), func(peer Peer) error {return nil})
+
+	// create a test payload
+	payload := []byte("test data")
+
+	// create a new ECDSA key
+	key, _ := crypto.GenerateKey()
+	id := crypto.FromECDSAPub(&key.PublicKey)
+
+	// sign the test payload using SHA512 hash and ECDSA private key
+	s := signature{}
+	hash := sha512.Sum512(payload)
+	s.R,s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
+	sign, _ := common.Serialize(s)
+
+	// validate that p2p layer can verify the signature
+	if !p2p.Verify(payload, sign, id) {
+		t.Errorf("Failed to verify signature")
+	}
+}

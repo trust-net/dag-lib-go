@@ -80,6 +80,11 @@ func (p2p *mockP2P) Sign(data []byte) ([]byte, error) {
 	return nil, errors.New("not implemented")
 }
 
+func (p2p *mockP2P) Verify(payload, sign, id []byte) bool {
+	// not implemented
+	return false
+}
+
 // implements peerDEVp2pWrapper interface, so can be used interchangeabily with DEVp2p.Peer 
 type mockPeer struct {
 	IdCount int

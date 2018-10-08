@@ -9,6 +9,7 @@ import (
     "crypto/sha512"
     "crypto/rand"
 	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/trust-net/go-trust-net/common"
 )
 
@@ -17,7 +18,7 @@ type Layer interface {
 	Self() string
 	Id() []byte
 	Sign(data []byte) ([]byte, error)
-//	Verify(data []byte, signature []byte, peer Peer) bool
+	Verify(data, sign, id []byte) bool
 }
 
 type Runner func(peer Peer) error
@@ -62,6 +63,25 @@ func (l *layerDEVp2p) Sign(data []byte) ([]byte, error) {
 	}
 }
 
+func (l *layerDEVp2p) Verify(payload, sign, id []byte) bool {
+	// extract submitter's key
+	key := crypto.ToECDSAPub(id)
+	if key == nil {
+		return false
+	}
+
+	// regenerate signature parameters
+	s := signature{}
+	if err := common.Deserialize(sign, &s); err != nil {
+		// Failed to parse signature
+		return false
+	}
+	// we want to validate the hash of the payload
+	hash := sha512.Sum512(payload)
+	// validate signature of payload
+	return ecdsa.Verify(key, hash[:], s.R, s.S)
+}
+
 // we are just wrapping the callback to hide the DEVp2p specific details
 func (l *layerDEVp2p) runner(dPeer *p2p.Peer, dRw p2p.MsgReadWriter) error {
 	peer := NewDEVp2pPeer(dPeer, dRw)
@@ -88,9 +108,9 @@ func NewDEVp2pLayer(c Config, cb Runner) (*layerDEVp2p, error) {
 		conf: conf,
 		cb: cb,
 		key: conf.PrivateKey,
+		id: crypto.FromECDSAPub(&conf.PrivateKey.PublicKey),
 	}
 	impl.conf.Protocols = impl.makeDEVp2pProtocols(c)
 	impl.srv = &p2p.Server{Config: *impl.conf}
-	impl.id = impl.srv.Self().ID.Bytes()
 	return impl, nil
 }
