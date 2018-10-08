@@ -42,6 +42,8 @@ func (d *dlt) Register(app AppConfig, peerHandler PeerApprover, txHandler Networ
 		return errors.New("App is already registered")
 	}
 	d.app = &app
+	// app's ID need to be same as p2p node's ID
+	d.app.AppId = d.p2p.Id()
 	d.peerHandler = peerHandler
 	d.txHandler = txHandler
 	return nil
@@ -65,15 +67,21 @@ func (d *dlt) Submit(tx *Transaction) error {
 	if tx == nil {
 		return errors.New("nil transaction")
 	}
+	// update transaction's app ID
+	tx.AppId = d.app.AppId
+
+	// sign transaction using p2p layer
+	if signature, err := d.p2p.Sign(tx.Payload); err != nil {
+		return err
+	} else {
+		tx.Signature = signature
+	}
+
 	switch {
 		case tx.Payload == nil:
 			return errors.New("nil transaction payload")
 		case tx.Signature == nil:
 			return errors.New("nil transaction signature")
-		case tx.AppId == nil:
-			return errors.New("nil transaction app ID")
-		case string(tx.AppId) != string(d.app.AppId):
-			return errors.New("transaction app ID does not match registered app ID")
 		case tx.Submitter == nil:
 			return errors.New("nil transaction submitter ID")
 	}
@@ -98,13 +106,18 @@ func (d *dlt) listener (peer p2p.Peer) error {
 			return err
 		}
 		switch msg.Code() {
+			case NodeShutdownMsgCode:
+				// cleanly shutdown peer connection
+				// TBD
+
+				return nil
 			case AppConfigMsgCode:
 				// deserialize the application config message from payload
 				conf := AppConfig{}
 				if err := msg.Decode(&conf); err != nil {
 					return err
 				}
-				
+
 				// application config is passed to application layer, if present, for validation
 				if d.app != nil {
 					if !d.peerHandler(conf) {
@@ -121,6 +134,9 @@ func (d *dlt) listener (peer p2p.Peer) error {
 				if err := msg.Decode(tx); err != nil {
 					return err
 				}
+				
+				// validate transaction signature
+				// TBD
 
 				// transaction message should go to sharding layer
 				// but, should'nt it go to endorsing layer first, to make sure its valid transaction?

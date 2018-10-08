@@ -60,6 +60,7 @@ func TestP2PLayer(name string) *mockP2P {
 type mockP2P struct {
 	IsStarted bool
 	Name string
+	ID []byte
 }
 
 func (p2p *mockP2P) Start() error {
@@ -67,8 +68,16 @@ func (p2p *mockP2P) Start() error {
 	return nil
 }
 
-func (p2p *mockP2P) Self () string {
+func (p2p *mockP2P) Self() string {
 	return p2p.Name
+}
+
+func (p2p *mockP2P) Id() []byte {
+	return p2p.ID
+}
+
+func (p2p *mockP2P) Sign(data []byte) ([]byte, error) {
+	return nil, errors.New("not implemented")
 }
 
 // implements peerDEVp2pWrapper interface, so can be used interchangeabily with DEVp2p.Peer 

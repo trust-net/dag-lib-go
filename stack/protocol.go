@@ -14,16 +14,21 @@ const (
 
 	// Length should contain the number of message codes used
 	// by the protocol.
-	ProtocolLength = uint64(2)
+	ProtocolLength = uint64(3)
 )
 
 // protocol messages
 const (
+	// peer connection shutdown
+	NodeShutdownMsgCode = uint64(0x0f)
 	// application's config message
 	AppConfigMsgCode = uint64(0xf0)
 	// application's transaction message
 	TransactionMsgCode = uint64(0xff)
 )
+
+// node shutdown message
+type NodeShutdown struct {}
 
 // application handshake message
 type AppConfig struct {
