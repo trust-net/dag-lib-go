@@ -118,6 +118,11 @@ func (d *dlt) listener (peer p2p.Peer) error {
 					return err
 				}
 
+				// actually following is not true, App ID would be of the application instance's node ID, but
+				// peer's ID would be of the node that is forwarding this message to us 
+//				// app ID should always be same as node ID
+//				conf.AppId = peer.ID()
+
 				// application config is passed to application layer, if present, for validation
 				if d.app != nil {
 					if !d.peerHandler(conf) {
@@ -134,7 +139,17 @@ func (d *dlt) listener (peer p2p.Peer) error {
 				if err := msg.Decode(tx); err != nil {
 					return err
 				}
-				
+
+				// actually following is not true, App ID would be of the application instance's node ID, but
+				// peer's ID would be of the node that is forwarding this message to us 
+//				// app ID should always be same as node ID
+//				if len(tx.AppId) != len(peer.ID()) {
+//					return errors.New("
+//				} else {
+//					// compare both bit by bit
+//					// TBD
+//				}
+
 				// validate transaction signature
 				// TBD
 
