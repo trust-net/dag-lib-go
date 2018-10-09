@@ -9,8 +9,8 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 )
 
-// approve if connection request is from a valid application peer
-type PeerApprover func (app AppConfig) bool
+// approve if willing to accept message from application corresponding to the ID
+type PeerApprover func (id []byte) bool
 
 // approve if a recieved network transaction is valid 
 type NetworkTxApprover func (tx *Transaction) error
@@ -111,28 +111,7 @@ func (d *dlt) listener (peer p2p.Peer) error {
 				// TBD
 
 				return nil
-			case AppConfigMsgCode:
-				// deserialize the application config message from payload
-				conf := AppConfig{}
-				if err := msg.Decode(&conf); err != nil {
-					return err
-				}
 
-				// actually following is not true, App ID would be of the application instance's node ID, but
-				// peer's ID would be of the node that is forwarding this message to us 
-//				// app ID should always be same as node ID
-//				conf.AppId = peer.ID()
-
-				// application config is passed to application layer, if present, for validation
-				if d.app != nil {
-					if !d.peerHandler(conf) {
-						// application says not a valid/compatible peer, should sharding layer filter out messages from this peer?
-						// also, how to handle token attack from a malacious node faking to be application peer, but failed validation here?
-						
-						// TBD, handle above concerns
-						return errors.New("app validation failed")
-					}
-				}
 			case TransactionMsgCode:
 				// deserialize the transaction message from payload
 				tx := &Transaction{}
@@ -140,18 +119,10 @@ func (d *dlt) listener (peer p2p.Peer) error {
 					return err
 				}
 
-				// actually following is not true, App ID would be of the application instance's node ID, but
-				// peer's ID would be of the node that is forwarding this message to us 
-//				// app ID should always be same as node ID
-//				if len(tx.AppId) != len(peer.ID()) {
-//					return errors.New("
-//				} else {
-//					// compare both bit by bit
-//					// TBD
-//				}
-
 				// validate transaction signature
-				// TBD
+				if !d.p2p.Verify(tx.Payload, tx.Signature, tx.AppId) {
+					return errors.New("Transaction signature invalid")
+				}
 
 				// transaction message should go to sharding layer
 				// but, should'nt it go to endorsing layer first, to make sure its valid transaction?
@@ -162,7 +133,12 @@ func (d *dlt) listener (peer p2p.Peer) error {
 				if d.app == nil {
 					return errors.New("app not registered")
 				}
-				if err := d.txHandler(tx); err != nil {
+
+				// check with application if willing to accept the message
+				if !d.peerHandler(tx.AppId) {
+					// application rejected the application ID as peer
+					// silently discard message
+				} else if err := d.txHandler(tx); err != nil {
 					// application says not a valid transaction, peer should have validated this before sending
 					// but, how can we prevent a distributed denial of service attack with this flow?
 					// because, a malacious application node can join, and submit an invalid transaction that may

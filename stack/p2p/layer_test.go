@@ -25,7 +25,6 @@ func TestDEVp2pInstance(t *testing.T) {
 		t.Errorf("Failed to cast P2P layer into DEVp2p implementation")
 	}
 	// p2p node's ID should be initialized correctly
-//	if string(p2p.Id()) != string(p2p.(*layerDEVp2p).srv.Self().ID.Bytes()) {
 	if string(p2p.Id()) != string(crypto.FromECDSAPub(&p2p.(*layerDEVp2p).conf.PrivateKey.PublicKey)) {
 		t.Errorf("Did not initialize p2p node's ID")
 	}

@@ -82,7 +82,7 @@ func (p2p *mockP2P) Sign(data []byte) ([]byte, error) {
 
 func (p2p *mockP2P) Verify(payload, sign, id []byte) bool {
 	// not implemented
-	return false
+	return true
 }
 
 // implements peerDEVp2pWrapper interface, so can be used interchangeabily with DEVp2p.Peer 
