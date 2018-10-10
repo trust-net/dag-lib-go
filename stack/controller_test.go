@@ -176,6 +176,20 @@ func TestStart(t *testing.T) {
 	if err := stack.Start(); err != nil || !p2p.IsStarted {
 		t.Errorf("Controller failed to start: %s", err)
 	}
+	if !p2p.IsStarted {
+		t.Errorf("Controller did not start p2p layer")
+	}
+}
+
+// stop of controller, happy path
+func TestStop(t *testing.T) {
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	p2p := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = p2p
+	stack.Stop()
+	if !p2p.IsStopped {
+		t.Errorf("Controller did not stop p2p layer")
+	}
 }
 
 // peer connection handshake, happy path

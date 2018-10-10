@@ -15,6 +15,7 @@ import (
 
 type Layer interface {
 	Start() error
+	Stop()
 	Self() string
 	Id() []byte
 	Sign(data []byte) ([]byte, error)
@@ -38,6 +39,10 @@ type layerDEVp2p struct {
 
 func (l *layerDEVp2p) Start() error {
 	return l.srv.Start()
+}
+
+func (l *layerDEVp2p) Stop() {
+	l.srv.Stop()
 }
 
 func (l *layerDEVp2p) Self() string {

@@ -59,6 +59,7 @@ func TestP2PLayer(name string) *mockP2P {
 
 type mockP2P struct {
 	IsStarted bool
+	IsStopped bool
 	Name string
 	ID []byte
 }
@@ -66,6 +67,11 @@ type mockP2P struct {
 func (p2p *mockP2P) Start() error {
 	p2p.IsStarted = true
 	return nil
+}
+
+func (p2p *mockP2P) Stop() {
+	p2p.IsStopped = true
+	return
 }
 
 func (p2p *mockP2P) Self() string {

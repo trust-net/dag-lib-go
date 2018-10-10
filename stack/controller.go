@@ -24,6 +24,8 @@ type DLT interface {
 	Submit(tx *Transaction) error
 	// start the controller
 	Start() error
+	// stop the controller
+	Stop()
 }
 
 type dlt struct {
@@ -90,6 +92,10 @@ func (d *dlt) Submit(tx *Transaction) error {
 
 func (d *dlt) Start() error {
 	return d.p2p.Start()
+}
+
+func (d *dlt) Stop() {
+	d.p2p.Stop()
 }
 
 // perform handshake with the peer node
