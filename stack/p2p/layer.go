@@ -4,6 +4,7 @@ package p2p
 
 import (
 //	"fmt"
+	"sync"
 	"math/big"
 	"crypto/ecdsa"
     "crypto/sha512"
@@ -16,10 +17,12 @@ import (
 type Layer interface {
 	Start() error
 	Stop()
+	Disconnect(peer Peer)
 	Self() string
 	Id() []byte
 	Sign(data []byte) ([]byte, error)
 	Verify(data, sign, id []byte) bool
+	Broadcast(msgId []byte, msgcode uint64, data interface{}) error
 }
 
 type Runner func(peer Peer) error
@@ -35,13 +38,27 @@ type layerDEVp2p struct {
 	srv *p2p.Server
 	cb Runner
 	id []byte
+	peers map[string]Peer
+	lock sync.RWMutex
 }
 
 func (l *layerDEVp2p) Start() error {
 	return l.srv.Start()
 }
 
+func (l *layerDEVp2p) Disconnect(peer Peer) {
+	// remove the peer from peer map
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	delete(l.peers, string(peer.ID()))
+	peer.Disconnect()
+}
+
 func (l *layerDEVp2p) Stop() {
+	// disconnect from all connected peers
+	for _, peer := range(l.peers) {
+		peer.Disconnect()
+	}
 	l.srv.Stop()
 }
 
@@ -87,9 +104,28 @@ func (l *layerDEVp2p) Verify(payload, sign, id []byte) bool {
 	return ecdsa.Verify(key, hash[:], s.R, s.S)
 }
 
+func (l *layerDEVp2p) Broadcast(msgId []byte, msgcode uint64, data interface{}) error {
+	// walk through list of peers and send messages
+	for _, peer := range(l.peers) {
+		if err := peer.Send(msgId, msgcode, data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // we are just wrapping the callback to hide the DEVp2p specific details
 func (l *layerDEVp2p) runner(dPeer *p2p.Peer, dRw p2p.MsgReadWriter) error {
 	peer := NewDEVp2pPeer(dPeer, dRw)
+	// add the peer to layer's peers map
+	l.lock.Lock()
+	l.peers[string(peer.ID())] = peer
+	l.lock.Unlock()
+	defer func() {
+		l.lock.Lock()
+		delete(l.peers,string(peer.ID()))
+		l.lock.Unlock()
+	}()
 	return l.cb(peer)
 }
 
@@ -114,6 +150,7 @@ func NewDEVp2pLayer(c Config, cb Runner) (*layerDEVp2p, error) {
 		cb: cb,
 		key: conf.PrivateKey,
 		id: crypto.FromECDSAPub(&conf.PrivateKey.PublicKey),
+		peers: make(map[string]Peer),
 	}
 	impl.conf.Protocols = impl.makeDEVp2pProtocols(c)
 	impl.srv = &p2p.Server{Config: *impl.conf}

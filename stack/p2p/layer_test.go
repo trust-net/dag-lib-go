@@ -28,6 +28,10 @@ func TestDEVp2pInstance(t *testing.T) {
 	if string(p2p.Id()) != string(crypto.FromECDSAPub(&p2p.(*layerDEVp2p).conf.PrivateKey.PublicKey)) {
 		t.Errorf("Did not initialize p2p node's ID")
 	}
+	// peers map should be initialized correctly
+	if p2p.(*layerDEVp2p).peers == nil || len(p2p.(*layerDEVp2p).peers) != 0 {
+		t.Errorf("Did not initialize P2P Layer's peers map")
+	}
 }
 
 func TestDEVp2pInstanceBadConfig(t *testing.T) {
@@ -38,15 +42,30 @@ func TestDEVp2pInstanceBadConfig(t *testing.T) {
 }
 
 func TestDEVp2pRunner(t *testing.T) {
-	// create an instance of DEVp2p layer
+	// flags to check from inside callback
 	called := false
-	layer,_ := NewDEVp2pLayer(TestConfig(), func(peer Peer) error {
+	peerInMap := false
+	// create an instance of DEVp2p layer
+	var layer *layerDEVp2p
+	layer,_ = NewDEVp2pLayer(TestConfig(), func(peer Peer) error {
 			called = true
+			_, peerInMap = layer.peers[string(peer.ID())]
 			return nil
 	})
-	layer.runner(nil, nil)
+	// invoke runner with a mock p2p peer node and connection
+	mPeer := TestDEVp2pPeer("mock peer")
+	mConn := TestConn()
+	layer.runner(mPeer, mConn)
 	if !called {
 		t.Errorf("Callback did not get called")
+	}
+	// validate that peer got added to map before callback
+	if !peerInMap {
+		t.Errorf("peer did not get added to map before callback")
+	}
+	// validate that peer got removed from map after callback
+	if _, peerInMap = layer.peers[string(mPeer.ID().Bytes())]; peerInMap {
+		t.Errorf("peer did not get removed from map after callback")
 	}
 }
 
@@ -100,5 +119,27 @@ func TestDEVp2pVerify(t *testing.T) {
 	// validate that p2p layer can verify the signature
 	if !p2p.Verify(payload, sign, id) {
 		t.Errorf("Failed to verify signature")
+	}
+}
+
+func TestDEVp2pBroadcast(t *testing.T) {
+	// create an instance of the p2p layer
+	var p2p *layerDEVp2p
+	var broadCastError error
+	p2p, _ = NewDEVp2pLayer(TestConfig(), func(peer Peer) error {
+			// broadcast a message to all peers
+			broadCastError = p2p.Broadcast([]byte("msg 1"), 1, struct{}{})
+			return nil
+	})
+	// invoke runner with a mock p2p peer node and connection
+	mPeer := TestDEVp2pPeer("mock peer")
+	mConn := TestConn()
+	p2p.runner(mPeer, mConn)
+	if broadCastError != nil {
+		t.Errorf("Failed to broadcast message: %s", broadCastError)
+	}
+	// we should have sent message on our mock peer connection
+	if mConn.WriteCount != 1 {
+		t.Errorf("did not write message to peer connection")
 	}
 }

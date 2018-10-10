@@ -3,6 +3,7 @@
 package stack
 
 import (
+//	"fmt"
 	"errors"
 	"sync"
 	"github.com/trust-net/dag-lib-go/db"
@@ -87,7 +88,7 @@ func (d *dlt) Submit(tx *Transaction) error {
 		case tx.Submitter == nil:
 			return errors.New("nil transaction submitter ID")
 	}
-	return nil
+	return d.p2p.Broadcast(tx.Signature, TransactionMsgCode, tx)
 }
 
 func (d *dlt) Start() error {
@@ -101,6 +102,7 @@ func (d *dlt) Stop() {
 // perform handshake with the peer node
 func (d *dlt) handshake(peer p2p.Peer) error {
 	// Iteration 1 will not have any sync or protocol level handshake
+//	fmt.Printf("\nNew Peer Connection: %x\n", peer.ID())
 	return nil
 }
 
@@ -114,8 +116,7 @@ func (d *dlt) listener (peer p2p.Peer) error {
 		switch msg.Code() {
 			case NodeShutdownMsgCode:
 				// cleanly shutdown peer connection
-				// TBD
-
+				d.p2p.Disconnect(peer)
 				return nil
 
 			case TransactionMsgCode:
@@ -152,8 +153,13 @@ func (d *dlt) listener (peer p2p.Peer) error {
 					// it will trigger chain reaction of peer connection resets (if we rolled back error here)
 					// also, additionally, how to preserve application account's utility token when such faulty transaction comes along?
 					
-					// TBD, handle above concerns
-					return err
+					// silently discard the transaction, and do not forward to others
+					// will not deduct utility token, but then will also not propagate the message
+					// so all in all its fair treatment
+				} else {
+					// mark sender of the message as seen
+					peer.Seen(tx.Signature)
+					d.p2p.Broadcast(tx.Signature, TransactionMsgCode, tx)
 				}
 
 			// case 1 message type

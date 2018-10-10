@@ -37,6 +37,7 @@ func incrementTx(name string, delta int) *stack.Transaction {
 	txPayload, _ := common.Serialize(tx)
 	return &stack.Transaction{
 		Payload: txPayload,
+		Submitter: []byte("countr CLI"),
 	}
 }
 
@@ -50,6 +51,7 @@ func decrementTx(name string, delta int) *stack.Transaction {
 	txPayload, _ := common.Serialize(tx)
 	return &stack.Transaction{
 		Payload: txPayload,
+		Submitter: []byte("countr CLI"),
 	}
 }
 
@@ -120,11 +122,7 @@ func txHandler (tx *stack.Transaction) error {
 		fmt.Printf("Invalid TX from %x\n", tx.AppId)
 		return err
 	}
-	fmt.Printf("TX: %s %s %d", op.Op, op.Target, op.Delta)
-//	last := int64(0)
-//	if val, err := myDb.Get([]byte(op.Target)); err == nil {
-//		common.Deserialize(val, &last)
-//	}
+	fmt.Printf("TX: %s %s %d\n", op.Op, op.Target, op.Delta)
 	delta := 0 
 	switch op.Op {
 		case "incr":
@@ -132,13 +130,13 @@ func txHandler (tx *stack.Transaction) error {
 		case "decr":
 			delta = int(-op.Delta)
 	}
-	fmt.Printf("%s --> %d", op.Target, applyDelta(op.Target, delta))
+	fmt.Printf("%s --> %d\n", op.Target, applyDelta(op.Target, delta))
 	return nil
 }
 
 func peerValidator (id []byte) bool {
 	fmt.Printf("\n")
-	fmt.Printf("New peer: %x\n", id)
+	fmt.Printf("Msg from peer: %x\n", id)
 	return true
 }
 
@@ -198,7 +196,9 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: incr %s %d\n", op.name, op.delta)
-								dlt.Submit(incrementTx(op.name, op.delta))
+								if err := dlt.Submit(incrementTx(op.name, op.delta)); err != nil {
+									fmt.Printf("Error submitting transaction: %s\n", err)
+								}
 							}
 						}
 					case "decr":
@@ -208,7 +208,9 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: decr %s %d\n", op.name, op.delta)
-								dlt.Submit(decrementTx(op.name, op.delta))
+								if err := dlt.Submit(decrementTx(op.name, op.delta)); err != nil {
+									fmt.Printf("Error submitting transaction: %s\n", err)
+								}
 							}
 						}
 					default:

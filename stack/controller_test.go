@@ -2,6 +2,7 @@ package stack
 
 import (
     "testing"
+    "errors"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 //	devP2P "github.com/ethereum/go-ethereum/p2p"
@@ -155,6 +156,8 @@ func TestSubmitAppIdNoMatch(t *testing.T) {
 // transaction submission, happy path
 func TestSubmit(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	p2p := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = p2p
 	app := TestAppConfig()
 	peerHandler := func (id []byte) bool {return true}
 	txHandler := func (tx *Transaction) error {return nil}
@@ -165,6 +168,9 @@ func TestSubmit(t *testing.T) {
 	}
 	if err := stack.Submit(TestTransaction()); err != nil {
 		t.Errorf("Transaction submission failed, err: %s", err)
+	}
+	if !p2p.DidBroadcast {
+		t.Errorf("Transaction did not get broadcast to peers")
 	}
 }
 
@@ -243,7 +249,8 @@ func TestAppCallbackPeerAccepted(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 
 	// inject mock p2p module into stack
-	stack.p2p = p2p.TestP2PLayer("mock p2p")
+	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = mockP2PLayer
 
 	// build a mock peer
 	mockP2pPeer := p2p.TestMockPeer("test peer")
@@ -294,6 +301,11 @@ func TestAppCallbackPeerAccepted(t *testing.T) {
 	if mockConn.ReadCount != 2 {
 		t.Errorf("Listener read %d messages", mockConn.ReadCount)
 	}
+
+	// we should have broadcasted message
+	if !mockP2PLayer.DidBroadcast {
+		t.Errorf("Listener did not froward valid network transaction")
+	}
 }
 
 // Application's handler callback test, when app ID is NOT accepted by application
@@ -302,7 +314,8 @@ func TestAppCallbackPeerNotAccepted(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 
 	// inject mock p2p module into stack
-	stack.p2p = p2p.TestP2PLayer("mock p2p")
+	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = mockP2PLayer
 
 	// build a mock peer
 	mockP2pPeer := p2p.TestMockPeer("test peer")
@@ -310,17 +323,13 @@ func TestAppCallbackPeerNotAccepted(t *testing.T) {
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
 
 	// define peer handler call back for app
-	peerHandlerCbCount := 0
 	peerHandler := func (id []byte) bool {
-		peerHandlerCbCount += 1
 		// we trust no one and accept none :)
 		return false
 	}
 
 	// define a tx handler call back for app
-	txHandlerCb := false
 	txHandler := func (tx *Transaction) error {
-		txHandlerCb = true
 		return nil
 	}
 
@@ -336,22 +345,70 @@ func TestAppCallbackPeerNotAccepted(t *testing.T) {
 
 	// now call stack's listener
 	if err := stack.listener(peer); err != nil {
-		t.Errorf("Transaction processing has errors: %s", err)
-	}
-
-	// app's peer handler should have been called
-	if peerHandlerCbCount != 1 {
-		t.Errorf("app peer validation handler not called")
-	}
-
-	// app's transaction handler should NOT have been called
-	if txHandlerCb {
-		t.Errorf("app peer transaction handler unexpectedly called")
+		t.Errorf("Listener quit on peer app rejected by app: %s", err)
 	}
 
 	// we should have attempted to read messaged 2 times
 	if mockConn.ReadCount != 2 {
 		t.Errorf("Listener read %d messages", mockConn.ReadCount)
+	}
+
+	// we should not have broadcasted message
+	if mockP2PLayer.DidBroadcast {
+		t.Errorf("Listener frowarded network transaction from unaccepted peer")
+	}
+}
+
+// test that DLT stack does not forward a transaction that is
+// rejected by application's transaction handler
+func TestAppCallbackTxRejected(t *testing.T) {
+	// create an instance of stack controller
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+
+	// inject mock p2p module into stack
+	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = mockP2PLayer
+
+	// build a mock peer
+	mockP2pPeer := p2p.TestMockPeer("test peer")
+	mockConn := p2p.TestConn()
+	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
+
+	// define peer handler call back for app
+	peerHandler := func (id []byte) bool {
+		// we everyone
+		return true
+	}
+
+	// define a tx handler call back for app
+	txHandler := func (tx *Transaction) error {
+		// we reject all transactions
+		return errors.New("trust no one")
+	}
+
+	// register app
+	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err != nil {
+		t.Errorf("Registration failed, err: %s", err)
+	}
+
+	// setup mock connection to send a signed transaction followed by clean shutdown
+	tx := TestSignedTransaction("test payload")
+	mockConn.NextMsg(TransactionMsgCode, tx)
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// now call stack's listener
+	if err := stack.listener(peer); err != nil {
+		t.Errorf("Listener quit on transaction rejected by app: %s", err)
+	}
+
+	// we should have attempted to read 2 messages
+	if mockConn.ReadCount != 2 {
+		t.Errorf("Listener read %d messages", mockConn.ReadCount)
+	}
+
+	// we should not have broadcasted message
+	if mockP2PLayer.DidBroadcast {
+		t.Errorf("Listener frowarded an invalid network transaction")
 	}
 }
 

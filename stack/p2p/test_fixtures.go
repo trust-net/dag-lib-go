@@ -60,6 +60,7 @@ func TestP2PLayer(name string) *mockP2P {
 type mockP2P struct {
 	IsStarted bool
 	IsStopped bool
+	DidBroadcast bool
 	Name string
 	ID []byte
 }
@@ -67,6 +68,10 @@ type mockP2P struct {
 func (p2p *mockP2P) Start() error {
 	p2p.IsStarted = true
 	return nil
+}
+
+func (p2p *mockP2P) Disconnect(peer Peer) {
+	return
 }
 
 func (p2p *mockP2P) Stop() {
@@ -83,12 +88,16 @@ func (p2p *mockP2P) Id() []byte {
 }
 
 func (p2p *mockP2P) Sign(data []byte) ([]byte, error) {
-	return nil, errors.New("not implemented")
+	return []byte("signature"), nil
 }
 
 func (p2p *mockP2P) Verify(payload, sign, id []byte) bool {
-	// not implemented
 	return true
+}
+
+func (p2p *mockP2P) Broadcast(msgId []byte, msgcode uint64, data interface{}) error {
+	p2p.DidBroadcast = true
+	return nil
 }
 
 // implements peerDEVp2pWrapper interface, so can be used interchangeabily with DEVp2p.Peer 
@@ -126,7 +135,8 @@ func (p* mockPeer) String() string {
 }
 
 func TestDEVp2pPeer(name string) *p2p.Peer {
-	return p2p.NewPeer(discover.NodeID{}, name, nil)
+	nodeId, _ := discover.BytesID([]byte(name))
+	return p2p.NewPeer(nodeId, name, nil)
 }
 
 func TestMockPeer(name string) *mockPeer {

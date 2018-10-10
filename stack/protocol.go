@@ -20,9 +20,9 @@ const (
 // protocol messages
 const (
 	// peer connection shutdown
-	NodeShutdownMsgCode = uint64(0x0f)
+	NodeShutdownMsgCode = uint64(0)
 	// application's transaction message
-	TransactionMsgCode = uint64(0xff)
+	TransactionMsgCode = uint64(1)
 )
 
 // node shutdown message
