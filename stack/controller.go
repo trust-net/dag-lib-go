@@ -8,6 +8,7 @@ import (
 	"sync"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
+	"github.com/trust-net/go-trust-net/common"
 )
 
 // approve if willing to accept message from application corresponding to the ID
@@ -35,6 +36,7 @@ type dlt struct {
 	txHandler NetworkTxApprover
 	db db.Database
 	p2p p2p.Layer
+	seen *common.Set
 	lock   sync.RWMutex
 }
 
@@ -131,6 +133,11 @@ func (d *dlt) listener (peer p2p.Peer) error {
 					return errors.New("Transaction signature invalid")
 				}
 
+				// check if message was already seen by stack
+				if d.isSeen(tx.Signature) {
+					continue
+				}
+
 				// transaction message should go to sharding layer
 				// but, should'nt it go to endorsing layer first, to make sure its valid transaction?
 				// also, should sharding layer be invoking the application callback, or should it be invoked by controller?
@@ -182,16 +189,34 @@ func (d *dlt) runner (peer p2p.Peer) error {
 		return err
 	} else {
 		defer func() {
-			// TODO: perform any cleanup here upong exit
+			// TODO: perform any cleanup here upon exit
 		}()
 	}
 	// start listening on messages from peer node
 	return d.listener(peer)
 }
 
+// mark a message as seen for stack (different from marking it seen for connected peer nodes)
+func (d *dlt) isSeen(msgId []byte) bool {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	if d.seen.Size() > 100 {
+		for i := 0; i < 20; i += 1 {
+			d.seen.Pop()
+		}
+	}
+	if !d.seen.Has(string(msgId)) {
+		d.seen.Add(string(msgId))
+		return false
+	} else {
+		return true
+	}
+}
+
 func NewDltStack(conf p2p.Config, db db.Database) (*dlt, error) {
 	stack := &dlt {
 		db: db,
+		seen: common.NewSet(),
 	}
 	// update p2p.Config with protocol name, version and message count based on protocol specs
 	conf.ProtocolName = ProtocolName

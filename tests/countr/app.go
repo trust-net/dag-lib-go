@@ -119,7 +119,7 @@ func txHandler (tx *stack.Transaction) error {
 	fmt.Printf("\n")
 	op := testTx {}
 	if err := common.Deserialize(tx.Payload, &op); err != nil {
-		fmt.Printf("Invalid TX from %x\n", tx.AppId)
+		fmt.Printf("Invalid TX from %x\n%s", tx.AppId, cmdPrompt)
 		return err
 	}
 	fmt.Printf("TX: %s %s %d\n", op.Op, op.Target, op.Delta)
@@ -130,13 +130,13 @@ func txHandler (tx *stack.Transaction) error {
 		case "decr":
 			delta = int(-op.Delta)
 	}
-	fmt.Printf("%s --> %d\n", op.Target, applyDelta(op.Target, delta))
+	fmt.Printf("%s --> %d\n%s", op.Target, applyDelta(op.Target, delta), cmdPrompt)
 	return nil
 }
 
 func peerValidator (id []byte) bool {
 	fmt.Printf("\n")
-	fmt.Printf("Msg from peer: %x\n", id)
+	fmt.Printf("Msg from peer: %x\n%s", id, cmdPrompt)
 	return true
 }
 

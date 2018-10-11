@@ -5,7 +5,6 @@ import (
     "errors"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
-//	devP2P "github.com/ethereum/go-ethereum/p2p"
 )
 
 // initialize DLT stack and validate
@@ -243,6 +242,55 @@ func TestPeerListenerNoApp(t *testing.T) {
 	}
 }
 
+// statck controller listener with a previously seen message
+func TestPeerListenerSeenMessage(t *testing.T) {
+	// create an instance of stack controller
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+
+	// inject mock p2p module into stack
+	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = mockP2PLayer
+
+	// build a mock peer
+	mockP2pPeer := p2p.TestMockPeer("test peer")
+	mockConn := p2p.TestConn()
+	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
+
+	// define a default peer handler call back for app
+	peerHandler := func (id []byte) bool { return true }
+
+	// define a default tx handler call back for app
+	txHandler := func (tx *Transaction) error { return nil }
+
+	// register app
+	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err != nil {
+		t.Errorf("Registration failed, err: %s", err)
+	}
+
+	// setup mock connection to send a signed transaction followed by clean shutdown
+	tx := TestSignedTransaction("test payload")
+	mockConn.NextMsg(TransactionMsgCode, tx)
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// mark the message seen with stack
+	stack.isSeen(tx.Signature)
+
+	// now call stack's listener
+	if err := stack.listener(peer); err != nil {
+		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// we should have attempted to read messaged 2 times
+	if mockConn.ReadCount != 2 {
+		t.Errorf("Listener read %d messages", mockConn.ReadCount)
+	}
+
+	// we should not have broadcasted seen message
+	if mockP2PLayer.DidBroadcast {
+		t.Errorf("Listener frowarded a seen transaction")
+	}
+}
+
 // Application's handler callback test, happy path (app ID is accepted by application)
 func TestAppCallbackPeerAccepted(t *testing.T) {
 	// create an instance of stack controller
@@ -305,6 +353,11 @@ func TestAppCallbackPeerAccepted(t *testing.T) {
 	// we should have broadcasted message
 	if !mockP2PLayer.DidBroadcast {
 		t.Errorf("Listener did not froward valid network transaction")
+	}
+
+	// we should have marked the message as seen for stack
+	if !stack.isSeen(tx.Signature) {
+		t.Errorf("Listener did not marked the transaction as seen")
 	}
 }
 
