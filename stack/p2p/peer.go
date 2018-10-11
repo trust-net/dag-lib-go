@@ -6,6 +6,7 @@ import (
 	"net"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/discover"
+	"github.com/trust-net/go-trust-net/common"
 )
 
 // P2P layer's wrapper for extracting Peer interface from underlying implementations
@@ -25,7 +26,11 @@ type Peer interface {
 	// a human readable representation of peer node
 	String() string
 	// send a message to peer node
-	Send(msgcode uint64, data interface{}) error
+	Send(msgId []byte, msgcode uint64, data interface{}) error
+	// mark a message as seen for this peer
+	Seen(msgId []byte)
+	// read a message from peer node
+	ReadMsg() (Msg, error)
 }
 
 const (
@@ -50,6 +55,7 @@ type peerDEVp2pWrapper interface {
 type peerDEVp2p struct {
 	peer peerDEVp2pWrapper
 	rw p2p.MsgReadWriter
+	seen *common.Set
 	status int
 }
 
@@ -58,6 +64,7 @@ func NewDEVp2pPeer(peer peerDEVp2pWrapper, rw p2p.MsgReadWriter) *peerDEVp2p {
 		peer: peer,
 		rw: rw,
 		status: Connected,
+		seen: common.NewSet(),
 	}
 }
 
@@ -91,6 +98,27 @@ func (p* peerDEVp2p) String() string {
 	return p.peer.String()
 }
 
-func (p* peerDEVp2p) Send(msgcode uint64, data interface{}) error {
-	return p2p.Send(p.rw, msgcode, data)
+func (p* peerDEVp2p) Send(msgId []byte, msgcode uint64, data interface{}) error {
+	if !p.seen.Has(string(msgId)) {
+		p.Seen(msgId)
+		return p2p.Send(p.rw, msgcode, data)
+	}
+	return nil
+}
+
+func (p* peerDEVp2p) Seen(msgId []byte) {
+	if p.seen.Size() > 100 {
+		for i := 0; i < 20; i += 1 {
+			p.seen.Pop()
+		}
+	}
+	p.seen.Add(string(msgId))
+}
+
+func (p* peerDEVp2p) ReadMsg() (Msg, error) {
+	if m, err := p.rw.ReadMsg(); err != nil {
+		return nil, err
+	} else {
+		return newMsg(&m), nil
+	}
 }

@@ -132,7 +132,7 @@ func TestInvalidBootnodes(t *testing.T) {
 }
 
 func TestToDEVp2pConfigInvalidKey(t *testing.T) {
-	config := testConfig()
+	config := TestConfig()
 	config.KeyFile = "invalid_key_file.json"
 	if _, err := config.toDEVp2pConfig(); err == nil {
 		t.Errorf("Expected toDEVp2pConfig to fail due to invalid key")
@@ -140,7 +140,7 @@ func TestToDEVp2pConfigInvalidKey(t *testing.T) {
 }
 
 func TestToDEVp2pConfigNoMaxPeers(t *testing.T) {
-	config := testConfig()
+	config := TestConfig()
 	config.MaxPeers = 0
 	if _, err := config.toDEVp2pConfig(); err == nil {
 		t.Errorf("Expected toDEVp2pConfig to fail due to missing Max Peers")
@@ -148,7 +148,7 @@ func TestToDEVp2pConfigNoMaxPeers(t *testing.T) {
 }
 
 func TestToDEVp2pConfigNoProtocolName(t *testing.T) {
-	config := testConfig()
+	config := TestConfig()
 	config.ProtocolName = ""
 	if _, err := config.toDEVp2pConfig(); err == nil {
 		t.Errorf("Expected toDEVp2pConfig to fail due to missing Max Peers")
@@ -156,7 +156,7 @@ func TestToDEVp2pConfigNoProtocolName(t *testing.T) {
 }
 
 func TestToDEVp2pConfigNoName(t *testing.T) {
-	config := testConfig()
+	config := TestConfig()
 	config.Name = ""
 	if _, err := config.toDEVp2pConfig(); err == nil {
 		t.Errorf("Expected toDEVp2pConfig to fail due to missing Name")
@@ -164,7 +164,7 @@ func TestToDEVp2pConfigNoName(t *testing.T) {
 }
 
 func TestListenAddrNoPort(t *testing.T) {
-	config := testConfig()
+	config := TestConfig()
 	config.ListenAddr = "test"
 	config.Port = ""
 	if addr := config.listenAddr(); addr != "test" {
@@ -173,7 +173,7 @@ func TestListenAddrNoPort(t *testing.T) {
 }
 
 func TestListenAddrNoListenAddr(t *testing.T) {
-	config := testConfig()
+	config := TestConfig()
 	config.ListenAddr = ""
 	config.Port = "1234"
 	if addr := config.listenAddr(); addr != ":1234" {

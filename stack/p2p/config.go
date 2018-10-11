@@ -53,7 +53,7 @@ type Config struct {
 	// will listen for incoming connections.
 	ListenAddr string `json:"listen_addr"`
 
-	// If the port is zero, the operating system will pick a port. The
+	// If the port is zero, the operating system will pick a port.
 	Port string `json:"listen_port"`
 
 	// If set to true, the listening port is made available to the
