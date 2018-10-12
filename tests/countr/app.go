@@ -17,7 +17,7 @@ import (
 )
 
 
-const cmdPrompt = "Command: "
+var cmdPrompt = "<headless>: "
 
 var myDb db.Database
 
@@ -142,9 +142,6 @@ func peerValidator (id []byte) bool {
 
 // main CLI loop
 func cli(dlt stack.DLT) error {
-	if err := dlt.Register(stack.AppConfig{}, peerValidator, txHandler); err != nil {
-		return err
-	}
 	if err := dlt.Start(); err != nil {
 		return err
 	}
@@ -212,6 +209,25 @@ func cli(dlt stack.DLT) error {
 									fmt.Printf("Error submitting transaction: %s\n", err)
 								}
 							}
+						}
+					case "join":
+						if !wordScanner.Scan() {
+							fmt.Printf("usage: join <shard id> [<name>]\n")
+							break
+						}
+						shardId := wordScanner.Text()
+						name := shardId
+						if wordScanner.Scan() {
+							name = wordScanner.Text()
+						}
+						conf := stack.AppConfig{
+							ShardId: []byte(shardId),
+							Name: name,
+						}
+						if err := dlt.Register(conf, peerValidator, txHandler); err != nil {
+							fmt.Printf("Error registering app: %s\n", err)
+						} else {
+							cmdPrompt = "<" + name + ">: "
 						}
 					default:
 						fmt.Printf("Unknown Command: %s", cmd)
