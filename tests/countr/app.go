@@ -134,12 +134,6 @@ func txHandler (tx *stack.Transaction) error {
 	return nil
 }
 
-func peerValidator (id []byte) bool {
-	fmt.Printf("\n")
-	fmt.Printf("Msg from peer: %x\n%s", id, cmdPrompt)
-	return true
-}
-
 // main CLI loop
 func cli(dlt stack.DLT) error {
 	if err := dlt.Start(); err != nil {
@@ -224,7 +218,7 @@ func cli(dlt stack.DLT) error {
 							ShardId: []byte(shardId),
 							Name: name,
 						}
-						if err := dlt.Register(conf, peerValidator, txHandler); err != nil {
+						if err := dlt.Register(conf, txHandler); err != nil {
 							fmt.Printf("Error registering app: %s\n", err)
 						} else {
 							cmdPrompt = "<" + name + ">: "

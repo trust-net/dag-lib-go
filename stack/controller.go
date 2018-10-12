@@ -11,15 +11,12 @@ import (
 	"github.com/trust-net/go-trust-net/common"
 )
 
-// approve if willing to accept message from application corresponding to the ID
-type PeerApprover func (id []byte) bool
-
 // approve if a recieved network transaction is valid 
 type NetworkTxApprover func (tx *Transaction) error
 
 type DLT interface {
 	// register application shard with the DLT stack
-	Register(app AppConfig, peerHandler PeerApprover, txHandler NetworkTxApprover) error
+	Register(app AppConfig, txHandler NetworkTxApprover) error
 	// unregister application shard from DLT stack
 	Unregister() error
 	// submit a transaction to the network
@@ -32,7 +29,6 @@ type DLT interface {
 
 type dlt struct {
 	app *AppConfig
-	peerHandler PeerApprover
 	txHandler NetworkTxApprover
 	db db.Database
 	p2p p2p.Layer
@@ -40,7 +36,7 @@ type dlt struct {
 	lock   sync.RWMutex
 }
 
-func (d *dlt) Register(app AppConfig, peerHandler PeerApprover, txHandler NetworkTxApprover) error {
+func (d *dlt) Register(app AppConfig, txHandler NetworkTxApprover) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.app != nil {
@@ -49,7 +45,6 @@ func (d *dlt) Register(app AppConfig, peerHandler PeerApprover, txHandler Networ
 	d.app = &app
 	// app's ID need to be same as p2p node's ID
 	d.app.AppId = d.p2p.Id()
-	d.peerHandler = peerHandler
 	d.txHandler = txHandler
 	return nil
 }
@@ -58,7 +53,6 @@ func (d *dlt) Unregister() error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	d.app = nil
-	d.peerHandler = nil
 	d.txHandler = nil
 	return nil
 }
@@ -146,11 +140,7 @@ func (d *dlt) listener (peer p2p.Peer) error {
 				// if not headless, then process transaction with app
 				if d.app != nil {
 					// check with application if willing to accept the message
-					if !d.peerHandler(tx.AppId) {
-						// application rejected the application ID as peer
-						// silently discard message
-						continue
-					} else if err := d.txHandler(tx); err != nil {
+					if err := d.txHandler(tx); err != nil {
 						// application says not a valid transaction, peer should have validated this before sending
 						// but, how can we prevent a distributed denial of service attack with this flow?
 						// because, a malacious application node can join, and submit an invalid transaction that may
