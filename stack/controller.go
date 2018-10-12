@@ -143,31 +143,31 @@ func (d *dlt) listener (peer p2p.Peer) error {
 				// also, should sharding layer be invoking the application callback, or should it be invoked by controller?
 				// TBD, TBD, TBD ...
 				
-				// for iteration #1, there is only 1 message type, and always goes to application
-				if d.app == nil {
-					return errors.New("app not registered")
-				}
+				// if not headless, then process transaction with app
+				if d.app != nil {
+					// check with application if willing to accept the message
+					if !d.peerHandler(tx.AppId) {
+						// application rejected the application ID as peer
+						// silently discard message
+						continue
+					} else if err := d.txHandler(tx); err != nil {
+						// application says not a valid transaction, peer should have validated this before sending
+						// but, how can we prevent a distributed denial of service attack with this flow?
+						// because, a malacious application node can join, and submit an invalid transaction that may
+						// travel through the network via headless nodes, but then eventually get discarded here, in which case
+						// it will trigger chain reaction of peer connection resets (if we rolled back error here)
+						// also, additionally, how to preserve application account's utility token when such faulty transaction comes along?
 
-				// check with application if willing to accept the message
-				if !d.peerHandler(tx.AppId) {
-					// application rejected the application ID as peer
-					// silently discard message
-				} else if err := d.txHandler(tx); err != nil {
-					// application says not a valid transaction, peer should have validated this before sending
-					// but, how can we prevent a distributed denial of service attack with this flow?
-					// because, a malacious application node can join, and submit an invalid transaction that may
-					// travel through the network via headless nodes, but then eventually get discarded here, in which case
-					// it will trigger chain reaction of peer connection resets (if we rolled back error here)
-					// also, additionally, how to preserve application account's utility token when such faulty transaction comes along?
-					
-					// silently discard the transaction, and do not forward to others
-					// will not deduct utility token, but then will also not propagate the message
-					// so all in all its fair treatment
-				} else {
-					// mark sender of the message as seen
-					peer.Seen(tx.Signature)
-					d.p2p.Broadcast(tx.Signature, TransactionMsgCode, tx)
+						// silently discard the transaction, and do not forward to others
+						// will not deduct utility token, but then will also not propagate the message
+						// so all in all its fair treatment
+						continue
+					}
 				}
+				// mark sender of the message as seen
+				peer.Seen(tx.Signature)
+				d.p2p.Broadcast(tx.Signature, TransactionMsgCode, tx)
+
 
 			// case 1 message type
 			

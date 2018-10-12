@@ -223,22 +223,38 @@ func TestPeerListenerNoApp(t *testing.T) {
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 
+	// inject mock p2p module into stack
+	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = mockP2PLayer
+
 	// build a mock peer
 	mockP2pPeer := p2p.TestMockPeer("test peer")
 	mockConn := p2p.TestConn()
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
 	
-	// setup mock connection to send a transaction message
-	mockConn.NextMsg(TransactionMsgCode, &Transaction{})
-	
-	// invoke listener
-	if err := stack.listener(peer); err == nil {
-		t.Errorf("Listener did not check for app registration")
+	// setup mock connection to send a signed transaction followed by clean shutdown
+	tx := TestSignedTransaction("test payload")
+	mockConn.NextMsg(TransactionMsgCode, tx)
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// now call stack's listener
+	if err := stack.listener(peer); err != nil {
+		t.Errorf("Listener failed to process transaction as headless: %s", err)
 	}
 
-	// we should have read a message from peer
-	if mockConn.ReadCount != 1 {
+	// we should have read 2 messages from peer
+	if mockConn.ReadCount != 2 {
 		t.Errorf("Listener read %d messages", mockConn.ReadCount)
+	}
+
+	// we should have broadcasted message
+	if !mockP2PLayer.DidBroadcast {
+		t.Errorf("Listener did not froward network transaction as headless")
+	}
+
+	// we should have marked the message as seen for stack
+	if !stack.isSeen(tx.Signature) {
+		t.Errorf("Listener did not mark the transaction as seen while headless")
 	}
 }
 
@@ -410,6 +426,11 @@ func TestAppCallbackPeerNotAccepted(t *testing.T) {
 	if mockP2PLayer.DidBroadcast {
 		t.Errorf("Listener frowarded network transaction from unaccepted peer")
 	}
+
+	// we should have marked the message as seen for stack
+	if !stack.isSeen(tx.Signature) {
+		t.Errorf("Listener did not mark the transaction as seen while headless")
+	}
 }
 
 // test that DLT stack does not forward a transaction that is
@@ -462,6 +483,11 @@ func TestAppCallbackTxRejected(t *testing.T) {
 	// we should not have broadcasted message
 	if mockP2PLayer.DidBroadcast {
 		t.Errorf("Listener frowarded an invalid network transaction")
+	}
+
+	// we should have marked the message as seen for stack
+	if !stack.isSeen(tx.Signature) {
+		t.Errorf("Listener did not mark the transaction as seen while headless")
 	}
 }
 
