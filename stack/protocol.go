@@ -1,7 +1,7 @@
 package stack
 
 import (
-
+	"github.com/trust-net/dag-lib-go/stack/shard"
 )
 
 // protocol specs
@@ -28,26 +28,6 @@ const (
 // node shutdown message
 type NodeShutdown struct {}
 
-// application handshake message
-type AppConfig struct {
-	// public ID of the application instance (different from node ID used in p2p layer)
-	AppId []byte
-	// name of the application
-	Name string
-	// shard ID of the application (same for all nodes of application)
-	ShardId []byte
-	// protocol version for the shard (same for all nodes of application)
-	Version uint64
-}
+type AppConfig shard.AppConfig
 
-// transaction message
-type Transaction struct {
-	// serialized transaction payload
-	Payload []byte
-	// transaction signature
-	Signature []byte
-	// transaction approver application instance ID
-	AppId []byte
-	// transaction submitter's public ID
-	Submitter []byte
-}
+type Transaction shard.Transaction

@@ -22,6 +22,9 @@ func TestInitiatization(t *testing.T) {
 	if len(stack.(*dlt).p2p.Self()) == 0 {
 		t.Errorf("Stack does not have correct p2p layer")
 	}
+	if stack.(*dlt).sharder == nil {
+		t.Errorf("Stack does not have sharding layer")
+	}
 }
 
 // register application
@@ -30,11 +33,11 @@ func TestRegister(t *testing.T) {
 	app := TestAppConfig()
 	txHandler := func (tx *Transaction) error {return nil}
 	
-	if err := stack.Register(app, txHandler); err != nil {
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 	// our app's ID should be same as p2p node's ID
-	if string(stack.app.AppId) != string(stack.p2p.Id()) || string(stack.app.ShardId) != string(app.ShardId) || stack.app.Name != app.Name || stack.app.Version != app.Version {
+	if string(stack.app.AppId) != string(stack.p2p.Id()) || string(stack.app.ShardId) != string(app.ShardId) || stack.app.Name != app.Name {
 		t.Errorf("App configuration not initialized correctly")
 	}
 	if stack.txHandler == nil {
@@ -48,11 +51,11 @@ func TestPreRegistered(t *testing.T) {
 	app := AppConfig{}
 	txHandler := func (tx *Transaction) error {return nil}
 	
-	if err := stack.Register(app, txHandler); err != nil {
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 	
-	if err := stack.Register(TestAppConfig(), txHandler); err == nil {
+	if err := stack.Register([]byte("another shard"), "another app", txHandler); err == nil {
 		t.Errorf("Registration did not check for already registered")
 	}
 }
@@ -61,8 +64,9 @@ func TestPreRegistered(t *testing.T) {
 func TestUnRegister(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	txHandler := func (tx *Transaction) error {return nil}
-	
-	if err := stack.Register(TestAppConfig(), txHandler); err != nil {
+
+	app := TestAppConfig()
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 	if err := stack.Unregister(); err != nil {
@@ -89,7 +93,7 @@ func TestSubmitNilValues(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
 	txHandler := func (tx *Transaction) error {return nil}	
-	if err := stack.Register(app, txHandler); err != nil {
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
@@ -133,7 +137,7 @@ func TestSubmitAppIdNoMatch(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
 	txHandler := func (tx *Transaction) error {return nil}
-	if err := stack.Register(app, txHandler); err != nil {
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
@@ -155,7 +159,7 @@ func TestSubmit(t *testing.T) {
 	app := TestAppConfig()
 	txHandler := func (tx *Transaction) error {return nil}
 	
-	if err := stack.Register(app, txHandler); err != nil {
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
@@ -270,7 +274,8 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 	txHandler := func (tx *Transaction) error { return nil }
 
 	// register app
-	if err := stack.Register(TestAppConfig(), txHandler); err != nil {
+	app := TestAppConfig()
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 
@@ -320,7 +325,8 @@ func TestAppCallbackTxRejected(t *testing.T) {
 	}
 
 	// register app
-	if err := stack.Register(TestAppConfig(), txHandler); err != nil {
+	app := TestAppConfig()
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 
@@ -363,7 +369,8 @@ func TestStackRunner(t *testing.T) {
 	txHandler := func (tx *Transaction) error { return nil}
 
 	// register app
-	if err := stack.Register(TestAppConfig(), txHandler); err != nil {
+	app := TestAppConfig()
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 

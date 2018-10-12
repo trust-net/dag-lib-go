@@ -24,7 +24,6 @@ func TestAppConfig() AppConfig {
 		AppId: []byte("test app ID"),
 		ShardId: []byte ("test shard"),
 		Name: "test app",
-		Version: 1234,
 	}
 }
 

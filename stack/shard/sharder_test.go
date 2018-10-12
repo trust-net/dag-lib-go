@@ -1,4 +1,4 @@
-package sharding
+package shard
 
 import (
     "testing"
@@ -9,7 +9,7 @@ func TestInitiatization(t *testing.T) {
 	var s Sharder
 	var err error
 	s, err = NewSharder(db.NewInMemDatabase())
-	if s.(*sharder) != nil || err == nil {
-		t.Errorf("Initiatization validation failed, c: %s, err: %s", s, err)
+	if s.(*sharder) == nil || err != nil {
+		t.Errorf("Initiatization validation failed: %s, err: %s", s, err)
 	}
 }

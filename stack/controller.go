@@ -6,17 +6,15 @@ import (
 //	"fmt"
 	"errors"
 	"sync"
+	"github.com/trust-net/dag-lib-go/stack/shard"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/go-trust-net/common"
 )
 
-// approve if a recieved network transaction is valid 
-type NetworkTxApprover func (tx *Transaction) error
-
 type DLT interface {
 	// register application shard with the DLT stack
-	Register(app AppConfig, txHandler NetworkTxApprover) error
+	Register(shardId []byte, name string, txHandler func (tx *Transaction) error) error
 	// unregister application shard from DLT stack
 	Unregister() error
 	// submit a transaction to the network
@@ -29,20 +27,24 @@ type DLT interface {
 
 type dlt struct {
 	app *AppConfig
-	txHandler NetworkTxApprover
+	txHandler func (tx *Transaction) error
 	db db.Database
 	p2p p2p.Layer
+	sharder shard.Sharder
 	seen *common.Set
 	lock   sync.RWMutex
 }
 
-func (d *dlt) Register(app AppConfig, txHandler NetworkTxApprover) error {
+func (d *dlt) Register(shardId []byte, name string, txHandler func (tx *Transaction) error) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.app != nil {
 		return errors.New("App is already registered")
 	}
-	d.app = &app
+	d.app = &AppConfig {
+		ShardId: shardId,
+		Name: name,
+	}
 	// app's ID need to be same as p2p node's ID
 	d.app.AppId = d.p2p.Id()
 	d.txHandler = txHandler
@@ -214,6 +216,11 @@ func NewDltStack(conf p2p.Config, db db.Database) (*dlt, error) {
 	conf.ProtocolLength = ProtocolLength
 	if p2p, err := p2p.NewDEVp2pLayer(conf, stack.runner); err == nil {
 		stack.p2p = p2p
+	} else {
+		return nil, err
+	}
+	if sharder, err := shard.NewSharder(db); err == nil {
+		stack.sharder = sharder
 	} else {
 		return nil, err
 	}

@@ -214,11 +214,7 @@ func cli(dlt stack.DLT) error {
 						if wordScanner.Scan() {
 							name = wordScanner.Text()
 						}
-						conf := stack.AppConfig{
-							ShardId: []byte(shardId),
-							Name: name,
-						}
-						if err := dlt.Register(conf, txHandler); err != nil {
+						if err := dlt.Register([]byte(shardId), name, txHandler); err != nil {
 							fmt.Printf("Error registering app: %s\n", err)
 						} else {
 							cmdPrompt = "<" + name + ">: "
