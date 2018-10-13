@@ -26,8 +26,16 @@ const (
 )
 
 // node shutdown message
-type NodeShutdown struct {}
+type NodeShutdown struct{}
 
-type AppConfig shard.AppConfig
+// application configuration
+type AppConfig struct {
+	// public ID of the application instance (same as node ID used in p2p layer)
+	AppId []byte
+	// name of the application
+	Name string
+	// shard ID of the application (same for all nodes of application)
+	ShardId []byte
+}
 
 type Transaction shard.Transaction

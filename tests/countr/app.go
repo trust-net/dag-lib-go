@@ -4,59 +4,62 @@ package main
 
 import (
 	"bufio"
-	"strconv"
-	"flag"
-	"os"
-	"fmt"
-	"strings"
 	"encoding/json"
+	"flag"
+	"fmt"
+	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
-	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/go-trust-net/common"
+	"os"
+	"strconv"
+	"strings"
 )
 
-
 var cmdPrompt = "<headless>: "
+
+var shardId []byte
 
 var myDb db.Database
 
 type testTx struct {
-	Op string
+	Op     string
 	Target string
-	Delta int64
+	Delta  int64
 }
 
 func incrementTx(name string, delta int) *stack.Transaction {
 	applyDelta(name, delta)
 	tx := testTx{
-		Op: "incr",
+		Op:     "incr",
 		Target: name,
-		Delta: int64(delta),
+		Delta:  int64(delta),
 	}
 	txPayload, _ := common.Serialize(tx)
 	return &stack.Transaction{
-		Payload: txPayload,
+		Payload:   txPayload,
 		Submitter: []byte("countr CLI"),
+		ShardId:   shardId,
 	}
 }
 
 func decrementTx(name string, delta int) *stack.Transaction {
 	applyDelta(name, -delta)
 	tx := testTx{
-		Op: "decr",
+		Op:     "decr",
 		Target: name,
-		Delta: int64(delta),
+		Delta:  int64(delta),
 	}
 	txPayload, _ := common.Serialize(tx)
 	return &stack.Transaction{
-		Payload: txPayload,
+		Payload:   txPayload,
 		Submitter: []byte("countr CLI"),
+		ShardId:   shardId,
 	}
 }
 
 type op struct {
-	name string
+	name  string
 	delta int
 }
 
@@ -73,7 +76,7 @@ func scanOps(scanner *bufio.Scanner) (ops []op) {
 		}
 	}
 	ops = make([]op, 0)
-	currOp := op {}
+	currOp := op{}
 	readName := false
 	for {
 		name, delta, success := nextToken()
@@ -91,14 +94,14 @@ func scanOps(scanner *bufio.Scanner) (ops []op) {
 			if readName {
 				ops = append(ops, currOp)
 			}
-			currOp = op {}
+			currOp = op{}
 			currOp.name = *name
 			currOp.delta = 1
 			readName = true
 		} else {
 			currOp.delta = delta
 			ops = append(ops, currOp)
-			currOp = op {}
+			currOp = op{}
 			readName = false
 		}
 	}
@@ -115,20 +118,20 @@ func applyDelta(name string, delta int) int64 {
 	return last
 }
 
-func txHandler (tx *stack.Transaction) error {
+func txHandler(tx *stack.Transaction) error {
 	fmt.Printf("\n")
-	op := testTx {}
+	op := testTx{}
 	if err := common.Deserialize(tx.Payload, &op); err != nil {
 		fmt.Printf("Invalid TX from %x\n%s", tx.AppId, cmdPrompt)
 		return err
 	}
 	fmt.Printf("TX: %s %s %d\n", op.Op, op.Target, op.Delta)
-	delta := 0 
+	delta := 0
 	switch op.Op {
-		case "incr":
-			delta = int(op.Delta)
-		case "decr":
-			delta = int(-op.Delta)
+	case "incr":
+		delta = int(op.Delta)
+	case "decr":
+		delta = int(-op.Delta)
 	}
 	fmt.Printf("%s --> %d\n%s", op.Target, applyDelta(op.Target, delta), cmdPrompt)
 	return nil
@@ -209,8 +212,8 @@ func cli(dlt stack.DLT) error {
 							fmt.Printf("usage: join <shard id> [<name>]\n")
 							break
 						}
-						shardId := wordScanner.Text()
-						name := shardId
+						name := wordScanner.Text()
+						shardId = []byte(name)
 						if wordScanner.Scan() {
 							name = wordScanner.Text()
 						}
@@ -261,7 +264,7 @@ func main() {
 		fmt.Printf("Failed to read config file: %s\n", err)
 		return
 	}
-	
+
 	// instantiate the DLT stack
 	myDb = db.NewInMemDatabase()
 	if dlt, err := stack.NewDltStack(config, myDb); err != nil {
