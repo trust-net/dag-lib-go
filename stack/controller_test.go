@@ -1,10 +1,10 @@
 package stack
 
 import (
-    "testing"
-    "errors"
+	"errors"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
+	"testing"
 )
 
 // initialize DLT stack and validate
@@ -22,24 +22,35 @@ func TestInitiatization(t *testing.T) {
 	if len(stack.(*dlt).p2p.Self()) == 0 {
 		t.Errorf("Stack does not have correct p2p layer")
 	}
+	if stack.(*dlt).sharder == nil {
+		t.Errorf("Stack does not have sharding layer")
+	}
 }
 
 // register application
 func TestRegister(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
-	peerHandler := func (id []byte) bool {return true}
-	txHandler := func (tx *Transaction) error {return nil}
-	
-	if err := stack.Register(app, peerHandler, txHandler); err != nil {
+	txHandler := func(tx *Transaction) error { return nil }
+
+	// inject mock sharder into stack
+	sharder := NewMockSharder()
+	stack.sharder = sharder
+
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 	// our app's ID should be same as p2p node's ID
-	if string(stack.app.AppId) != string(stack.p2p.Id()) || string(stack.app.ShardId) != string(app.ShardId) || stack.app.Name != app.Name || stack.app.Version != app.Version {
+	if string(stack.app.AppId) != string(stack.p2p.Id()) || string(stack.app.ShardId) != string(app.ShardId) || stack.app.Name != app.Name {
 		t.Errorf("App configuration not initialized correctly")
 	}
-	if stack.peerHandler == nil || stack.txHandler == nil {
+	if stack.txHandler == nil {
 		t.Errorf("Callback methods not initialized correctly")
+	}
+
+	// we should have registered with sharder
+	if !sharder.IsRegistered || sharder.TxHandler == nil {
+		t.Errorf("DLT stack controller did not register with sharding layer")
 	}
 }
 
@@ -47,25 +58,39 @@ func TestRegister(t *testing.T) {
 func TestPreRegistered(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := AppConfig{}
-	peerHandler := func (id []byte) bool {return true}
-	txHandler := func (tx *Transaction) error {return nil}
-	
-	if err := stack.Register(app, peerHandler, txHandler); err != nil {
+	txHandler := func(tx *Transaction) error { return nil }
+
+	// register app one time
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
-	
-	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err == nil {
+
+	// inject mock sharder into stack
+	sharder := NewMockSharder()
+	stack.sharder = sharder
+
+	// attempt to register app again
+	if err := stack.Register([]byte("another shard"), "another app", txHandler); err == nil {
 		t.Errorf("Registration did not check for already registered")
+	}
+
+	// we should NOT have registered with sharder
+	if sharder.IsRegistered || sharder.TxHandler != nil {
+		t.Errorf("DLT stack controller did duplicate register with sharding layer")
 	}
 }
 
 // unregister a previously registered application
 func TestUnRegister(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
-	peerHandler := func (id []byte) bool {return true}
-	txHandler := func (tx *Transaction) error {return nil}
-	
-	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err != nil {
+	txHandler := func(tx *Transaction) error { return nil }
+
+	// inject mock sharder into stack
+	sharder := NewMockSharder()
+	stack.sharder = sharder
+
+	app := TestAppConfig()
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 	if err := stack.Unregister(); err != nil {
@@ -74,8 +99,13 @@ func TestUnRegister(t *testing.T) {
 	if stack.app != nil {
 		t.Errorf("App configuration not cleared during unregister")
 	}
-	if stack.peerHandler != nil || stack.txHandler != nil {
+	if stack.txHandler != nil {
 		t.Errorf("Callback methods not cleared during unregister")
+	}
+
+	// we should have un-registered with sharder but not cleared the callback reference
+	if sharder.IsRegistered || sharder.TxHandler == nil {
+		t.Errorf("DLT stack controller did not unregister with sharding layer")
 	}
 }
 
@@ -91,9 +121,8 @@ func TestSubmitUnregistered(t *testing.T) {
 func TestSubmitNilValues(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
-	peerHandler := func (id []byte) bool {return true}
-	txHandler := func (tx *Transaction) error {return nil}	
-	if err := stack.Register(app, peerHandler, txHandler); err != nil {
+	txHandler := func(tx *Transaction) error { return nil }
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
@@ -136,9 +165,8 @@ func TestSubmitNilValues(t *testing.T) {
 func TestSubmitAppIdNoMatch(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
-	peerHandler := func (id []byte) bool {return true}
-	txHandler := func (tx *Transaction) error {return nil}
-	if err := stack.Register(app, peerHandler, txHandler); err != nil {
+	txHandler := func(tx *Transaction) error { return nil }
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
@@ -158,10 +186,9 @@ func TestSubmit(t *testing.T) {
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	app := TestAppConfig()
-	peerHandler := func (id []byte) bool {return true}
-	txHandler := func (tx *Transaction) error {return nil}
-	
-	if err := stack.Register(app, peerHandler, txHandler); err != nil {
+	txHandler := func(tx *Transaction) error { return nil }
+
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
@@ -170,6 +197,28 @@ func TestSubmit(t *testing.T) {
 	}
 	if !p2p.DidBroadcast {
 		t.Errorf("Transaction did not get broadcast to peers")
+	}
+}
+
+// transaction submission validation of fields
+func TestSubmitValidation(t *testing.T) {
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	p2p := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = p2p
+	app := TestAppConfig()
+	txHandler := func(tx *Transaction) error { return nil }
+
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
+		t.Errorf("Registration failed, err: %s", err)
+		return
+	}
+	tx := TestTransaction()
+	tx.ShardId = nil
+	if err := stack.Submit(tx); err == nil {
+		t.Errorf("Transaction submission did not check for missing shard Id")
+	}
+	if p2p.DidBroadcast {
+		t.Errorf("Invalid transaction got broadcast to peers")
 	}
 }
 
@@ -206,12 +255,12 @@ func TestPeerHandshake(t *testing.T) {
 	mockP2pPeer := p2p.TestMockPeer("test peer")
 	mockConn := p2p.TestConn()
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
-	
+
 	// invoke handshake
 	if err := stack.handshake(peer); err != nil {
 		t.Errorf("Handshake failed, err: %s", err)
 	}
-	
+
 	// for iteration #1 no handshake message should be exchanged
 	if mockConn.WriteCount != 0 {
 		t.Errorf("Handshake exchanged %d messages", mockConn.WriteCount)
@@ -223,22 +272,47 @@ func TestPeerListenerNoApp(t *testing.T) {
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 
+	// inject mock p2p module into stack
+	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = mockP2PLayer
+
+	// inject mock sharding layer into stack
+	sharder := NewMockSharder()
+	stack.sharder = sharder
+
 	// build a mock peer
 	mockP2pPeer := p2p.TestMockPeer("test peer")
 	mockConn := p2p.TestConn()
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
-	
-	// setup mock connection to send a transaction message
-	mockConn.NextMsg(TransactionMsgCode, &Transaction{})
-	
-	// invoke listener
-	if err := stack.listener(peer); err == nil {
-		t.Errorf("Listener did not check for app registration")
+
+	// setup mock connection to send a signed transaction followed by clean shutdown
+	tx := TestSignedTransaction("test payload")
+	mockConn.NextMsg(TransactionMsgCode, tx)
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// now call stack's listener
+	if err := stack.listener(peer); err != nil {
+		t.Errorf("Listener failed to process transaction as headless: %s", err)
 	}
 
-	// we should have read a message from peer
-	if mockConn.ReadCount != 1 {
+	// we should have read 2 messages from peer
+	if mockConn.ReadCount != 2 {
 		t.Errorf("Listener read %d messages", mockConn.ReadCount)
+	}
+
+	// we should have broadcasted message
+	if !mockP2PLayer.DidBroadcast {
+		t.Errorf("Listener did not froward network transaction as headless")
+	}
+
+	// we should have marked the message as seen for stack
+	if !stack.isSeen(tx.Signature) {
+		t.Errorf("Listener did not mark the transaction as seen while headless")
+	}
+
+	// sharding layer should be asked to handle transaction
+	if !sharder.TxHandlerCalled {
+		t.Errorf("DLT stack controller did not call sharding layer")
 	}
 }
 
@@ -256,14 +330,12 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 	mockConn := p2p.TestConn()
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
 
-	// define a default peer handler call back for app
-	peerHandler := func (id []byte) bool { return true }
-
 	// define a default tx handler call back for app
-	txHandler := func (tx *Transaction) error { return nil }
+	txHandler := func(tx *Transaction) error { return nil }
 
 	// register app
-	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err != nil {
+	app := TestAppConfig()
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 
@@ -291,127 +363,6 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 	}
 }
 
-// Application's handler callback test, happy path (app ID is accepted by application)
-func TestAppCallbackPeerAccepted(t *testing.T) {
-	// create an instance of stack controller
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
-
-	// inject mock p2p module into stack
-	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
-	stack.p2p = mockP2PLayer
-
-	// build a mock peer
-	mockP2pPeer := p2p.TestMockPeer("test peer")
-	mockConn := p2p.TestConn()
-	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
-
-	// define peer handler call back for app
-	peerHandlerCbCount := 0
-	peerHandler := func (id []byte) bool {
-		peerHandlerCbCount += 1
-		// we trust all and accept all :)
-		return true
-	}
-
-	// define a tx handler call back for app
-	txHandlerCb := false
-	txHandler := func (tx *Transaction) error {
-		txHandlerCb = true
-		return nil
-	}
-
-	// register app
-	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err != nil {
-		t.Errorf("Registration failed, err: %s", err)
-	}
-
-	// setup mock connection to send a signed transaction followed by clean shutdown
-	tx := TestSignedTransaction("test payload")
-	mockConn.NextMsg(TransactionMsgCode, tx)
-	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
-
-	// now call stack's listener
-	if err := stack.listener(peer); err != nil {
-		t.Errorf("Transaction processing has errors: %s", err)
-	}
-
-	// app's peer handler should have been called
-	if peerHandlerCbCount != 1 {
-		t.Errorf("app peer validation handler not called")
-	}
-
-	// app's transaction handler should have been called
-	if !txHandlerCb {
-		t.Errorf("app peer transaction handler not called")
-	}
-
-	// we should have attempted to read messaged 2 times
-	if mockConn.ReadCount != 2 {
-		t.Errorf("Listener read %d messages", mockConn.ReadCount)
-	}
-
-	// we should have broadcasted message
-	if !mockP2PLayer.DidBroadcast {
-		t.Errorf("Listener did not froward valid network transaction")
-	}
-
-	// we should have marked the message as seen for stack
-	if !stack.isSeen(tx.Signature) {
-		t.Errorf("Listener did not marked the transaction as seen")
-	}
-}
-
-// Application's handler callback test, when app ID is NOT accepted by application
-func TestAppCallbackPeerNotAccepted(t *testing.T) {
-	// create an instance of stack controller
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
-
-	// inject mock p2p module into stack
-	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
-	stack.p2p = mockP2PLayer
-
-	// build a mock peer
-	mockP2pPeer := p2p.TestMockPeer("test peer")
-	mockConn := p2p.TestConn()
-	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
-
-	// define peer handler call back for app
-	peerHandler := func (id []byte) bool {
-		// we trust no one and accept none :)
-		return false
-	}
-
-	// define a tx handler call back for app
-	txHandler := func (tx *Transaction) error {
-		return nil
-	}
-
-	// register app
-	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err != nil {
-		t.Errorf("Registration failed, err: %s", err)
-	}
-
-	// setup mock connection to send a signed transaction followed by clean shutdown
-	tx := TestSignedTransaction("test payload")
-	mockConn.NextMsg(TransactionMsgCode, tx)
-	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
-
-	// now call stack's listener
-	if err := stack.listener(peer); err != nil {
-		t.Errorf("Listener quit on peer app rejected by app: %s", err)
-	}
-
-	// we should have attempted to read messaged 2 times
-	if mockConn.ReadCount != 2 {
-		t.Errorf("Listener read %d messages", mockConn.ReadCount)
-	}
-
-	// we should not have broadcasted message
-	if mockP2PLayer.DidBroadcast {
-		t.Errorf("Listener frowarded network transaction from unaccepted peer")
-	}
-}
-
 // test that DLT stack does not forward a transaction that is
 // rejected by application's transaction handler
 func TestAppCallbackTxRejected(t *testing.T) {
@@ -427,20 +378,15 @@ func TestAppCallbackTxRejected(t *testing.T) {
 	mockConn := p2p.TestConn()
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
 
-	// define peer handler call back for app
-	peerHandler := func (id []byte) bool {
-		// we everyone
-		return true
-	}
-
 	// define a tx handler call back for app
-	txHandler := func (tx *Transaction) error {
+	txHandler := func(tx *Transaction) error {
 		// we reject all transactions
 		return errors.New("trust no one")
 	}
 
 	// register app
-	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err != nil {
+	app := TestAppConfig()
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 
@@ -463,10 +409,70 @@ func TestAppCallbackTxRejected(t *testing.T) {
 	if mockP2PLayer.DidBroadcast {
 		t.Errorf("Listener frowarded an invalid network transaction")
 	}
+
+	// we should have marked the message as seen for stack
+	if !stack.isSeen(tx.Signature) {
+		t.Errorf("Listener did not mark the transaction as seen while headless")
+	}
 }
 
-// DLT stack controller's runner with a registered app, happy path 
-// (app handshake, transaction message, shutdown)
+// DLT stack controller's transaction callback wrapper between sharder and application
+func TestStackTxHandlerWrapper(t *testing.T) {
+	// create an instance of stack controller
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+
+	// inject mock p2p module into stack
+	stack.p2p = p2p.TestP2PLayer("mock p2p")
+
+	// define a detault tx handler call back for app
+	txMatch := false
+	gotCallback := false
+	origTx := TestTransaction()
+	txHandler := func(tx *Transaction) error {
+		gotCallback = true
+		txMatch = (string(origTx.Payload) == string(tx.Payload) &&
+			string(origTx.Signature) == string(tx.Signature) &&
+			string(origTx.ShardId) == string(tx.ShardId) &&
+			string(origTx.Submitter) == string(tx.Submitter) &&
+			string(origTx.AppId) == string(tx.AppId))
+
+		return nil
+	}
+
+	// register app
+	app := TestAppConfig()
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
+		t.Errorf("Registration failed, err: %s", err)
+	}
+
+	// build a mock peer
+	mockP2pPeer := p2p.TestMockPeer("test peer")
+	mockConn := p2p.TestConn()
+	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
+
+	// setup mock connection to send following messages:
+	//    transaction message
+	//    node shutdown message
+	mockConn.NextMsg(TransactionMsgCode, origTx)
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// now simulate a new connection session
+	if err := stack.runner(peer); err != nil {
+		t.Errorf("Peer connection has error: %s", err)
+	}
+
+	// validate that transaction in callback matched the original
+	if !txMatch {
+		t.Errorf("transactions failed to match")
+	}
+
+	if !gotCallback {
+		t.Errorf("Application did not recieve callback")
+	}
+}
+
+// DLT stack controller's runner with a registered app, happy path
+// (transaction message, shutdown)
 func TestStackRunner(t *testing.T) {
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
@@ -474,14 +480,17 @@ func TestStackRunner(t *testing.T) {
 	// inject mock p2p module into stack
 	stack.p2p = p2p.TestP2PLayer("mock p2p")
 
-	// define an default peer handler call back for app
-	peerHandler := func (id []byte) bool { return true }
+	// inject mock sharding layer into stack
+	sharder := NewMockSharder()
+	stack.sharder = sharder
 
 	// define a detault tx handler call back for app
-	txHandler := func (tx *Transaction) error { return nil}
+	gotCallback := false
+	txHandler := func(tx *Transaction) error { gotCallback = true; return nil }
 
 	// register app
-	if err := stack.Register(TestAppConfig(), peerHandler, txHandler); err != nil {
+	app := TestAppConfig()
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 
@@ -509,5 +518,10 @@ func TestStackRunner(t *testing.T) {
 	// no messages should have been sent to peer (yet)
 	if mockConn.WriteCount != 0 {
 		t.Errorf("Did not expect %d messages sent to peer", mockConn.WriteCount)
+	}
+
+	// application should have got call back to process transaction via sharding layer
+	if !sharder.TxHandlerCalled || !gotCallback {
+		t.Errorf("Application did not recieve callback via sharding layer")
 	}
 }
