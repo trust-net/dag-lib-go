@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 	"testing"
 )
 
@@ -31,7 +32,7 @@ func TestInitiatization(t *testing.T) {
 func TestRegister(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
-	txHandler := func(tx *Transaction) error { return nil }
+	txHandler := func(tx *dto.Transaction) error { return nil }
 
 	// inject mock sharder into stack
 	sharder := NewMockSharder()
@@ -58,7 +59,7 @@ func TestRegister(t *testing.T) {
 func TestPreRegistered(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := AppConfig{}
-	txHandler := func(tx *Transaction) error { return nil }
+	txHandler := func(tx *dto.Transaction) error { return nil }
 
 	// register app one time
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
@@ -83,7 +84,7 @@ func TestPreRegistered(t *testing.T) {
 // unregister a previously registered application
 func TestUnRegister(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
-	txHandler := func(tx *Transaction) error { return nil }
+	txHandler := func(tx *dto.Transaction) error { return nil }
 
 	// inject mock sharder into stack
 	sharder := NewMockSharder()
@@ -121,7 +122,7 @@ func TestSubmitUnregistered(t *testing.T) {
 func TestSubmitNilValues(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
-	txHandler := func(tx *Transaction) error { return nil }
+	txHandler := func(tx *dto.Transaction) error { return nil }
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
@@ -165,7 +166,7 @@ func TestSubmitNilValues(t *testing.T) {
 func TestSubmitAppIdNoMatch(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
-	txHandler := func(tx *Transaction) error { return nil }
+	txHandler := func(tx *dto.Transaction) error { return nil }
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
@@ -186,7 +187,7 @@ func TestSubmit(t *testing.T) {
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	app := TestAppConfig()
-	txHandler := func(tx *Transaction) error { return nil }
+	txHandler := func(tx *dto.Transaction) error { return nil }
 
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
@@ -206,7 +207,7 @@ func TestSubmitValidation(t *testing.T) {
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	app := TestAppConfig()
-	txHandler := func(tx *Transaction) error { return nil }
+	txHandler := func(tx *dto.Transaction) error { return nil }
 
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
@@ -331,7 +332,7 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
 
 	// define a default tx handler call back for app
-	txHandler := func(tx *Transaction) error { return nil }
+	txHandler := func(tx *dto.Transaction) error { return nil }
 
 	// register app
 	app := TestAppConfig()
@@ -379,7 +380,7 @@ func TestAppCallbackTxRejected(t *testing.T) {
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
 
 	// define a tx handler call back for app
-	txHandler := func(tx *Transaction) error {
+	txHandler := func(tx *dto.Transaction) error {
 		// we reject all transactions
 		return errors.New("trust no one")
 	}
@@ -428,7 +429,7 @@ func TestStackTxHandlerWrapper(t *testing.T) {
 	txMatch := false
 	gotCallback := false
 	origTx := TestTransaction()
-	txHandler := func(tx *Transaction) error {
+	txHandler := func(tx *dto.Transaction) error {
 		gotCallback = true
 		txMatch = (string(origTx.Payload) == string(tx.Payload) &&
 			string(origTx.Signature) == string(tx.Signature) &&
@@ -486,7 +487,7 @@ func TestStackRunner(t *testing.T) {
 
 	// define a detault tx handler call back for app
 	gotCallback := false
-	txHandler := func(tx *Transaction) error { gotCallback = true; return nil }
+	txHandler := func(tx *dto.Transaction) error { gotCallback = true; return nil }
 
 	// register app
 	app := TestAppConfig()
@@ -502,7 +503,7 @@ func TestStackRunner(t *testing.T) {
 	// setup mock connection to send following messages:
 	//    transaction message
 	//    node shutdown message
-	mockConn.NextMsg(TransactionMsgCode, &Transaction{})
+	mockConn.NextMsg(TransactionMsgCode, &dto.Transaction{})
 	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
 
 	// now simulate a new connection session

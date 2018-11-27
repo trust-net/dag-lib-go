@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/go-trust-net/common"
 	"os"
@@ -28,7 +29,7 @@ type testTx struct {
 	Delta  int64
 }
 
-func incrementTx(name string, delta int) *stack.Transaction {
+func incrementTx(name string, delta int) *dto.Transaction {
 	applyDelta(name, delta)
 	tx := testTx{
 		Op:     "incr",
@@ -36,14 +37,14 @@ func incrementTx(name string, delta int) *stack.Transaction {
 		Delta:  int64(delta),
 	}
 	txPayload, _ := common.Serialize(tx)
-	return &stack.Transaction{
+	return &dto.Transaction{
 		Payload:   txPayload,
 		Submitter: []byte("countr CLI"),
 		ShardId:   shardId,
 	}
 }
 
-func decrementTx(name string, delta int) *stack.Transaction {
+func decrementTx(name string, delta int) *dto.Transaction {
 	applyDelta(name, -delta)
 	tx := testTx{
 		Op:     "decr",
@@ -51,7 +52,7 @@ func decrementTx(name string, delta int) *stack.Transaction {
 		Delta:  int64(delta),
 	}
 	txPayload, _ := common.Serialize(tx)
-	return &stack.Transaction{
+	return &dto.Transaction{
 		Payload:   txPayload,
 		Submitter: []byte("countr CLI"),
 		ShardId:   shardId,
@@ -118,7 +119,7 @@ func applyDelta(name string, delta int) int64 {
 	return last
 }
 
-func txHandler(tx *stack.Transaction) error {
+func txHandler(tx *dto.Transaction) error {
 	fmt.Printf("\n")
 	op := testTx{}
 	if err := common.Deserialize(tx.Payload, &op); err != nil {

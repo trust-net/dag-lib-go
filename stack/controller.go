@@ -8,17 +8,18 @@ import (
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/shard"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/go-trust-net/common"
 	"sync"
 )
 
 type DLT interface {
 	// register application shard with the DLT stack
-	Register(shardId []byte, name string, txHandler func(tx *Transaction) error) error
+	Register(shardId []byte, name string, txHandler func(tx *dto.Transaction) error) error
 	// unregister application shard from DLT stack
 	Unregister() error
 	// submit a transaction to the network
-	Submit(tx *Transaction) error
+	Submit(tx *dto.Transaction) error
 	// start the controller
 	Start() error
 	// stop the controller
@@ -27,7 +28,7 @@ type DLT interface {
 
 type dlt struct {
 	app       *AppConfig
-	txHandler func(tx *Transaction) error
+	txHandler func(tx *dto.Transaction) error
 	db        db.Database
 	p2p       p2p.Layer
 	sharder   shard.Sharder
@@ -35,7 +36,7 @@ type dlt struct {
 	lock      sync.RWMutex
 }
 
-func (d *dlt) Register(shardId []byte, name string, txHandler func(tx *Transaction) error) error {
+func (d *dlt) Register(shardId []byte, name string, txHandler func(tx *dto.Transaction) error) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.app != nil {
@@ -50,7 +51,7 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx *Transacti
 	d.txHandler = txHandler
 
 	// register app with sharder
-	d.sharder.Register(shardId, d.txHandlerCb)
+	d.sharder.Register(shardId, txHandler)
 	return nil
 }
 
@@ -62,7 +63,7 @@ func (d *dlt) Unregister() error {
 	return d.sharder.Unregister()
 }
 
-func (d *dlt) Submit(tx *Transaction) error {
+func (d *dlt) Submit(tx *dto.Transaction) error {
 	if d.app == nil {
 		return errors.New("app not registered")
 	}
@@ -126,7 +127,7 @@ func (d *dlt) listener(peer p2p.Peer) error {
 
 		case TransactionMsgCode:
 			// deserialize the transaction message from payload
-			tx := &Transaction{}
+			tx := &dto.Transaction{}
 			if err := msg.Decode(tx); err != nil {
 				//					fmt.Printf("\nFailed to decode message: %s\n", err)
 				return err
@@ -148,7 +149,7 @@ func (d *dlt) listener(peer p2p.Peer) error {
 			// TBD, TBD, TBD ...
 
 			// let sharding layer process transaction
-			if err := d.sharder.Handle(&shard.Transaction{
+			if err := d.sharder.Handle(&dto.Transaction{
 				Payload:   tx.Payload,
 				Signature: tx.Signature,
 				AppId:     tx.AppId,
@@ -205,17 +206,6 @@ func (d *dlt) isSeen(msgId []byte) bool {
 	} else {
 		return true
 	}
-}
-
-// a wrapper for transaction handler callback between sharding layer and application
-func (d *dlt) txHandlerCb(tx *shard.Transaction) error {
-	return d.txHandler(&Transaction{
-		Payload:   tx.Payload,
-		Signature: tx.Signature,
-		AppId:     tx.AppId,
-		ShardId:   tx.ShardId,
-		Submitter: tx.Submitter,
-	})
 }
 
 func NewDltStack(conf p2p.Config, db db.Database) (*dlt, error) {

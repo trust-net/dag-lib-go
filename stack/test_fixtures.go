@@ -5,13 +5,13 @@ import (
 	"crypto/rand"
 	"crypto/sha512"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/trust-net/dag-lib-go/stack/shard"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/go-trust-net/common"
 	"math/big"
 )
 
-func TestTransaction() *Transaction {
-	return &Transaction{
+func TestTransaction() *dto.Transaction {
+	return &dto.Transaction{
 		Payload:   []byte("test data"),
 		Signature: []byte("test signature"),
 		AppId:     []byte("test app ID"),
@@ -28,8 +28,8 @@ func TestAppConfig() AppConfig {
 	}
 }
 
-func TestSignedTransaction(data string) *Transaction {
-	tx := &Transaction{
+func TestSignedTransaction(data string) *dto.Transaction {
+	tx := &dto.Transaction{
 		Payload: []byte(data),
 		ShardId: []byte("test shard"),
 	}
@@ -54,10 +54,10 @@ type mockSharder struct {
 	IsRegistered    bool
 	ShardId         []byte
 	TxHandlerCalled bool
-	TxHandler       func(tx *shard.Transaction) error
+	TxHandler       func(tx *dto.Transaction) error
 }
 
-func (s *mockSharder) Register(shardId []byte, txHandler func(tx *shard.Transaction) error) error {
+func (s *mockSharder) Register(shardId []byte, txHandler func(tx *dto.Transaction) error) error {
 	s.IsRegistered = true
 	s.ShardId = shardId
 	s.TxHandler = txHandler
@@ -69,7 +69,7 @@ func (s *mockSharder) Unregister() error {
 	return nil
 }
 
-func (s *mockSharder) Handle(tx *shard.Transaction) error {
+func (s *mockSharder) Handle(tx *dto.Transaction) error {
 	s.TxHandlerCalled = true
 	if s.TxHandler != nil {
 		return s.TxHandler(tx)
