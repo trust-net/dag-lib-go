@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"crypto/ecdsa"
 	"flag"
 	"fmt"
 	"github.com/trust-net/dag-lib-go/db"
@@ -15,11 +16,19 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"crypto/rand"
+	"crypto/sha512"
+	"github.com/ethereum/go-ethereum/crypto"
+	"math/big"
 )
 
 var cmdPrompt = "<headless>: "
 
 var shardId []byte
+
+var key *ecdsa.PrivateKey
+
+var submitter []byte
 
 var myDb db.Database
 
@@ -27,6 +36,20 @@ type testTx struct {
 	Op     string
 	Target string
 	Delta  int64
+}
+
+func sign(tx *dto.Transaction) *dto.Transaction {
+	// sign the test payload using SHA512 hash and ECDSA private key
+	type signature struct {
+		R *big.Int
+		S *big.Int
+	}
+	s := signature{}
+	hash := sha512.Sum512(tx.Payload)
+	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
+	tx.Signature, _ = common.Serialize(s)
+	tx.Submitter = submitter
+	return tx
 }
 
 func incrementTx(name string, delta int) *dto.Transaction {
@@ -37,11 +60,11 @@ func incrementTx(name string, delta int) *dto.Transaction {
 		Delta:  int64(delta),
 	}
 	txPayload, _ := common.Serialize(tx)
-	return &dto.Transaction{
+	return sign(&dto.Transaction{
 		Payload:   txPayload,
 		Submitter: []byte("countr CLI"),
 		ShardId:   shardId,
-	}
+	})
 }
 
 func decrementTx(name string, delta int) *dto.Transaction {
@@ -52,11 +75,11 @@ func decrementTx(name string, delta int) *dto.Transaction {
 		Delta:  int64(delta),
 	}
 	txPayload, _ := common.Serialize(tx)
-	return &dto.Transaction{
+	return sign(&dto.Transaction{
 		Payload:   txPayload,
 		Submitter: []byte("countr CLI"),
 		ShardId:   shardId,
-	}
+	})
 }
 
 type op struct {
@@ -265,6 +288,10 @@ func main() {
 		fmt.Printf("Failed to read config file: %s\n", err)
 		return
 	}
+	
+	// create a new ECDSA key for submitter client
+	key, _ = crypto.GenerateKey()
+	submitter = crypto.FromECDSAPub(&key.PublicKey)
 
 	// instantiate the DLT stack
 	myDb = db.NewInMemDatabase()

@@ -3,7 +3,7 @@
 package dto
 
 import (
-
+	"github.com/trust-net/go-trust-net/common"
 )
 
 // transaction message
@@ -18,4 +18,8 @@ type Transaction struct {
 	ShardId []byte
 	// transaction submitter's public ID
 	Submitter []byte
+}
+
+func (tx *Transaction) Serialize() ([]byte, error) {
+	return common.Serialize(tx)
 }

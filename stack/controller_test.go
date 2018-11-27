@@ -23,6 +23,9 @@ func TestInitiatization(t *testing.T) {
 	if len(stack.(*dlt).p2p.Self()) == 0 {
 		t.Errorf("Stack does not have correct p2p layer")
 	}
+	if stack.(*dlt).endorser == nil {
+		t.Errorf("Stack does not have endorsement layer")
+	}
 	if stack.(*dlt).sharder == nil {
 		t.Errorf("Stack does not have sharding layer")
 	}
@@ -37,6 +40,8 @@ func TestRegister(t *testing.T) {
 	// inject mock sharder into stack
 	sharder := NewMockSharder()
 	stack.sharder = sharder
+	// inject mock endorser into stack
+	stack.endorser = NewMockEndorser()
 
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
@@ -69,6 +74,8 @@ func TestPreRegistered(t *testing.T) {
 	// inject mock sharder into stack
 	sharder := NewMockSharder()
 	stack.sharder = sharder
+	// inject mock endorser into stack
+	stack.endorser = NewMockEndorser()
 
 	// attempt to register app again
 	if err := stack.Register([]byte("another shard"), "another app", txHandler); err == nil {
@@ -89,6 +96,8 @@ func TestUnRegister(t *testing.T) {
 	// inject mock sharder into stack
 	sharder := NewMockSharder()
 	stack.sharder = sharder
+	// inject mock endorser into stack
+	stack.endorser = NewMockEndorser()
 
 	app := TestAppConfig()
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
@@ -113,8 +122,16 @@ func TestUnRegister(t *testing.T) {
 // try submitting a transaction without application being registered first
 func TestSubmitUnregistered(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	// inject mock endorser into stack
+	endorser := NewMockEndorser()
+	stack.endorser = endorser
 	if err := stack.Submit(nil); err == nil {
 		t.Errorf("Transaction submission did not check for unregistered")
+	}
+	// make sure that endorser does not gets called for unregistered submission
+	// since its lower in stack from sharder, which would have errored out already
+	if endorser.TxHandlerCalled {
+		t.Errorf("Endorser called for unregistered submission")
 	}
 }
 
@@ -140,19 +157,19 @@ func TestSubmitNilValues(t *testing.T) {
 		t.Errorf("Transaction submission did not check for nil payload")
 	}
 
-	// signature should automatically be created when submitted
+	// try submitting unsigned transaction
 	tx = TestTransaction()
 	tx.Signature = nil
-	if err := stack.Submit(tx); err != nil {
-		t.Errorf("Transaction submission did not create signature")
+	if err := stack.Submit(tx); err == nil {
+		t.Errorf("Transaction submission did not check for signature")
 	}
 
-	// app ID should automatically be updated from node's ID
-	tx = TestTransaction()
-	tx.AppId = nil
-	if err := stack.Submit(tx); err != nil {
-		t.Errorf("Transaction submission did not update app ID")
-	}
+//	// try submitting unsigned transaction nil app ID
+//	tx = TestTransaction()
+//	tx.AppId = nil
+//	if err := stack.Submit(tx); err == nil {
+//		t.Errorf("Transaction submission did not check for app ID")
+//	}
 
 	// submitter ID needs to be non-null
 	tx = TestTransaction()
@@ -162,7 +179,7 @@ func TestSubmitNilValues(t *testing.T) {
 	}
 }
 
-// try submitting a transaction with fake app ID, it should get corrected
+// try submitting a transaction with fake app ID, it should fail
 func TestSubmitAppIdNoMatch(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
@@ -171,19 +188,19 @@ func TestSubmitAppIdNoMatch(t *testing.T) {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
-	tx := TestTransaction()
-	tx.AppId = []byte("some random app ID")
-	if err := stack.Submit(tx); err != nil {
-		t.Errorf("Transaction submission did ignore fake app ID")
-	}
-	if string(tx.AppId) != string(stack.p2p.Id()) {
-		t.Errorf("Transaction submission did not update correct app ID")
-	}
+//	tx := TestTransaction()
+//	tx.AppId = []byte("some random app ID")
+//	if err := stack.Submit(tx); err == nil {
+//		t.Errorf("Transaction submission did not validate app ID")
+//	}
 }
 
 // transaction submission, happy path
 func TestSubmit(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	// inject mock endorser into stack
+	endorser := NewMockEndorser()
+	stack.endorser = endorser
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	app := TestAppConfig()
@@ -193,11 +210,22 @@ func TestSubmit(t *testing.T) {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
-	if err := stack.Submit(TestTransaction()); err != nil {
+	tx := TestSignedTransaction("test payload")
+	// make sure transaction's app ID is correct
+	tx.AppId = stack.app.AppId
+	if err := stack.Submit(tx); err != nil {
 		t.Errorf("Transaction submission failed, err: %s", err)
 	}
 	if !p2p.DidBroadcast {
 		t.Errorf("Transaction did not get broadcast to peers")
+	}
+
+	// verify that endorser gets called for submission
+	if !endorser.TxHandlerCalled {
+		t.Errorf("Endorser did not get called for submission")
+	}
+	if string(endorser.TxId) != string(tx.Signature) {
+		t.Errorf("Endorser transaction does not match submitted transaction")
 	}
 }
 
@@ -281,6 +309,10 @@ func TestPeerListenerNoApp(t *testing.T) {
 	sharder := NewMockSharder()
 	stack.sharder = sharder
 
+	// inject mock endorser into stack
+	endorser := NewMockEndorser()
+	stack.endorser = endorser
+
 	// build a mock peer
 	mockP2pPeer := p2p.TestMockPeer("test peer")
 	mockConn := p2p.TestConn()
@@ -315,6 +347,14 @@ func TestPeerListenerNoApp(t *testing.T) {
 	if !sharder.TxHandlerCalled {
 		t.Errorf("DLT stack controller did not call sharding layer")
 	}
+
+	// verify that endorser gets called for network message
+	if !endorser.TxHandlerCalled {
+		t.Errorf("Endorser did not get called for network transaction")
+	}
+	if string(endorser.TxId) != string(tx.Signature) {
+		t.Errorf("Endorser transaction does not match network transaction")
+	}
 }
 
 // statck controller listener with a previously seen message
@@ -325,6 +365,10 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 	// inject mock p2p module into stack
 	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = mockP2PLayer
+
+	// inject mock endorser into stack
+	endorser := NewMockEndorser()
+	stack.endorser = endorser
 
 	// build a mock peer
 	mockP2pPeer := p2p.TestMockPeer("test peer")
@@ -361,6 +405,11 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 	// we should not have broadcasted seen message
 	if mockP2PLayer.DidBroadcast {
 		t.Errorf("Listener frowarded a seen transaction")
+	}
+
+	// verify that endorser did not get called for duplicate network message
+	if endorser.TxHandlerCalled {
+		t.Errorf("Endorser got called for duplicate network transaction")
 	}
 }
 
@@ -485,6 +534,10 @@ func TestStackRunner(t *testing.T) {
 	sharder := NewMockSharder()
 	stack.sharder = sharder
 
+	// inject mock endorser into stack
+	endorser := NewMockEndorser()
+	stack.endorser = endorser
+
 	// define a detault tx handler call back for app
 	gotCallback := false
 	txHandler := func(tx *dto.Transaction) error { gotCallback = true; return nil }
@@ -501,9 +554,10 @@ func TestStackRunner(t *testing.T) {
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
 
 	// setup mock connection to send following messages:
-	//    transaction message
+	//    test transaction message
 	//    node shutdown message
-	mockConn.NextMsg(TransactionMsgCode, &dto.Transaction{})
+	tx := TestSignedTransaction("test data")
+	mockConn.NextMsg(TransactionMsgCode, tx)
 	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
 
 	// now simulate a new connection session
@@ -519,6 +573,14 @@ func TestStackRunner(t *testing.T) {
 	// no messages should have been sent to peer (yet)
 	if mockConn.WriteCount != 0 {
 		t.Errorf("Did not expect %d messages sent to peer", mockConn.WriteCount)
+	}
+
+	// verify that endorser gets called for network message
+	if !endorser.TxHandlerCalled {
+		t.Errorf("Endorser did not get called for network transaction")
+	}
+	if string(endorser.TxId) != string(tx.Signature) {
+		t.Errorf("Endorser transaction does not match network transaction")
 	}
 
 	// application should have got call back to process transaction via sharding layer

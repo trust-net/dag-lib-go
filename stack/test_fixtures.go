@@ -1,24 +1,8 @@
 package stack
 
 import (
-	"crypto/ecdsa"
-	"crypto/rand"
-	"crypto/sha512"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/trust-net/dag-lib-go/stack/dto"
-	"github.com/trust-net/go-trust-net/common"
-	"math/big"
 )
-
-func TestTransaction() *dto.Transaction {
-	return &dto.Transaction{
-		Payload:   []byte("test data"),
-		Signature: []byte("test signature"),
-		AppId:     []byte("test app ID"),
-		ShardId:   []byte("test shard"),
-		Submitter: []byte("test submitter"),
-	}
-}
 
 func TestAppConfig() AppConfig {
 	return AppConfig{
@@ -28,26 +12,30 @@ func TestAppConfig() AppConfig {
 	}
 }
 
+func TestTransaction() *dto.Transaction {
+	return dto.TestTransaction()
+}
+
 func TestSignedTransaction(data string) *dto.Transaction {
-	tx := &dto.Transaction{
-		Payload: []byte(data),
-		ShardId: []byte("test shard"),
-	}
+	return dto.TestSignedTransaction(data)
+}
 
-	// create a new ECDSA key
-	key, _ := crypto.GenerateKey()
-	tx.AppId = crypto.FromECDSAPub(&key.PublicKey)
+type mockEndorser struct {
+	TxId         []byte
+	TxHandlerCalled bool
+	HandlerReturn error
+}
 
-	// sign the test payload using SHA512 hash and ECDSA private key
-	type signature struct {
-		R *big.Int
-		S *big.Int
+func (e *mockEndorser) Handle(tx *dto.Transaction) error {
+	e.TxHandlerCalled = true
+	e.TxId = tx.Signature
+	return e.HandlerReturn
+}
+
+func NewMockEndorser() *mockEndorser {
+	return &mockEndorser{
+		HandlerReturn: nil,
 	}
-	s := signature{}
-	hash := sha512.Sum512(tx.Payload)
-	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
-	tx.Signature, _ = common.Serialize(s)
-	return tx
 }
 
 type mockSharder struct {

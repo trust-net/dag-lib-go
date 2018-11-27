@@ -3,11 +3,12 @@
 package stack
 
 import (
-	//	"fmt"
+		"fmt"
 	"errors"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/shard"
+	"github.com/trust-net/dag-lib-go/stack/endorsement"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/go-trust-net/common"
 	"sync"
@@ -32,6 +33,7 @@ type dlt struct {
 	db        db.Database
 	p2p       p2p.Layer
 	sharder   shard.Sharder
+	endorser	  endorsement.Endorser
 	seen      *common.Set
 	lock      sync.RWMutex
 }
@@ -47,6 +49,10 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx *dto.Trans
 		Name:    name,
 	}
 	// app's ID need to be same as p2p node's ID
+	// WHY DO WE NEED APP ID??? It will not get included in Tx Signature from submitter client
+	// (since submitter may want to submit same transaction with multiple app instances) -- may be we should
+	// only have shard Id in the transaction
+	// ACTUALLY, this will be the Anchor (which will include app ID from DLT stack)
 	d.app.AppId = d.p2p.Id()
 	d.txHandler = txHandler
 
@@ -72,19 +78,12 @@ func (d *dlt) Submit(tx *dto.Transaction) error {
 		return errors.New("nil transaction")
 	}
 	if string(tx.ShardId) != string(d.app.ShardId) {
-		return errors.New("missing shard id")
+		return errors.New("incorrect shard id")
 	}
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	// update transaction's app ID
-	tx.AppId = d.app.AppId
-
-	// sign transaction using p2p layer
-	if signature, err := d.p2p.Sign(tx.Payload); err != nil {
-		return err
-	} else {
-		tx.Signature = signature
-	}
+	// TBD: replace below with check for TxAnchor
+//	if string(tx.AppId) != string(d.app.AppId) {
+//		return errors.New("incorrect app id")
+//	}
 
 	switch {
 	case tx.Payload == nil:
@@ -94,6 +93,31 @@ func (d *dlt) Submit(tx *dto.Transaction) error {
 	case tx.Submitter == nil:
 		return errors.New("nil transaction submitter ID")
 	}
+	
+//	// WHY are we locking here???
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
+
+//	// sign transaction using p2p layer
+//	// WHY?????
+//	// this signature should actually come from submitter client!!!!
+//	if signature, err := d.p2p.Sign(tx.Payload); err != nil {
+//		return err
+//	} else {
+//		tx.Signature = signature
+//	}
+
+	// send the submitted transaction to sharding layer
+	// TBD
+	
+	// next in line process with endorsement layer
+	// TBD: below needs to change to a different method that will check whether transaction
+	// has correct TxAnchor in the submitted transaction
+	if err := d.endorser.Handle(tx); err != nil {
+		return err
+	}
+
+	// finally send it to p2p layer, to broadcase to others
 	return d.p2p.Broadcast(tx.Signature, TransactionMsgCode, tx)
 }
 
@@ -133,8 +157,8 @@ func (d *dlt) listener(peer p2p.Peer) error {
 				return err
 			}
 
-			// validate transaction signature
-			if !d.p2p.Verify(tx.Payload, tx.Signature, tx.AppId) {
+			// validate transaction signature using transaction submitter's ID
+			if !d.p2p.Verify(tx.Payload, tx.Signature, tx.Submitter) {
 				return errors.New("Transaction signature invalid")
 			}
 
@@ -147,16 +171,16 @@ func (d *dlt) listener(peer p2p.Peer) error {
 			// but, should'nt it go to endorsing layer first, to make sure its valid transaction?
 			// also, should sharding layer be invoking the application callback, or should it be invoked by controller?
 			// TBD, TBD, TBD ...
-
+			
+			// send transaction to endorsing layer for handling
+			if err := d.endorser.Handle(tx); err != nil {
+				fmt.Printf("\nFailed to process transaction: %s\n", err)
+				continue
+			}
+			
 			// let sharding layer process transaction
-			if err := d.sharder.Handle(&dto.Transaction{
-				Payload:   tx.Payload,
-				Signature: tx.Signature,
-				AppId:     tx.AppId,
-				ShardId:   tx.ShardId,
-				Submitter: tx.Submitter,
-			}); err != nil {
-				//					fmt.Printf("\nFailed to process transaction: %s\n", err)
+			if err := d.sharder.Handle(tx); err != nil {
+//				fmt.Printf("\nFailed to process transaction: %s\n", err)
 				continue
 			}
 
@@ -219,6 +243,11 @@ func NewDltStack(conf p2p.Config, db db.Database) (*dlt, error) {
 	conf.ProtocolLength = ProtocolLength
 	if p2p, err := p2p.NewDEVp2pLayer(conf, stack.runner); err == nil {
 		stack.p2p = p2p
+	} else {
+		return nil, err
+	}
+	if endorser, err := endorsement.NewEndorser(db); err == nil {
+		stack.endorser = endorser
 	} else {
 		return nil, err
 	}
