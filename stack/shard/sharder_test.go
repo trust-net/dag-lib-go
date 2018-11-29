@@ -9,14 +9,18 @@ import (
 func TestInitiatization(t *testing.T) {
 	var s Sharder
 	var err error
-	s, err = NewSharder(db.NewInMemDatabase())
+	testDb := db.NewInMemDbProvider()
+	s, err = NewSharder(testDb)
 	if s.(*sharder) == nil || err != nil {
 		t.Errorf("Initiatization validation failed: %s, err: %s", s, err)
+	}
+	if s.(*sharder).db != testDb.DB("dlt_shard") {
+		t.Errorf("Layer does not have correct DB reference expected: %s, actual: %s", testDb.DB("dlt_shard").Name(), s.(*sharder).db.Name())
 	}
 }
 
 func TestRegistration(t *testing.T) {
-	s, _ := NewSharder(db.NewInMemDatabase())
+	s, _ := NewSharder(db.NewInMemDbProvider())
 	// register an app
 	txHandler := func(tx *dto.Transaction) error { return nil }
 
@@ -34,7 +38,7 @@ func TestRegistration(t *testing.T) {
 }
 
 func TestUnregistration(t *testing.T) {
-	s, _ := NewSharder(db.NewInMemDatabase())
+	s, _ := NewSharder(db.NewInMemDbProvider())
 	// register an app
 	txHandler := func(tx *dto.Transaction) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
@@ -54,7 +58,7 @@ func TestUnregistration(t *testing.T) {
 }
 
 func TestHandlerUnregistered(t *testing.T) {
-	s, _ := NewSharder(db.NewInMemDatabase())
+	s, _ := NewSharder(db.NewInMemDbProvider())
 	// send a mock transaction to sharder with no app registered
 	if err := s.Handle(&dto.Transaction{
 		ShardId: []byte("test shard"),
@@ -64,8 +68,7 @@ func TestHandlerUnregistered(t *testing.T) {
 }
 
 func TestHandlerRegistered(t *testing.T) {
-	s, _ := NewSharder(db.NewInMemDatabase())
-
+	s, _ := NewSharder(db.NewInMemDbProvider())
 	// register an app
 	called := false
 	txHandler := func(tx *dto.Transaction) error { called = true; return nil }
@@ -85,7 +88,7 @@ func TestHandlerRegistered(t *testing.T) {
 }
 
 func TestHandlerAppFiltering(t *testing.T) {
-	s, _ := NewSharder(db.NewInMemDatabase())
+	s, _ := NewSharder(db.NewInMemDbProvider())
 
 	// register an app
 	called := false
@@ -106,7 +109,7 @@ func TestHandlerAppFiltering(t *testing.T) {
 }
 
 func TestHandlerTransactionValidation(t *testing.T) {
-	s, _ := NewSharder(db.NewInMemDatabase())
+	s, _ := NewSharder(db.NewInMemDbProvider())
 
 	// register an app
 	called := false

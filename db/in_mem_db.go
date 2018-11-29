@@ -11,11 +11,33 @@ import (
 type inMemDb struct {
 	mdb  map[string][]byte
 	lock sync.RWMutex
+	name string
 }
 
-func NewInMemDatabase() *inMemDb {
+func NewInMemDatabase(name string) *inMemDb {
 	return &inMemDb{
 		mdb: make(map[string][]byte),
+		name: name,
+	}
+}
+
+type inMemDbProvider struct {
+	repos map[string] *inMemDb
+}
+
+func NewInMemDbProvider() *inMemDbProvider {
+	return &inMemDbProvider{
+		repos: make(map[string] *inMemDb),
+	}
+}
+
+func (p *inMemDbProvider) DB(ns string) Database {
+	if db, exists := p.repos[ns]; exists {
+		return db
+	} else {
+		db = NewInMemDatabase(ns)
+		p.repos[ns] = db
+		return db
 	}
 }
 
@@ -48,6 +70,12 @@ func (db *inMemDb) GetAll() [][]byte {
 	return values
 }
 
+func (db *inMemDb) Flush() {
+	db.lock.Lock()
+	defer db.lock.Unlock()
+	db.mdb = make(map[string][]byte)
+}
+
 func (db *inMemDb) Has(key []byte) (bool, error) {
 	db.lock.Lock()
 	defer db.lock.Unlock()
@@ -64,4 +92,8 @@ func (db *inMemDb) Delete(key []byte) error {
 
 func (db *inMemDb) Close() error {
 	return nil
+}
+
+func (db *inMemDb) Name() string {
+	return db.name
 }

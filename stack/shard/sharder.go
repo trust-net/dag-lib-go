@@ -50,8 +50,8 @@ func (s *sharder) Handle(tx *dto.Transaction) error {
 
 }
 
-func NewSharder(db db.Database) (*sharder, error) {
+func NewSharder(dbp db.DbProvider) (*sharder, error) {
 	return &sharder{
-		db: db,
+		db: dbp.DB("dlt_shard"),
 	}, nil
 }

@@ -149,7 +149,7 @@ func (d *dlt) listener(peer p2p.Peer) error {
 			// deserialize the transaction message from payload
 			tx := &dto.Transaction{}
 			if err := msg.Decode(tx); err != nil {
-				//					fmt.Printf("\nFailed to decode message: %s\n", err)
+				fmt.Printf("\nFailed to decode message: %s\n", err)
 				return err
 			}
 
@@ -170,13 +170,13 @@ func (d *dlt) listener(peer p2p.Peer) error {
 
 			// send transaction to endorsing layer for handling
 			if err := d.endorser.Handle(tx); err != nil {
-				fmt.Printf("\nFailed to process transaction: %s\n", err)
+				// fmt.Printf("\nFailed to endorse transaction: %s\n", err)
 				continue
 			}
 
 			// let sharding layer process transaction
 			if err := d.sharder.Handle(tx); err != nil {
-				//				fmt.Printf("\nFailed to process transaction: %s\n", err)
+				// fmt.Printf("\nFailed to shard transaction: %s\n", err)
 				continue
 			}
 
@@ -228,9 +228,9 @@ func (d *dlt) isSeen(msgId []byte) bool {
 	}
 }
 
-func NewDltStack(conf p2p.Config, db db.Database) (*dlt, error) {
+func NewDltStack(conf p2p.Config, dbp db.DbProvider) (*dlt, error) {
 	stack := &dlt{
-		db:   db,
+		db:   dbp.DB("dlt_stack"),
 		seen: common.NewSet(),
 	}
 	// update p2p.Config with protocol name, version and message count based on protocol specs
@@ -242,12 +242,12 @@ func NewDltStack(conf p2p.Config, db db.Database) (*dlt, error) {
 	} else {
 		return nil, err
 	}
-	if endorser, err := endorsement.NewEndorser(db); err == nil {
+	if endorser, err := endorsement.NewEndorser(dbp); err == nil {
 		stack.endorser = endorser
 	} else {
 		return nil, err
 	}
-	if sharder, err := shard.NewSharder(db); err == nil {
+	if sharder, err := shard.NewSharder(dbp); err == nil {
 		stack.sharder = sharder
 	} else {
 		return nil, err

@@ -12,13 +12,13 @@ import (
 func TestInitiatization(t *testing.T) {
 	var stack DLT
 	var err error
-	testDb := db.NewInMemDatabase()
+	testDb := db.NewInMemDbProvider()
 	stack, err = NewDltStack(p2p.TestConfig(), testDb)
 	if stack.(*dlt) == nil || err != nil {
 		t.Errorf("Initiatization validation failed, c: %s, err: %s", stack, err)
 	}
-	if stack.(*dlt).db != testDb {
-		t.Errorf("Stack does not have correct DB reference expected: %s, actual: %s", testDb, stack.(*dlt).db)
+	if stack.(*dlt).db != testDb.DB("dlt_stack") {
+		t.Errorf("Stack does not have correct DB reference expected: %s, actual: %s", testDb.DB("dlt_stack").Name(), stack.(*dlt).db.Name())
 	}
 	if len(stack.(*dlt).p2p.Self()) == 0 {
 		t.Errorf("Stack does not have correct p2p layer")
@@ -33,7 +33,7 @@ func TestInitiatization(t *testing.T) {
 
 // register application
 func TestRegister(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
 	cbCalled := false
 	txHandler := func(tx *dto.Transaction) error { cbCalled = true; return nil }
@@ -77,7 +77,7 @@ func TestRegister(t *testing.T) {
 
 // replay failure during register application
 func TestRegisterReplayFailure(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
 	txHandler := func(tx *dto.Transaction) error { return errors.New("forced failure") }
 
@@ -105,7 +105,7 @@ func TestRegisterReplayFailure(t *testing.T) {
 
 // attempt to register app when already registered
 func TestPreRegistered(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := AppConfig{}
 	txHandler := func(tx *dto.Transaction) error { return nil }
 
@@ -139,7 +139,7 @@ func TestPreRegistered(t *testing.T) {
 
 // unregister a previously registered application
 func TestUnRegister(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	txHandler := func(tx *dto.Transaction) error { return nil }
 
 	// inject mock sharder into stack
@@ -170,7 +170,7 @@ func TestUnRegister(t *testing.T) {
 
 // try submitting a transaction without application being registered first
 func TestSubmitUnregistered(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	// inject mock endorser into stack
 	endorser := NewMockEndorser()
 	stack.endorser = endorser
@@ -186,7 +186,7 @@ func TestSubmitUnregistered(t *testing.T) {
 
 // try submitting a transaction with nil/missing values
 func TestSubmitNilValues(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
 	txHandler := func(tx *dto.Transaction) error { return nil }
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
@@ -223,7 +223,7 @@ func TestSubmitNilValues(t *testing.T) {
 
 // try submitting a transaction with fake app ID, it should fail
 func TestSubmitAppIdNoMatch(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
 	txHandler := func(tx *dto.Transaction) error { return nil }
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
@@ -234,7 +234,7 @@ func TestSubmitAppIdNoMatch(t *testing.T) {
 
 // transaction submission, happy path
 func TestSubmit(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	// inject mock endorser into stack
 	endorser := NewMockEndorser()
 	stack.endorser = endorser
@@ -268,7 +268,7 @@ func TestSubmit(t *testing.T) {
 
 // transaction submission validation of fields
 func TestSubmitValidation(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	app := TestAppConfig()
@@ -290,7 +290,7 @@ func TestSubmitValidation(t *testing.T) {
 
 // start of controller, happy path
 func TestStart(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	if err := stack.Start(); err != nil || !p2p.IsStarted {
@@ -303,7 +303,7 @@ func TestStart(t *testing.T) {
 
 // stop of controller, happy path
 func TestStop(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	stack.Stop()
@@ -315,7 +315,7 @@ func TestStop(t *testing.T) {
 // peer connection handshake, happy path
 func TestPeerHandshake(t *testing.T) {
 	// create an instance of stack controller
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 
 	// build a mock peer
 	mockP2pPeer := p2p.TestMockPeer("test peer")
@@ -336,7 +336,7 @@ func TestPeerHandshake(t *testing.T) {
 // statck controller listener with no app registered, happy path
 func TestPeerListenerNoApp(t *testing.T) {
 	// create an instance of stack controller
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 
 	// inject mock p2p module into stack
 	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
@@ -397,7 +397,7 @@ func TestPeerListenerNoApp(t *testing.T) {
 // statck controller listener with a previously seen message
 func TestPeerListenerSeenMessage(t *testing.T) {
 	// create an instance of stack controller
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 
 	// inject mock p2p module into stack
 	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
@@ -454,7 +454,7 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 // rejected by application's transaction handler
 func TestAppCallbackTxRejected(t *testing.T) {
 	// create an instance of stack controller
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 
 	// inject mock p2p module into stack
 	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
@@ -506,7 +506,7 @@ func TestAppCallbackTxRejected(t *testing.T) {
 // DLT stack controller's transaction callback wrapper between sharder and application
 func TestStackTxHandlerWrapper(t *testing.T) {
 	// create an instance of stack controller
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 
 	// inject mock p2p module into stack
 	stack.p2p = p2p.TestP2PLayer("mock p2p")
@@ -562,7 +562,7 @@ func TestStackTxHandlerWrapper(t *testing.T) {
 // (transaction message, shutdown)
 func TestStackRunner(t *testing.T) {
 	// create an instance of stack controller
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 
 	// inject mock p2p module into stack
 	stack.p2p = p2p.TestP2PLayer("mock p2p")

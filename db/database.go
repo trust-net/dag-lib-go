@@ -11,4 +11,9 @@ type Database interface {
 	Has(key []byte) (bool, error)
 	Delete(key []byte) error
 	Close() error
+	Name() string
+}
+
+type DbProvider interface {
+	DB(namespace string) Database
 }

@@ -30,7 +30,7 @@ var key *ecdsa.PrivateKey
 
 var submitter []byte
 
-var myDb db.Database
+var myDb = db.NewInMemDatabase("countr_app")
 
 type testTx struct {
 	Op     string
@@ -246,6 +246,15 @@ func cli(dlt stack.DLT) error {
 						} else {
 							cmdPrompt = "<" + name + ">: "
 						}
+					case "leave":
+						for wordScanner.Scan() {
+							continue
+						}
+						if err := dlt.Unregister(); err != nil {
+							fmt.Printf("Error during un-registering app: %s\n", err)
+						}
+						myDb.Flush()
+						cmdPrompt = "<headless>: "
 					default:
 						fmt.Printf("Unknown Command: %s", cmd)
 						for wordScanner.Scan() {
@@ -294,8 +303,7 @@ func main() {
 	submitter = crypto.FromECDSAPub(&key.PublicKey)
 
 	// instantiate the DLT stack
-	myDb = db.NewInMemDatabase()
-	if dlt, err := stack.NewDltStack(config, myDb); err != nil {
+	if dlt, err := stack.NewDltStack(config, db.NewInMemDbProvider()); err != nil {
 		fmt.Printf("Failed to create DLT stack: %s", err)
 	} else if err = cli(dlt); err != nil {
 		fmt.Printf("Error in CLI: %s", err)

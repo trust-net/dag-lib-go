@@ -10,14 +10,18 @@ import (
 func TestInitiatization(t *testing.T) {
 	var e Endorser
 	var err error
-	e, err = NewEndorser(db.NewInMemDatabase())
+	testDb := db.NewInMemDbProvider()
+	e, err = NewEndorser(testDb)
 	if e.(*endorser) == nil || err != nil {
 		t.Errorf("Initiatization validation failed, c: %s, err: %s", e, err)
+	}
+	if e.(*endorser).db != testDb.DB("dlt_smithy") {
+		t.Errorf("Layer does not have correct DB reference expected: %s, actual: %s", testDb.DB("dlt_smithy").Name(), e.(*endorser).db.Name())
 	}
 }
 
 func TestTxHandler(t *testing.T) {
-	e, _ := NewEndorser(db.NewInMemDatabase())
+	e, _ := NewEndorser(db.NewInMemDbProvider())
 
 	// send a mock transaction to endorser
 	if err := e.Handle(dto.TestTransaction()); err != nil {
@@ -26,7 +30,7 @@ func TestTxHandler(t *testing.T) {
 }
 
 func TestTxHandlerSavesTransaction(t *testing.T) {
-	e, _ := NewEndorser(db.NewInMemDatabase())
+	e, _ := NewEndorser(db.NewInMemDbProvider())
 
 	// send a transaction to endorser
 	tx := dto.TestSignedTransaction("test payload")
@@ -39,7 +43,7 @@ func TestTxHandlerSavesTransaction(t *testing.T) {
 }
 
 func TestTxHandlerBadTransaction(t *testing.T) {
-	e, _ := NewEndorser(db.NewInMemDatabase())
+	e, _ := NewEndorser(db.NewInMemDbProvider())
 
 	// send a nil transaction to endorser
 	if err := e.Handle(nil); err == nil {
@@ -55,7 +59,7 @@ func TestTxHandlerBadTransaction(t *testing.T) {
 }
 
 func TestReplaySuccess(t *testing.T) {
-	e, _ := NewEndorser(db.NewInMemDatabase())
+	e, _ := NewEndorser(db.NewInMemDbProvider())
 
 	// send couple of network transactions to endorser
 	e.Handle(dto.TestSignedTransaction("test payload 1"))
@@ -76,7 +80,7 @@ func TestReplaySuccess(t *testing.T) {
 }
 
 func TestReplayError(t *testing.T) {
-	e, _ := NewEndorser(db.NewInMemDatabase())
+	e, _ := NewEndorser(db.NewInMemDbProvider())
 
 	// send couple of network transactions to endorser
 	e.Handle(dto.TestSignedTransaction("test payload 1"))
@@ -97,7 +101,7 @@ func TestReplayError(t *testing.T) {
 }
 
 func TestReplayNoTransactions(t *testing.T) {
-	e, _ := NewEndorser(db.NewInMemDatabase())
+	e, _ := NewEndorser(db.NewInMemDbProvider())
 
 	// request a replay of transactions
 	callCount := 0

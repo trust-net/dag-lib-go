@@ -63,8 +63,8 @@ func (e *endorser) Replay(txHandler func(tx *dto.Transaction) error) error {
 	return nil
 }
 
-func NewEndorser(db db.Database) (*endorser, error) {
+func NewEndorser(dbp db.DbProvider) (*endorser, error) {
 	return &endorser{
-		db: db,
+		db: dbp.DB("dlt_smithy"),
 	}, nil
 }
