@@ -23,3 +23,10 @@ type Transaction struct {
 func (tx *Transaction) Serialize() ([]byte, error) {
 	return common.Serialize(tx)
 }
+
+func (tx *Transaction) DeSerialize(data []byte) (error) {
+	if err := common.Deserialize(data, tx); err != nil {
+		return err
+	}
+	return nil
+}

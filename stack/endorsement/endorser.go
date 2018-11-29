@@ -11,6 +11,8 @@ import (
 type Endorser interface {
 	// Handle Transaction
 	Handle(tx *dto.Transaction) error
+	// Replay transactions for newly registered app
+	Replay(txHandler func(tx *dto.Transaction) error) error
 }
 
 type endorser struct {
@@ -42,6 +44,22 @@ func (e *endorser) Handle(tx *dto.Transaction) error {
 	// broadcast transaction
 	// ^^^ this will be done by the controller if there is no error
 
+	return nil
+}
+
+func (e *endorser) Replay(txHandler func(tx *dto.Transaction) error) error {
+	// get all transactions from DB and process each of them
+	for _, data := range e.db.GetAll() {
+		// deserialize the transaction read from DB
+		tx := &dto.Transaction{}
+		if err := tx.DeSerialize(data); err != nil {
+			return err
+		}
+		// process the transaction via callback
+		if err := txHandler(tx); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

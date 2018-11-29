@@ -21,15 +21,26 @@ func TestSignedTransaction(data string) *dto.Transaction {
 }
 
 type mockEndorser struct {
-	TxId         []byte
+	TxId            []byte
+	Tx              *dto.Transaction
 	TxHandlerCalled bool
-	HandlerReturn error
+	ReplayCalled    bool
+	HandlerReturn   error
 }
 
 func (e *mockEndorser) Handle(tx *dto.Transaction) error {
 	e.TxHandlerCalled = true
 	e.TxId = tx.Signature
+	e.Tx = tx
 	return e.HandlerReturn
+}
+
+func (e *mockEndorser) Replay(txHandler func(tx *dto.Transaction) error) error {
+	e.ReplayCalled = true
+	if e.Tx != nil {
+		return txHandler(e.Tx)
+	}
+	return nil
 }
 
 func NewMockEndorser() *mockEndorser {
@@ -54,6 +65,7 @@ func (s *mockSharder) Register(shardId []byte, txHandler func(tx *dto.Transactio
 
 func (s *mockSharder) Unregister() error {
 	s.IsRegistered = false
+	s.TxHandler = nil
 	return nil
 }
 

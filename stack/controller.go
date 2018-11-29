@@ -3,13 +3,13 @@
 package stack
 
 import (
-		"fmt"
 	"errors"
+	"fmt"
 	"github.com/trust-net/dag-lib-go/db"
+	"github.com/trust-net/dag-lib-go/stack/dto"
+	"github.com/trust-net/dag-lib-go/stack/endorsement"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/shard"
-	"github.com/trust-net/dag-lib-go/stack/endorsement"
-	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/go-trust-net/common"
 	"sync"
 )
@@ -33,7 +33,7 @@ type dlt struct {
 	db        db.Database
 	p2p       p2p.Layer
 	sharder   shard.Sharder
-	endorser	  endorsement.Endorser
+	endorser  endorsement.Endorser
 	seen      *common.Set
 	lock      sync.RWMutex
 }
@@ -58,12 +58,23 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx *dto.Trans
 
 	// register app with sharder
 	d.sharder.Register(shardId, txHandler)
+
+	// replay endorsement layer transactions to the registered app via sharder
+	if err := d.endorser.Replay(d.sharder.Handle); err != nil {
+		// unregister upon replay failure
+		d.unregister()
+		return err
+	}
 	return nil
 }
 
 func (d *dlt) Unregister() error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	return d.unregister()
+}
+
+func (d *dlt) unregister() error {
 	d.app = nil
 	d.txHandler = nil
 	return d.sharder.Unregister()
@@ -80,10 +91,8 @@ func (d *dlt) Submit(tx *dto.Transaction) error {
 	if string(tx.ShardId) != string(d.app.ShardId) {
 		return errors.New("incorrect shard id")
 	}
-	// TBD: replace below with check for TxAnchor
-//	if string(tx.AppId) != string(d.app.AppId) {
-//		return errors.New("incorrect app id")
-//	}
+	// check for TxAnchor
+	// TBD
 
 	switch {
 	case tx.Payload == nil:
@@ -93,23 +102,10 @@ func (d *dlt) Submit(tx *dto.Transaction) error {
 	case tx.Submitter == nil:
 		return errors.New("nil transaction submitter ID")
 	}
-	
-//	// WHY are we locking here???
-//	d.lock.Lock()
-//	defer d.lock.Unlock()
-
-//	// sign transaction using p2p layer
-//	// WHY?????
-//	// this signature should actually come from submitter client!!!!
-//	if signature, err := d.p2p.Sign(tx.Payload); err != nil {
-//		return err
-//	} else {
-//		tx.Signature = signature
-//	}
 
 	// send the submitted transaction to sharding layer
 	// TBD
-	
+
 	// next in line process with endorsement layer
 	// TBD: below needs to change to a different method that will check whether transaction
 	// has correct TxAnchor in the submitted transaction
@@ -171,16 +167,16 @@ func (d *dlt) listener(peer p2p.Peer) error {
 			// but, should'nt it go to endorsing layer first, to make sure its valid transaction?
 			// also, should sharding layer be invoking the application callback, or should it be invoked by controller?
 			// TBD, TBD, TBD ...
-			
+
 			// send transaction to endorsing layer for handling
 			if err := d.endorser.Handle(tx); err != nil {
 				fmt.Printf("\nFailed to process transaction: %s\n", err)
 				continue
 			}
-			
+
 			// let sharding layer process transaction
 			if err := d.sharder.Handle(tx); err != nil {
-//				fmt.Printf("\nFailed to process transaction: %s\n", err)
+				//				fmt.Printf("\nFailed to process transaction: %s\n", err)
 				continue
 			}
 

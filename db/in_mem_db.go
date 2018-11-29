@@ -6,9 +6,10 @@ import (
 	"errors"
 	"sync"
 )
+
 // in memory implementation of database (for testing etc.)
 type inMemDb struct {
-	mdb map[string][]byte
+	mdb  map[string][]byte
 	lock sync.RWMutex
 }
 
@@ -35,11 +36,23 @@ func (db *inMemDb) Get(key []byte) ([]byte, error) {
 	}
 }
 
+func (db *inMemDb) GetAll() [][]byte {
+	db.lock.Lock()
+	defer db.lock.Unlock()
+	values := make([][]byte, len(db.mdb))
+	i := 0
+	for _, value := range db.mdb {
+		values[i] = value
+		i += 1
+	}
+	return values
+}
+
 func (db *inMemDb) Has(key []byte) (bool, error) {
 	db.lock.Lock()
 	defer db.lock.Unlock()
 	_, ok := db.mdb[string(key)]
-	return  ok, nil
+	return ok, nil
 }
 
 func (db *inMemDb) Delete(key []byte) error {
@@ -49,6 +62,6 @@ func (db *inMemDb) Delete(key []byte) error {
 	return nil
 }
 
-func (db *inMemDb) Close() error{
+func (db *inMemDb) Close() error {
 	return nil
 }

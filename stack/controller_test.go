@@ -3,8 +3,8 @@ package stack
 import (
 	"errors"
 	"github.com/trust-net/dag-lib-go/db"
-	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/dto"
+	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"testing"
 )
 
@@ -35,13 +35,17 @@ func TestInitiatization(t *testing.T) {
 func TestRegister(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
 	app := TestAppConfig()
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	cbCalled := false
+	txHandler := func(tx *dto.Transaction) error { cbCalled = true; return nil }
 
 	// inject mock sharder into stack
 	sharder := NewMockSharder()
 	stack.sharder = sharder
 	// inject mock endorser into stack
-	stack.endorser = NewMockEndorser()
+	endorser := NewMockEndorser()
+	stack.endorser = endorser
+	// register a transaction with endorser
+	stack.endorser.Handle(dto.TestSignedTransaction("test payload"))
 
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
@@ -57,6 +61,45 @@ func TestRegister(t *testing.T) {
 	// we should have registered with sharder
 	if !sharder.IsRegistered || sharder.TxHandler == nil {
 		t.Errorf("DLT stack controller did not register with sharding layer")
+	}
+
+	// we should have replayed transactions
+	if !endorser.ReplayCalled {
+		t.Errorf("DLT stack controller did not replay transactions with endorser")
+	}
+
+	// replay should have called application's transaction handler
+	if !cbCalled {
+		t.Errorf("DLT stack controller replay did not callback application")
+	}
+
+}
+
+// replay failure during register application
+func TestRegisterReplayFailure(t *testing.T) {
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDatabase())
+	app := TestAppConfig()
+	txHandler := func(tx *dto.Transaction) error { return errors.New("forced failure") }
+
+	// inject mock sharder into stack
+	sharder := NewMockSharder()
+	stack.sharder = sharder
+	// inject mock endorser into stack
+	stack.endorser = NewMockEndorser()
+	// register a transaction with endorser
+	stack.endorser.Handle(dto.TestSignedTransaction("test payload"))
+
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err == nil {
+		t.Errorf("Registration did not fail upon replay error")
+	}
+
+	if stack.txHandler != nil {
+		t.Errorf("Callback methods not un-initialized correctly upon replay failure")
+	}
+
+	// we should NOT be registered with sharder
+	if sharder.IsRegistered || sharder.TxHandler != nil {
+		t.Errorf("DLT stack controller did not un-register with sharding layer upon replay failure")
 	}
 }
 
@@ -75,7 +118,8 @@ func TestPreRegistered(t *testing.T) {
 	sharder := NewMockSharder()
 	stack.sharder = sharder
 	// inject mock endorser into stack
-	stack.endorser = NewMockEndorser()
+	endorser := NewMockEndorser()
+	stack.endorser = endorser
 
 	// attempt to register app again
 	if err := stack.Register([]byte("another shard"), "another app", txHandler); err == nil {
@@ -85,6 +129,11 @@ func TestPreRegistered(t *testing.T) {
 	// we should NOT have registered with sharder
 	if sharder.IsRegistered || sharder.TxHandler != nil {
 		t.Errorf("DLT stack controller did duplicate register with sharding layer")
+	}
+
+	// we should NOT have replayed transactions
+	if endorser.ReplayCalled {
+		t.Errorf("DLT stack controller did replay even with duplicate registration")
 	}
 }
 
@@ -113,8 +162,8 @@ func TestUnRegister(t *testing.T) {
 		t.Errorf("Callback methods not cleared during unregister")
 	}
 
-	// we should have un-registered with sharder but not cleared the callback reference
-	if sharder.IsRegistered || sharder.TxHandler == nil {
+	// we should have un-registered with sharder and cleared the callback reference
+	if sharder.IsRegistered || sharder.TxHandler != nil {
 		t.Errorf("DLT stack controller did not unregister with sharding layer")
 	}
 }
@@ -164,13 +213,6 @@ func TestSubmitNilValues(t *testing.T) {
 		t.Errorf("Transaction submission did not check for signature")
 	}
 
-//	// try submitting unsigned transaction nil app ID
-//	tx = TestTransaction()
-//	tx.AppId = nil
-//	if err := stack.Submit(tx); err == nil {
-//		t.Errorf("Transaction submission did not check for app ID")
-//	}
-
 	// submitter ID needs to be non-null
 	tx = TestTransaction()
 	tx.Submitter = nil
@@ -188,11 +230,6 @@ func TestSubmitAppIdNoMatch(t *testing.T) {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
-//	tx := TestTransaction()
-//	tx.AppId = []byte("some random app ID")
-//	if err := stack.Submit(tx); err == nil {
-//		t.Errorf("Transaction submission did not validate app ID")
-//	}
 }
 
 // transaction submission, happy path
