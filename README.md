@@ -2,8 +2,10 @@
 Go library for DAG protocol
 
 ## How to use DLT stack library
+
 ### Create configuration
 Create a `p2p.Config` instance. These values can be read from a file, using the field names as specified in the `json` directive against each of them. A sample file is:
+
 ```
 {
 	"key_file": "name of file to persist private key for the node",
@@ -41,10 +43,13 @@ Once application execution completes (either due to application shutdown, or any
 
 ## Example
 An example test program that implement a distributed network counter using DLT stack library is provided under the `tests/countr/app.go`. It can be used as following:
+
 ### Build test application
+
 ```
 (cd tests/countr/; go build)
 ```
+
 ### Create config file
 Use the example mentioned above to create config files for each instance that need to be run. Please make sure:
 * port is unique in each copy
@@ -52,6 +57,7 @@ Use the example mentioned above to create config files for each instance that ne
 
 ### Run the test application
 Start each instance of the test application with its corresponding config file:
+
 ```
 ./tests/countr/countr -config config1.json
 ```
@@ -60,29 +66,45 @@ Start each instance of the test application with its corresponding config file:
 
 ### Register application shard
 Use the application's CLI to join a shard as following:
+
 ```
-<headless>: join app
+<headless>: join app1
+<app1>:
 ```
+
 > This step is optional, an instance can be run without joining any shard, as a headless node. However, on that instance no transaction can be submitted. It will simply participate in the network as a headless node.
 
 ### Send counter transaction
 Use the application's CLI to submit transactions as following:
+
 ```
-<app>: incr cntr1 
+<app1>: incr cntr1 
 adding transaction: incr cntr1 1
 
-<app>: decr cntr2
+<app1>: decr cntr2
 adding transaction: decr cntr2 1
 ```
+
 Use application's CLI to query a counter's value:
+
 ```
-<app>: countr cntr1
+<app1>: countr cntr1
      cntr1: 1
-<app>: countr cntr2
+<app1>: countr cntr2
      cntr2: -1
-<app>: countr cntr3
+<app1>: countr cntr3
      cntr3: not found
 ```
+
+### Leave/Un-register from shard
+Use the application's CLI to leave a previosuly registered shard as following:
+
+```
+<app1>: leave
+<headless>:
+```
+
+> Above will unregister the app and run node in headless node. App can re-join the same shard, or join a different shard, and will get synced with rest of the apps in that shard after it joins.
 
 ### Shutdown application
 ```
@@ -90,6 +112,12 @@ Use application's CLI to query a counter's value:
 Shutdown cleanly
 ```
 ## Release Notes
+## Iteration 3
+* app can join and leave shards dynamically (node needs to continue running since beginning, however app's registration to different shards is dynamic)
+* app: will get full sync for shard's transactions upon joining a new shard, or when it leaves then re-joins same shard
+* client: an application's transaction needs to be signed by the client when submitting to DLT stack
+* demo app: extended CLI to join/leave different shards dynamically and submit signed transactions to the DLT stack
+
 ### Iteration 2
 * different nodes can run different applications, and can even run without application (headless node)
 * shard: app transaction filtering based on shard membership, supports headless node
