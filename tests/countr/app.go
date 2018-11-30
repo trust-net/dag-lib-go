@@ -5,22 +5,32 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"crypto/ecdsa"
 	"flag"
 	"fmt"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/go-trust-net/common"
 	"os"
 	"strconv"
 	"strings"
+	"crypto/rand"
+	"crypto/sha512"
+	"github.com/ethereum/go-ethereum/crypto"
+	"math/big"
 )
 
 var cmdPrompt = "<headless>: "
 
 var shardId []byte
 
-var myDb db.Database
+var key *ecdsa.PrivateKey
+
+var submitter []byte
+
+var myDb = db.NewInMemDatabase("countr_app")
 
 type testTx struct {
 	Op     string
@@ -28,7 +38,21 @@ type testTx struct {
 	Delta  int64
 }
 
-func incrementTx(name string, delta int) *stack.Transaction {
+func sign(tx *dto.Transaction) *dto.Transaction {
+	// sign the test payload using SHA512 hash and ECDSA private key
+	type signature struct {
+		R *big.Int
+		S *big.Int
+	}
+	s := signature{}
+	hash := sha512.Sum512(tx.Payload)
+	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
+	tx.Signature, _ = common.Serialize(s)
+	tx.Submitter = submitter
+	return tx
+}
+
+func incrementTx(name string, delta int) *dto.Transaction {
 	applyDelta(name, delta)
 	tx := testTx{
 		Op:     "incr",
@@ -36,14 +60,14 @@ func incrementTx(name string, delta int) *stack.Transaction {
 		Delta:  int64(delta),
 	}
 	txPayload, _ := common.Serialize(tx)
-	return &stack.Transaction{
+	return sign(&dto.Transaction{
 		Payload:   txPayload,
 		Submitter: []byte("countr CLI"),
 		ShardId:   shardId,
-	}
+	})
 }
 
-func decrementTx(name string, delta int) *stack.Transaction {
+func decrementTx(name string, delta int) *dto.Transaction {
 	applyDelta(name, -delta)
 	tx := testTx{
 		Op:     "decr",
@@ -51,11 +75,11 @@ func decrementTx(name string, delta int) *stack.Transaction {
 		Delta:  int64(delta),
 	}
 	txPayload, _ := common.Serialize(tx)
-	return &stack.Transaction{
+	return sign(&dto.Transaction{
 		Payload:   txPayload,
 		Submitter: []byte("countr CLI"),
 		ShardId:   shardId,
-	}
+	})
 }
 
 type op struct {
@@ -118,7 +142,7 @@ func applyDelta(name string, delta int) int64 {
 	return last
 }
 
-func txHandler(tx *stack.Transaction) error {
+func txHandler(tx *dto.Transaction) error {
 	fmt.Printf("\n")
 	op := testTx{}
 	if err := common.Deserialize(tx.Payload, &op); err != nil {
@@ -222,6 +246,15 @@ func cli(dlt stack.DLT) error {
 						} else {
 							cmdPrompt = "<" + name + ">: "
 						}
+					case "leave":
+						for wordScanner.Scan() {
+							continue
+						}
+						if err := dlt.Unregister(); err != nil {
+							fmt.Printf("Error during un-registering app: %s\n", err)
+						}
+						myDb.Flush()
+						cmdPrompt = "<headless>: "
 					default:
 						fmt.Printf("Unknown Command: %s", cmd)
 						for wordScanner.Scan() {
@@ -264,10 +297,13 @@ func main() {
 		fmt.Printf("Failed to read config file: %s\n", err)
 		return
 	}
+	
+	// create a new ECDSA key for submitter client
+	key, _ = crypto.GenerateKey()
+	submitter = crypto.FromECDSAPub(&key.PublicKey)
 
 	// instantiate the DLT stack
-	myDb = db.NewInMemDatabase()
-	if dlt, err := stack.NewDltStack(config, myDb); err != nil {
+	if dlt, err := stack.NewDltStack(config, db.NewInMemDbProvider()); err != nil {
 		fmt.Printf("Failed to create DLT stack: %s", err)
 	} else if err = cli(dlt); err != nil {
 		fmt.Printf("Error in CLI: %s", err)

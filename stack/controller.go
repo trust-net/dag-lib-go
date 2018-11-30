@@ -3,9 +3,11 @@
 package stack
 
 import (
-	//	"fmt"
 	"errors"
+	"fmt"
 	"github.com/trust-net/dag-lib-go/db"
+	"github.com/trust-net/dag-lib-go/stack/dto"
+	"github.com/trust-net/dag-lib-go/stack/endorsement"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/shard"
 	"github.com/trust-net/go-trust-net/common"
@@ -14,11 +16,11 @@ import (
 
 type DLT interface {
 	// register application shard with the DLT stack
-	Register(shardId []byte, name string, txHandler func(tx *Transaction) error) error
+	Register(shardId []byte, name string, txHandler func(tx *dto.Transaction) error) error
 	// unregister application shard from DLT stack
 	Unregister() error
 	// submit a transaction to the network
-	Submit(tx *Transaction) error
+	Submit(tx *dto.Transaction) error
 	// start the controller
 	Start() error
 	// stop the controller
@@ -27,15 +29,16 @@ type DLT interface {
 
 type dlt struct {
 	app       *AppConfig
-	txHandler func(tx *Transaction) error
+	txHandler func(tx *dto.Transaction) error
 	db        db.Database
 	p2p       p2p.Layer
 	sharder   shard.Sharder
+	endorser  endorsement.Endorser
 	seen      *common.Set
 	lock      sync.RWMutex
 }
 
-func (d *dlt) Register(shardId []byte, name string, txHandler func(tx *Transaction) error) error {
+func (d *dlt) Register(shardId []byte, name string, txHandler func(tx *dto.Transaction) error) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.app != nil {
@@ -46,23 +49,38 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx *Transacti
 		Name:    name,
 	}
 	// app's ID need to be same as p2p node's ID
+	// WHY DO WE NEED APP ID??? It will not get included in Tx Signature from submitter client
+	// (since submitter may want to submit same transaction with multiple app instances) -- may be we should
+	// only have shard Id in the transaction
+	// ACTUALLY, this will be the Anchor (which will include app ID from DLT stack)
 	d.app.AppId = d.p2p.Id()
 	d.txHandler = txHandler
 
 	// register app with sharder
-	d.sharder.Register(shardId, d.txHandlerCb)
+	d.sharder.Register(shardId, txHandler)
+
+	// replay endorsement layer transactions to the registered app via sharder
+	if err := d.endorser.Replay(d.sharder.Handle); err != nil {
+		// unregister upon replay failure
+		d.unregister()
+		return err
+	}
 	return nil
 }
 
 func (d *dlt) Unregister() error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	return d.unregister()
+}
+
+func (d *dlt) unregister() error {
 	d.app = nil
 	d.txHandler = nil
 	return d.sharder.Unregister()
 }
 
-func (d *dlt) Submit(tx *Transaction) error {
+func (d *dlt) Submit(tx *dto.Transaction) error {
 	if d.app == nil {
 		return errors.New("app not registered")
 	}
@@ -71,19 +89,10 @@ func (d *dlt) Submit(tx *Transaction) error {
 		return errors.New("nil transaction")
 	}
 	if string(tx.ShardId) != string(d.app.ShardId) {
-		return errors.New("missing shard id")
+		return errors.New("incorrect shard id")
 	}
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	// update transaction's app ID
-	tx.AppId = d.app.AppId
-
-	// sign transaction using p2p layer
-	if signature, err := d.p2p.Sign(tx.Payload); err != nil {
-		return err
-	} else {
-		tx.Signature = signature
-	}
+	// check for TxAnchor
+	// TBD
 
 	switch {
 	case tx.Payload == nil:
@@ -93,6 +102,18 @@ func (d *dlt) Submit(tx *Transaction) error {
 	case tx.Submitter == nil:
 		return errors.New("nil transaction submitter ID")
 	}
+
+	// send the submitted transaction to sharding layer
+	// TBD
+
+	// next in line process with endorsement layer
+	// TBD: below needs to change to a different method that will check whether transaction
+	// has correct TxAnchor in the submitted transaction
+	if err := d.endorser.Handle(tx); err != nil {
+		return err
+	}
+
+	// finally send it to p2p layer, to broadcase to others
 	return d.p2p.Broadcast(tx.Signature, TransactionMsgCode, tx)
 }
 
@@ -126,14 +147,14 @@ func (d *dlt) listener(peer p2p.Peer) error {
 
 		case TransactionMsgCode:
 			// deserialize the transaction message from payload
-			tx := &Transaction{}
+			tx := &dto.Transaction{}
 			if err := msg.Decode(tx); err != nil {
-				//					fmt.Printf("\nFailed to decode message: %s\n", err)
+				fmt.Printf("\nFailed to decode message: %s\n", err)
 				return err
 			}
 
-			// validate transaction signature
-			if !d.p2p.Verify(tx.Payload, tx.Signature, tx.AppId) {
+			// validate transaction signature using transaction submitter's ID
+			if !d.p2p.Verify(tx.Payload, tx.Signature, tx.Submitter) {
 				return errors.New("Transaction signature invalid")
 			}
 
@@ -147,15 +168,15 @@ func (d *dlt) listener(peer p2p.Peer) error {
 			// also, should sharding layer be invoking the application callback, or should it be invoked by controller?
 			// TBD, TBD, TBD ...
 
+			// send transaction to endorsing layer for handling
+			if err := d.endorser.Handle(tx); err != nil {
+				// fmt.Printf("\nFailed to endorse transaction: %s\n", err)
+				continue
+			}
+
 			// let sharding layer process transaction
-			if err := d.sharder.Handle(&shard.Transaction{
-				Payload:   tx.Payload,
-				Signature: tx.Signature,
-				AppId:     tx.AppId,
-				ShardId:   tx.ShardId,
-				Submitter: tx.Submitter,
-			}); err != nil {
-				//					fmt.Printf("\nFailed to process transaction: %s\n", err)
+			if err := d.sharder.Handle(tx); err != nil {
+				// fmt.Printf("\nFailed to shard transaction: %s\n", err)
 				continue
 			}
 
@@ -207,20 +228,9 @@ func (d *dlt) isSeen(msgId []byte) bool {
 	}
 }
 
-// a wrapper for transaction handler callback between sharding layer and application
-func (d *dlt) txHandlerCb(tx *shard.Transaction) error {
-	return d.txHandler(&Transaction{
-		Payload:   tx.Payload,
-		Signature: tx.Signature,
-		AppId:     tx.AppId,
-		ShardId:   tx.ShardId,
-		Submitter: tx.Submitter,
-	})
-}
-
-func NewDltStack(conf p2p.Config, db db.Database) (*dlt, error) {
+func NewDltStack(conf p2p.Config, dbp db.DbProvider) (*dlt, error) {
 	stack := &dlt{
-		db:   db,
+		db:   dbp.DB("dlt_stack"),
 		seen: common.NewSet(),
 	}
 	// update p2p.Config with protocol name, version and message count based on protocol specs
@@ -232,7 +242,12 @@ func NewDltStack(conf p2p.Config, db db.Database) (*dlt, error) {
 	} else {
 		return nil, err
 	}
-	if sharder, err := shard.NewSharder(db); err == nil {
+	if endorser, err := endorsement.NewEndorser(dbp); err == nil {
+		stack.endorser = endorser
+	} else {
+		return nil, err
+	}
+	if sharder, err := shard.NewSharder(dbp); err == nil {
 		stack.sharder = sharder
 	} else {
 		return nil, err

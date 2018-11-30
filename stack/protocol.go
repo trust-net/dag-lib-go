@@ -1,7 +1,6 @@
 package stack
 
 import (
-	"github.com/trust-net/dag-lib-go/stack/shard"
 )
 
 // protocol specs
@@ -37,5 +36,3 @@ type AppConfig struct {
 	// shard ID of the application (same for all nodes of application)
 	ShardId []byte
 }
-
-type Transaction shard.Transaction

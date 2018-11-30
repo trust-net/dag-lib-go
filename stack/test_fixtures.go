@@ -1,24 +1,8 @@
 package stack
 
 import (
-	"crypto/ecdsa"
-	"crypto/rand"
-	"crypto/sha512"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/trust-net/dag-lib-go/stack/shard"
-	"github.com/trust-net/go-trust-net/common"
-	"math/big"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 )
-
-func TestTransaction() *Transaction {
-	return &Transaction{
-		Payload:   []byte("test data"),
-		Signature: []byte("test signature"),
-		AppId:     []byte("test app ID"),
-		ShardId:   []byte("test shard"),
-		Submitter: []byte("test submitter"),
-	}
-}
 
 func TestAppConfig() AppConfig {
 	return AppConfig{
@@ -28,36 +12,51 @@ func TestAppConfig() AppConfig {
 	}
 }
 
-func TestSignedTransaction(data string) *Transaction {
-	tx := &Transaction{
-		Payload: []byte(data),
-		ShardId: []byte("test shard"),
-	}
+func TestTransaction() *dto.Transaction {
+	return dto.TestTransaction()
+}
 
-	// create a new ECDSA key
-	key, _ := crypto.GenerateKey()
-	tx.AppId = crypto.FromECDSAPub(&key.PublicKey)
+func TestSignedTransaction(data string) *dto.Transaction {
+	return dto.TestSignedTransaction(data)
+}
 
-	// sign the test payload using SHA512 hash and ECDSA private key
-	type signature struct {
-		R *big.Int
-		S *big.Int
+type mockEndorser struct {
+	TxId            []byte
+	Tx              *dto.Transaction
+	TxHandlerCalled bool
+	ReplayCalled    bool
+	HandlerReturn   error
+}
+
+func (e *mockEndorser) Handle(tx *dto.Transaction) error {
+	e.TxHandlerCalled = true
+	e.TxId = tx.Signature
+	e.Tx = tx
+	return e.HandlerReturn
+}
+
+func (e *mockEndorser) Replay(txHandler func(tx *dto.Transaction) error) error {
+	e.ReplayCalled = true
+	if e.Tx != nil {
+		return txHandler(e.Tx)
 	}
-	s := signature{}
-	hash := sha512.Sum512(tx.Payload)
-	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
-	tx.Signature, _ = common.Serialize(s)
-	return tx
+	return nil
+}
+
+func NewMockEndorser() *mockEndorser {
+	return &mockEndorser{
+		HandlerReturn: nil,
+	}
 }
 
 type mockSharder struct {
 	IsRegistered    bool
 	ShardId         []byte
 	TxHandlerCalled bool
-	TxHandler       func(tx *shard.Transaction) error
+	TxHandler       func(tx *dto.Transaction) error
 }
 
-func (s *mockSharder) Register(shardId []byte, txHandler func(tx *shard.Transaction) error) error {
+func (s *mockSharder) Register(shardId []byte, txHandler func(tx *dto.Transaction) error) error {
 	s.IsRegistered = true
 	s.ShardId = shardId
 	s.TxHandler = txHandler
@@ -66,10 +65,11 @@ func (s *mockSharder) Register(shardId []byte, txHandler func(tx *shard.Transact
 
 func (s *mockSharder) Unregister() error {
 	s.IsRegistered = false
+	s.TxHandler = nil
 	return nil
 }
 
-func (s *mockSharder) Handle(tx *shard.Transaction) error {
+func (s *mockSharder) Handle(tx *dto.Transaction) error {
 	s.TxHandlerCalled = true
 	if s.TxHandler != nil {
 		return s.TxHandler(tx)

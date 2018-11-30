@@ -5,39 +5,26 @@ package shard
 import (
 	"errors"
 	"github.com/trust-net/dag-lib-go/db"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 )
-
-// transaction message
-type Transaction struct {
-	// serialized transaction payload
-	Payload []byte
-	// transaction signature
-	Signature []byte
-	// transaction approver application instance ID
-	AppId []byte
-	// transaction approver application's shard ID
-	ShardId []byte
-	// transaction submitter's public ID
-	Submitter []byte
-}
 
 type Sharder interface {
 	// register application shard with the DLT stack
-	Register(shardId []byte, txHandler func(tx *Transaction) error) error
+	Register(shardId []byte, txHandler func(tx *dto.Transaction) error) error
 	// unregister application shard from DLT stack
 	Unregister() error
 	// Handle Transaction
-	Handle(tx *Transaction) error
+	Handle(tx *dto.Transaction) error
 }
 
 type sharder struct {
 	db db.Database
 
 	shardId   []byte
-	txHandler func(tx *Transaction) error
+	txHandler func(tx *dto.Transaction) error
 }
 
-func (s *sharder) Register(shardId []byte, txHandler func(tx *Transaction) error) error {
+func (s *sharder) Register(shardId []byte, txHandler func(tx *dto.Transaction) error) error {
 	s.shardId = append(shardId)
 	s.txHandler = txHandler
 	return nil
@@ -49,7 +36,7 @@ func (s *sharder) Unregister() error {
 	return nil
 }
 
-func (s *sharder) Handle(tx *Transaction) error {
+func (s *sharder) Handle(tx *dto.Transaction) error {
 	// validate transaction
 	if len(tx.ShardId) == 0 {
 		return errors.New("missing shard id in transaction")
@@ -63,8 +50,8 @@ func (s *sharder) Handle(tx *Transaction) error {
 
 }
 
-func NewSharder(db db.Database) (*sharder, error) {
+func NewSharder(dbp db.DbProvider) (*sharder, error) {
 	return &sharder{
-		db: db,
+		db: dbp.DB("dlt_shard"),
 	}, nil
 }
