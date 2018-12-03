@@ -37,7 +37,7 @@ func TestTxHandlerSavesTransaction(t *testing.T) {
 	e.Handle(tx)
 
 	// verify if transaction is saved into endorser's DB using Transaction's signature as key
-	if present, _ := e.db.Has(tx.Signature); !present {
+	if present, _ := e.db.Has(tx.Id()); !present {
 		t.Errorf("Transacton handling did not save the transaction")
 	}
 }
@@ -62,8 +62,14 @@ func TestReplaySuccess(t *testing.T) {
 	e, _ := NewEndorser(db.NewInMemDbProvider())
 
 	// send couple of network transactions to endorser
-	e.Handle(dto.TestSignedTransaction("test payload 1"))
-	e.Handle(dto.TestSignedTransaction("test payload 2"))
+	tx1 := dto.TestSignedTransaction("test payload 1")
+	tx2 := dto.TestSignedTransaction("test payload 2")
+	if err := e.Handle(tx1); err != nil {
+		t.Errorf("Failed to submit transaction 1: %s\nid: %x", err, tx1.Id())
+	}
+	if err := e.Handle(tx2); err != nil {
+		t.Errorf("Failed to submit transaction 2: %s\nid: %x", err, tx2.Id())
+	}
 
 	// request a replay of transactions
 	callCount := 0

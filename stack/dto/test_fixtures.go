@@ -9,12 +9,11 @@ import (
 	"math/big"
 )
 
-
 func TestTransaction() *Transaction {
 	return &Transaction{
 		Payload:   []byte("test data"),
 		Signature: []byte("test signature"),
-		AppId:     []byte("test app ID"),
+		NodeId:    []byte("test app ID"),
 		ShardId:   []byte("test shard"),
 		Submitter: []byte("test submitter"),
 	}
@@ -24,7 +23,7 @@ func TestSignedTransaction(data string) *Transaction {
 	tx := &Transaction{
 		Payload: []byte(data),
 		ShardId: []byte("test shard"),
-		AppId:   []byte("test app ID"),
+		NodeId:  []byte("test app ID"),
 	}
 
 	// create a new ECDSA key for submitter client

@@ -27,7 +27,7 @@ func (e *endorser) Handle(tx *dto.Transaction) error {
 	}
 
 	// check for duplicate transaction
-	if present, _ := e.db.Has(tx.Signature); present {
+	if present, _ := e.db.Has(tx.Id()); present {
 		return errors.New("duplicate transaction")
 	}
 
@@ -37,7 +37,7 @@ func (e *endorser) Handle(tx *dto.Transaction) error {
 	if data, err = tx.Serialize(); err != nil {
 		return err
 	}
-	if err = e.db.Put(tx.Signature, data); err != nil {
+	if err = e.db.Put(tx.Id(), data); err != nil {
 		return err
 	}
 

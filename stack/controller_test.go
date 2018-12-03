@@ -248,8 +248,6 @@ func TestSubmit(t *testing.T) {
 		return
 	}
 	tx := TestSignedTransaction("test payload")
-	// make sure transaction's app ID is correct
-	tx.AppId = stack.app.AppId
 	if err := stack.Submit(tx); err != nil {
 		t.Errorf("Transaction submission failed, err: %s", err)
 	}
@@ -520,8 +518,7 @@ func TestStackTxHandlerWrapper(t *testing.T) {
 		txMatch = (string(origTx.Payload) == string(tx.Payload) &&
 			string(origTx.Signature) == string(tx.Signature) &&
 			string(origTx.ShardId) == string(tx.ShardId) &&
-			string(origTx.Submitter) == string(tx.Submitter) &&
-			string(origTx.AppId) == string(tx.AppId))
+			string(origTx.Submitter) == string(tx.Submitter))
 
 		return nil
 	}
