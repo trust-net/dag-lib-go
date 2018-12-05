@@ -146,7 +146,7 @@ func txHandler(tx *dto.Transaction) error {
 	fmt.Printf("\n")
 	op := testTx{}
 	if err := common.Deserialize(tx.Payload, &op); err != nil {
-		fmt.Printf("Invalid TX from %x\n%s", tx.AppId, cmdPrompt)
+		fmt.Printf("Invalid TX from %x\n%s", tx.NodeId, cmdPrompt)
 		return err
 	}
 	fmt.Printf("TX: %s %s %d\n", op.Op, op.Target, op.Delta)

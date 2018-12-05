@@ -94,6 +94,10 @@ func (d *dlt) Submit(tx *dto.Transaction) error {
 	// check for TxAnchor
 	// TBD
 
+	// set NodeId for transaction
+	// TBD: this will be part of TxAnchor later
+	tx.NodeId = d.p2p.Id()
+
 	switch {
 	case tx.Payload == nil:
 		return errors.New("nil transaction payload")

@@ -30,7 +30,7 @@ type mockEndorser struct {
 
 func (e *mockEndorser) Handle(tx *dto.Transaction) error {
 	e.TxHandlerCalled = true
-	e.TxId = tx.Signature
+	e.TxId = tx.Id()
 	e.Tx = tx
 	return e.HandlerReturn
 }

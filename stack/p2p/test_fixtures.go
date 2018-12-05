@@ -54,6 +54,7 @@ func (m *mockMsgReadWriter) WriteMsg(p2p.Msg) error {
 func TestP2PLayer(name string) *mockP2P {
 	return &mockP2P {
 		Name: name,
+		ID: []byte("some random ID"),
 	}
 }
 

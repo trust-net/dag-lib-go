@@ -13,7 +13,7 @@ func TestTransaction() *Transaction {
 	return &Transaction{
 		Payload:   []byte("test data"),
 		Signature: []byte("test signature"),
-		NodeId:    []byte("test app ID"),
+		NodeId:    []byte("test node ID"),
 		ShardId:   []byte("test shard"),
 		Submitter: []byte("test submitter"),
 	}

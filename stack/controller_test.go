@@ -259,8 +259,15 @@ func TestSubmit(t *testing.T) {
 	if !endorser.TxHandlerCalled {
 		t.Errorf("Endorser did not get called for submission")
 	}
-	if string(endorser.TxId) != string(tx.Signature) {
+
+	// verify that endorser got the right transaction
+	if string(endorser.TxId) != string(tx.Id()) {
 		t.Errorf("Endorser transaction does not match submitted transaction")
+	}
+
+	// verify that transaction's node ID was set correctly
+	if string(tx.NodeId) != string(p2p.Id()) {
+		t.Errorf("Transaction's node ID not initialized correctly\nExpected: %x\nActual: %x", p2p.Id(), tx.NodeId)
 	}
 }
 
@@ -387,7 +394,7 @@ func TestPeerListenerNoApp(t *testing.T) {
 	if !endorser.TxHandlerCalled {
 		t.Errorf("Endorser did not get called for network transaction")
 	}
-	if string(endorser.TxId) != string(tx.Signature) {
+	if string(endorser.TxId) != string(tx.Id()) {
 		t.Errorf("Endorser transaction does not match network transaction")
 	}
 }
@@ -613,7 +620,7 @@ func TestStackRunner(t *testing.T) {
 	if !endorser.TxHandlerCalled {
 		t.Errorf("Endorser did not get called for network transaction")
 	}
-	if string(endorser.TxId) != string(tx.Signature) {
+	if string(endorser.TxId) != string(tx.Id()) {
 		t.Errorf("Endorser transaction does not match network transaction")
 	}
 
