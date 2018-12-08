@@ -1,20 +1,20 @@
 package repo
 
 import (
-    "testing"
+	"testing"
 )
 
 func TestQueueInitiatization(t *testing.T) {
 	var q Queue
 	var cq *circularQ
 	var err error
-	
+
 	if q, err = NewQueue(20); err != nil {
 		t.Errorf("Failed to instantiate: %s", err)
 	} else {
 		cq = q.(*circularQ)
 	}
-	
+
 	if cq.size != 21 {
 		t.Errorf("Incorrect initial size: %d", cq.size)
 	}
@@ -43,11 +43,11 @@ func TestPushPopOrder(t *testing.T) {
 	item, _ := q.Pop()
 	if item != "test data 1" {
 		t.Errorf("Incorrect popped item: %s", item)
-	}	
+	}
 	item, _ = q.Pop()
 	if item != "test data 2" {
 		t.Errorf("Incorrect popped item: %s", item)
-	}	
+	}
 }
 
 func TestFirstPush(t *testing.T) {
@@ -55,7 +55,7 @@ func TestFirstPush(t *testing.T) {
 	if err := q.Push("data"); err != nil {
 		t.Errorf("Failed to push: %s", err)
 	}
-	
+
 	// front stays the same
 	if q.front != 20 {
 		t.Errorf("Incorrect first push front: %d", q.front)
@@ -80,7 +80,7 @@ func TestRolloverPush(t *testing.T) {
 	if err := q.Push("data"); err != nil {
 		t.Errorf("Failed to push: %s", err)
 	}
-	
+
 	// front stays the same
 	if q.front != 15 {
 		t.Errorf("Incorrect rollover push front: %d", q.front)
@@ -101,7 +101,7 @@ func TestFullPushRollover(t *testing.T) {
 	if err := q.Push("data"); err == nil {
 		t.Errorf("Did not fail on full capacity push")
 	}
-	
+
 	// front stays the same
 	if q.front != 21 {
 		t.Errorf("Incorrect full capacity push front: %d", q.front)
@@ -122,7 +122,7 @@ func TestFullPushNormal(t *testing.T) {
 	if err := q.Push("data"); err == nil {
 		t.Errorf("Did not fail on full capacity push")
 	}
-	
+
 	// front stays the same
 	if q.front != 10 {
 		t.Errorf("Incorrect full capacity push front: %d", q.front)
@@ -134,13 +134,12 @@ func TestFullPushNormal(t *testing.T) {
 	}
 }
 
-
 func TestEmptyPop(t *testing.T) {
 	q, _ := NewQueue(20)
 	if _, err := q.Pop(); err == nil {
 		t.Errorf("Did not fail on empty pop")
 	}
-	
+
 	// front stays the same
 	if q.front != 20 {
 		t.Errorf("Incorrect first pop front: %d", q.front)
@@ -162,12 +161,12 @@ func TestRolloverPop(t *testing.T) {
 	q.back = 15
 	// set count to some value
 	q.count = 5
-	// change front to left most position, 1	
+	// change front to left most position, 1
 	q.front = 0
 	if _, err := q.Pop(); err != nil {
 		t.Errorf("Failed to pop: %s", err)
 	}
-	
+
 	// front should roll over to right most position
 	if q.front != 21 {
 		t.Errorf("Incorrect rollover pop front: %d", q.front)
@@ -193,7 +192,7 @@ func TestEmptyPopRollover(t *testing.T) {
 	if _, err := q.Pop(); err == nil {
 		t.Errorf("Did not fail on empty pop")
 	}
-	
+
 	// front stays the same
 	if q.front != 0 {
 		t.Errorf("Incorrect empty pop front: %d", q.front)
@@ -214,7 +213,7 @@ func TestEmptyPopNormal(t *testing.T) {
 	if _, err := q.Pop(); err == nil {
 		t.Errorf("Did not fail on empty pop")
 	}
-	
+
 	// front stays the same
 	if q.front != 11 {
 		t.Errorf("Incorrect empty pop front: %d", q.front)
@@ -229,27 +228,27 @@ func TestEmptyPopNormal(t *testing.T) {
 func TestFillUpAndDrain(t *testing.T) {
 	size := uint64(100)
 	q, _ := NewQueue(size)
-	
+
 	// add some small number of items, so it will roll over in the test
-	
+
 	for i := 0; i < 20; i++ {
 		q.Push("test data")
 	}
-	
+
 	// now run the fill up and drain in a loop
-	
-	for i := 0; i < 5; i ++ {
+
+	for i := 0; i < 5; i++ {
 		// fill up queue
 		for {
 			if err := q.Push("test data"); err != nil {
 				break
 			}
 		}
-		
+
 		if q.Count() != size {
 			t.Errorf("Incorrect fill up count: %d", q.Count())
 		}
-	
+
 		// drain the queue
 		for {
 			if data, err := q.Pop(); err != nil {
@@ -258,7 +257,7 @@ func TestFillUpAndDrain(t *testing.T) {
 				t.Errorf("%d: Incorrect popped value: %s", q.Count(), data)
 			}
 		}
-		
+
 		if q.Count() != 0 {
 			t.Errorf("Incorrect drained up count: %d", q.Count())
 		}

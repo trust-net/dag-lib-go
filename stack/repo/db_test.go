@@ -51,7 +51,7 @@ func TestAddTx(t *testing.T) {
 	} else if string(got_tx) != string(tx_ser) {
 		t.Errorf("Got incorrect transaction\nExpected: %x\nActual: %x", tx_ser, got_tx)
 	}
-	
+
 	// validate that shard DAG node was added for the transaction correctly
 	if dagNode, _ := repo.shardDb.Get(txId[:]); dagNode == nil {
 		t.Errorf("Did not save DAG node in shard DB")
@@ -71,7 +71,7 @@ func TestAddTxShardDagUpdate(t *testing.T) {
 	repo.AddTx(parent)
 	repo.AddTx(child1)
 	repo.AddTx(child2)
-	
+
 	// validate that shard DAG node was added for the transactions correctly
 	if parentNode := repo.GetShardDagNode(parent.Id()); parentNode == nil {
 		t.Errorf("Did not save DAG node in shard DB")
@@ -106,7 +106,7 @@ func TestAddDuplicateTx(t *testing.T) {
 func TestAddOrphanTx(t *testing.T) {
 	repo, _ := NewDltDb(db.NewInMemDbProvider())
 	tx := dto.TestSignedTransaction("test data")
-	
+
 	// make transaction orphan
 	tx.ShardSeq = [8]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02}
 	parent := []byte("some random parent")

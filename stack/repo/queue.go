@@ -1,8 +1,8 @@
 package repo
 
 import (
-	"sync"
 	"errors"
+	"sync"
 )
 
 type Queue interface {
@@ -23,8 +23,8 @@ type circularQ struct {
 
 func NewQueue(size uint64) (*circularQ, error) {
 	q := circularQ{
-		size:   size+1,
-		back:   size-1,
+		size:   size + 1,
+		back:   size - 1,
 		front:  size,
 		count:  0,
 		circle: make([]interface{}, size+2, size+2),

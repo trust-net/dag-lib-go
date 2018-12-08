@@ -26,16 +26,10 @@ type DltDb interface {
 	AddTx(tx *dto.Transaction) error
 	// delete an existing transaction from transaction history (deleting a non-tip transaction will cause errors)
 	DeleteTx(id [64]byte) error
-//	// get a DAG node based on node ID in the DAG (no entry == nil)
-//	GetDagNode(id [64]byte) *DagNode
 	// get the shard's DAG node for given transaction Id (no entry == nil)
 	GetShardDagNode(id [64]byte) *DagNode
 	// get the submitter's DAG node for given transaction Id (no entry == nil)
 	GetSubmitterDagNode(id [64]byte) *DagNode
-	// add a new DAG node into dag_table (no duplicates, no updates)
-	// Actually, below should be implicit when transaction is added
-	// AddDagNode(tx *dto.Transaction) error
-	//
 	// get list of shards seen so far based on transaction history
 	GetShards() []byte
 	// get list of submitters seen so far based on transaction history
@@ -84,22 +78,17 @@ func (d *dltDb) AddTx(tx *dto.Transaction) error {
 	if present, _ := d.txDb.Has(id[:]); present {
 		return errors.New("duplicate transaction")
 	}
-	
-//	// check for parent transaction in the shard
-//	if present, _ := d.txDb.Has(tx.ShardParent[:]); !present {
-//		return errors.New("parent transaction for shard not found")
-//	}
 
 	// save the transaction in DB
 	if err = d.txDb.Put(id[:], data); err != nil {
 		return err
 	}
 
-	// add the DAG node for the transaction to shard DAG db	
-	dagNode := DagNode {
+	// add the DAG node for the transaction to shard DAG db
+	dagNode := DagNode{
 		Parent: tx.ShardParent,
-		TxId: tx.Id(),
-		Depth: tx.ShardSeq,
+		TxId:   tx.Id(),
+		Depth:  tx.ShardSeq,
 	}
 	if err = d.saveShardDagNode(&dagNode); err != nil {
 		return err
@@ -112,7 +101,7 @@ func (d *dltDb) AddTx(tx *dto.Transaction) error {
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -136,10 +125,6 @@ func (d *dltDb) DeleteTx(id [64]byte) error {
 	}
 	return nil
 }
-
-//func (d *dltDb) GetDagNode(id [64]byte) *DagNode {
-//	return nil
-//}
 
 func (d *dltDb) GetShardDagNode(id [64]byte) *DagNode {
 	d.lock.Lock()
