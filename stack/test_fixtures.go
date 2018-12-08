@@ -1,7 +1,10 @@
 package stack
 
 import (
+	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/dto"
+	"github.com/trust-net/dag-lib-go/stack/repo"
+	"github.com/trust-net/dag-lib-go/stack/shard"
 )
 
 func TestAppConfig() AppConfig {
@@ -17,11 +20,12 @@ func TestTransaction() *dto.Transaction {
 }
 
 func TestSignedTransaction(data string) *dto.Transaction {
-	return dto.TestSignedTransaction(data)
+	tx, _ := shard.SignedShardTransaction(data)
+	return tx
 }
 
 type mockEndorser struct {
-	TxId            []byte
+	TxId            [64]byte
 	Tx              *dto.Transaction
 	TxHandlerCalled bool
 	ReplayCalled    bool
@@ -54,30 +58,29 @@ type mockSharder struct {
 	ShardId         []byte
 	TxHandlerCalled bool
 	TxHandler       func(tx *dto.Transaction) error
+	orig            shard.Sharder
 }
 
 func (s *mockSharder) Register(shardId []byte, txHandler func(tx *dto.Transaction) error) error {
 	s.IsRegistered = true
 	s.ShardId = shardId
 	s.TxHandler = txHandler
-	return nil
+	return s.orig.Register(shardId, txHandler)
 }
 
 func (s *mockSharder) Unregister() error {
 	s.IsRegistered = false
 	s.TxHandler = nil
-	return nil
+	return s.orig.Unregister()
 }
 
 func (s *mockSharder) Handle(tx *dto.Transaction) error {
 	s.TxHandlerCalled = true
-	if s.TxHandler != nil {
-		return s.TxHandler(tx)
-	} else {
-		return nil
-	}
+	return s.orig.Handle(tx)
 }
 
 func NewMockSharder() *mockSharder {
-	return &mockSharder{}
+	db, _ := repo.NewDltDb(db.NewInMemDbProvider())
+	orig, _ := shard.NewSharder(db)
+	return &mockSharder{orig: orig}
 }

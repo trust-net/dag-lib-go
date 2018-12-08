@@ -21,17 +21,17 @@ type Transaction struct {
 	// transaction approver application's shard ID
 	ShardId []byte
 	// sequence of this transaction within the shard
-	ShardSeq []byte
+	ShardSeq [8]byte
 	// parent transaction within the shard
-	ShardParent []byte
+	ShardParent [64]byte
 	// transaction submitter's public ID
 	Submitter []byte
 }
 
 // compute SHA512 hash or return from cache
-func (tx *Transaction) Id() []byte {
+func (tx *Transaction) Id() [64]byte {
 	if tx.idDone {
-		return tx.id[:]
+		return tx.id
 	}
 	data := make([]byte, 0)
 	// signature should be sufficient to capture payload and submitter ID
@@ -39,11 +39,11 @@ func (tx *Transaction) Id() []byte {
 	// append shard ID etc
 	// TBD: replace with TxAnchor when available
 	data = append(data, tx.ShardId...)
-	data = append(data, tx.ShardSeq...)
-	data = append(data, tx.ShardParent...)
+	data = append(data, tx.ShardSeq[:]...)
+	data = append(data, tx.ShardParent[:]...)
 	tx.id = sha512.Sum512(data)
 	tx.idDone = true
-	return tx.id[:]
+	return tx.id
 }
 
 func (tx *Transaction) Serialize() ([]byte, error) {

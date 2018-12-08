@@ -10,6 +10,7 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/endorsement"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/shard"
+	"github.com/trust-net/dag-lib-go/stack/repo"
 	"github.com/trust-net/go-trust-net/common"
 	"sync"
 )
@@ -30,7 +31,7 @@ type DLT interface {
 type dlt struct {
 	app       *AppConfig
 	txHandler func(tx *dto.Transaction) error
-	db        db.Database
+	db        repo.DltDb
 	p2p       p2p.Layer
 	sharder   shard.Sharder
 	endorser  endorsement.Endorser
@@ -59,12 +60,13 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx *dto.Trans
 	// register app with sharder
 	d.sharder.Register(shardId, txHandler)
 
-	// replay endorsement layer transactions to the registered app via sharder
-	if err := d.endorser.Replay(d.sharder.Handle); err != nil {
-		// unregister upon replay failure
-		d.unregister()
-		return err
-	}
+//	// replay endorsement layer transactions to the registered app via sharder
+//	if err := d.endorser.Replay(d.sharder.Handle); err != nil {
+//		// unregister upon replay failure
+//		d.unregister()
+//		return err
+//	}
+// TBD: reply will actually happen at sharder when app registers, it already has transactions
 	return nil
 }
 
@@ -233,8 +235,13 @@ func (d *dlt) isSeen(msgId []byte) bool {
 }
 
 func NewDltStack(conf p2p.Config, dbp db.DbProvider) (*dlt, error) {
+	var db repo.DltDb
+	var err error
+	if db, err = repo.NewDltDb(dbp); err != nil {
+		return nil, err
+	} 
 	stack := &dlt{
-		db:   dbp.DB("dlt_stack"),
+		db:   db,
 		seen: common.NewSet(),
 	}
 	// update p2p.Config with protocol name, version and message count based on protocol specs
@@ -246,12 +253,12 @@ func NewDltStack(conf p2p.Config, dbp db.DbProvider) (*dlt, error) {
 	} else {
 		return nil, err
 	}
-	if endorser, err := endorsement.NewEndorser(dbp); err == nil {
+	if endorser, err := endorsement.NewEndorser(db); err == nil {
 		stack.endorser = endorser
 	} else {
 		return nil, err
 	}
-	if sharder, err := shard.NewSharder(dbp); err == nil {
+	if sharder, err := shard.NewSharder(db); err == nil {
 		stack.sharder = sharder
 	} else {
 		return nil, err
