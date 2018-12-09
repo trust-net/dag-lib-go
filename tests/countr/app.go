@@ -4,22 +4,22 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"crypto/ecdsa"
+	"crypto/rand"
+	"crypto/sha512"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/go-trust-net/common"
+	"math/big"
 	"os"
 	"strconv"
 	"strings"
-	"crypto/rand"
-	"crypto/sha512"
-	"github.com/ethereum/go-ethereum/crypto"
-	"math/big"
 )
 
 var cmdPrompt = "<headless>: "
@@ -52,7 +52,10 @@ func sign(tx *dto.Transaction) *dto.Transaction {
 	return tx
 }
 
-func incrementTx(name string, delta int) *dto.Transaction {
+func incrementTx(a *dto.Anchor, name string, delta int) *dto.Transaction {
+	if a == nil {
+		return nil
+	}
 	applyDelta(name, delta)
 	tx := testTx{
 		Op:     "incr",
@@ -61,13 +64,18 @@ func incrementTx(name string, delta int) *dto.Transaction {
 	}
 	txPayload, _ := common.Serialize(tx)
 	return sign(&dto.Transaction{
-		Payload:   txPayload,
-		Submitter: []byte("countr CLI"),
-		ShardId:   shardId,
+		Payload:     txPayload,
+		Submitter:   []byte("countr CLI"),
+		ShardId:     a.ShardId,
+		ShardSeq:    a.ShardSeq,
+		ShardParent: a.ShardParent,
 	})
 }
 
-func decrementTx(name string, delta int) *dto.Transaction {
+func decrementTx(a *dto.Anchor, name string, delta int) *dto.Transaction {
+	if a == nil {
+		return nil
+	}
 	applyDelta(name, -delta)
 	tx := testTx{
 		Op:     "decr",
@@ -76,9 +84,11 @@ func decrementTx(name string, delta int) *dto.Transaction {
 	}
 	txPayload, _ := common.Serialize(tx)
 	return sign(&dto.Transaction{
-		Payload:   txPayload,
-		Submitter: []byte("countr CLI"),
-		ShardId:   shardId,
+		Payload:     txPayload,
+		Submitter:   []byte("countr CLI"),
+		ShardId:     a.ShardId,
+		ShardSeq:    a.ShardSeq,
+		ShardParent: a.ShardParent,
 	})
 }
 
@@ -214,7 +224,7 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: incr %s %d\n", op.name, op.delta)
-								if err := dlt.Submit(incrementTx(op.name, op.delta)); err != nil {
+								if err := dlt.Submit(incrementTx(dlt.Anchor(), op.name, op.delta)); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
 								}
 							}
@@ -226,10 +236,22 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: decr %s %d\n", op.name, op.delta)
-								if err := dlt.Submit(decrementTx(op.name, op.delta)); err != nil {
+								if err := dlt.Submit(decrementTx(dlt.Anchor(), op.name, op.delta)); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
 								}
 							}
+						}
+					case "info":
+						for wordScanner.Scan() {
+							continue
+						}
+						if a := dlt.Anchor(); a == nil {
+							fmt.Printf("failed to get any info...\n")
+						} else {
+							fmt.Printf("ShardId: %s\n", a.ShardId)
+							fmt.Printf("Next Seq: %d\n", a.ShardSeq)
+							fmt.Printf("Parent: %x\n", a.ShardParent)
+							fmt.Printf("NodeId: %x\n", a.NodeId)
 						}
 					case "join":
 						if !wordScanner.Scan() {
@@ -297,7 +319,7 @@ func main() {
 		fmt.Printf("Failed to read config file: %s\n", err)
 		return
 	}
-	
+
 	// create a new ECDSA key for submitter client
 	key, _ = crypto.GenerateKey()
 	submitter = crypto.FromECDSAPub(&key.PublicKey)

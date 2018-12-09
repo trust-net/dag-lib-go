@@ -8,13 +8,17 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/repo"
 )
 
-var ShardSeqOne = [8]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
+var ShardSeqOne = uint64(0x01)
 
 type Sharder interface {
 	// register application shard with the DLT stack
 	Register(shardId []byte, txHandler func(tx *dto.Transaction) error) error
 	// unregister application shard from DLT stack
 	Unregister() error
+	// populate a transaction Anchor
+	Anchor(a *dto.Anchor) error
+	// Approve submitted transaction
+	Approve(tx *dto.Transaction) error
 	// Handle Transaction
 	Handle(tx *dto.Transaction) error
 }
@@ -46,7 +50,10 @@ func (s *sharder) Register(shardId []byte, txHandler func(tx *dto.Transaction) e
 		// unknown/new shard, save the genesis transaction
 		if err := s.db.AddTx(s.genesisTx); err != nil {
 			return err
+		} else if err = s.db.UpdateShard(s.genesisTx); err != nil {
+			return err
 		}
+
 		// fmt.Printf("Registering genesis for shard: %x\n", shardId)
 	} else {
 		// fmt.Printf("Known shard Id: %x\n", shardId)
@@ -99,6 +106,78 @@ func (s *sharder) Unregister() error {
 	return nil
 }
 
+func numeric(id []byte) uint64 {
+	num := uint64(0)
+	for _, b := range id {
+		num += uint64(b)
+	}
+	return num
+}
+
+func (s *sharder) Anchor(a *dto.Anchor) error {
+	// TBD: lock and unlock
+
+	// make sure app is registered
+	if s.shardId == nil {
+		return errors.New("app not registered")
+	}
+
+	// assign shard ID of registered app
+	a.ShardId = s.shardId
+
+	// get tips of the shard's DAG
+	tips := s.db.ShardTips(s.shardId)
+
+	// find the deepest node as parent
+	parent := s.db.GetShardDagNode(tips[0])
+	for i := 1; i < len(tips); i += 1 {
+		node := s.db.GetShardDagNode(tips[i])
+		if parent.Depth < node.Depth {
+			parent = node
+		} else if parent.Depth == node.Depth && numeric(parent.TxId[:]) < numeric(node.TxId[:]) {
+			parent = node
+		}
+	}
+
+	// assign shard DAG's parent node ID to anchor
+	a.ShardParent = parent.TxId
+
+	// assign sequence 1 greater than DAG's parent node
+	a.ShardSeq = parent.Depth + 1
+
+	return nil
+}
+
+func (s *sharder) Approve(tx *dto.Transaction) error {
+	// make sure app is registered
+	if s.shardId == nil {
+		return errors.New("app not registered")
+	}
+
+	// validate transaction
+	if len(tx.ShardId) == 0 {
+		return errors.New("missing shard id in transaction")
+	}
+
+	// TBD: lock and unlock
+
+	// check if parent for the transaction is known
+	if parent := s.db.GetShardDagNode(tx.ShardParent); parent == nil {
+		return errors.New("parent transaction unknown for shard")
+	} else {
+		// should we add transaction here, or should we expect that transaction will be added by lower layer?
+		// for submissions, we'll add transaction here
+		if err := s.db.AddTx(tx); err != nil {
+			return err
+		}
+		// update the shard's DAG and Tips
+		if err := s.db.UpdateShard(tx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *sharder) Handle(tx *dto.Transaction) error {
 	// validate transaction
 	if len(tx.ShardId) == 0 {
@@ -115,7 +194,11 @@ func (s *sharder) Handle(tx *dto.Transaction) error {
 			return errors.New("genesis mismatch for 1st shard transaction")
 		}
 		// this is very first network transaction for a new shard, register the shard's genesis
-		s.db.AddTx(genesis)
+		if err := s.db.AddTx(genesis); err != nil {
+			// ignore, there is already a genesis transaction in DB
+		} else if err = s.db.UpdateShard(genesis); err != nil {
+			return err
+		}
 		// fmt.Printf("Handler genesis for shard: %x\n", genesis.ShardId)
 	}
 
@@ -123,11 +206,13 @@ func (s *sharder) Handle(tx *dto.Transaction) error {
 	if parent := s.db.GetShardDagNode(tx.ShardParent); parent == nil {
 		return errors.New("parent transaction unknown for shard")
 	} else {
-		// add the transaction as parent's child
-		// TBD
 		// should we add transaction here, or should we expect that transaction has already been added by lower layer?
-		// for now will assume that we'll add transaction here
-		s.db.AddTx(tx)
+		// for network transactions we'll assume that it has already been added by endorsement layer
+
+		// update shard's DAG and Tips in DB
+		if err := s.db.UpdateShard(tx); err != nil {
+			return err
+		}
 	}
 
 	// if an app is registered, call app's transaction handler

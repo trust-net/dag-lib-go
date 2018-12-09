@@ -40,15 +40,18 @@ func TestRegister(t *testing.T) {
 	txHandler := func(tx *dto.Transaction) error { cbCalled = true; return nil }
 
 	// inject mock sharder into stack
-	sharder := NewMockSharder()
+	sharder := NewMockSharder(stack.db)
 	stack.sharder = sharder
 	// inject mock endorser into stack
-	endorser := NewMockEndorser()
+	endorser := NewMockEndorser(stack.db)
 	stack.endorser = endorser
-	// register a transaction with sharder
+	// register a network transaction with sharder
 	tx, _ := shard.SignedShardTransaction("test payload")
+	if err := stack.endorser.Handle(tx); err != nil {
+		t.Errorf("Endorser network transaction failed, err: %s", err)
+	}
 	if err := stack.sharder.Handle(tx); err != nil {
-		t.Errorf("Preemptive network transaction failed, err: %s", err)
+		t.Errorf("Sharder network transaction failed, err: %s", err)
 	}
 
 	if err := stack.Register(tx.ShardId, app.Name, txHandler); err != nil {
@@ -81,10 +84,10 @@ func TestRegisterReplayFailure(t *testing.T) {
 	txHandler := func(tx *dto.Transaction) error { return errors.New("forced failure") }
 
 	// inject mock sharder into stack
-	sharder := NewMockSharder()
+	sharder := NewMockSharder(stack.db)
 	stack.sharder = sharder
 	// inject mock endorser into stack
-	stack.endorser = NewMockEndorser()
+	stack.endorser = NewMockEndorser(stack.db)
 	// register a transaction with sharder
 	tx, _ := shard.SignedShardTransaction("test payload")
 	stack.sharder.Handle(tx)
@@ -111,10 +114,10 @@ func TestPreRegistered(t *testing.T) {
 	}
 
 	// inject mock sharder into stack
-	sharder := NewMockSharder()
+	sharder := NewMockSharder(stack.db)
 	stack.sharder = sharder
 	// inject mock endorser into stack
-	endorser := NewMockEndorser()
+	endorser := NewMockEndorser(stack.db)
 	stack.endorser = endorser
 
 	// attempt to register app again
@@ -126,11 +129,6 @@ func TestPreRegistered(t *testing.T) {
 	if sharder.IsRegistered || sharder.TxHandler != nil {
 		t.Errorf("DLT stack controller did duplicate register with sharding layer")
 	}
-
-	// we should NOT have replayed transactions
-	if endorser.ReplayCalled {
-		t.Errorf("DLT stack controller did replay even with duplicate registration")
-	}
 }
 
 // unregister a previously registered application
@@ -139,10 +137,10 @@ func TestUnRegister(t *testing.T) {
 	txHandler := func(tx *dto.Transaction) error { return nil }
 
 	// inject mock sharder into stack
-	sharder := NewMockSharder()
+	sharder := NewMockSharder(stack.db)
 	stack.sharder = sharder
 	// inject mock endorser into stack
-	stack.endorser = NewMockEndorser()
+	stack.endorser = NewMockEndorser(stack.db)
 
 	app := TestAppConfig()
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
@@ -168,7 +166,7 @@ func TestUnRegister(t *testing.T) {
 func TestSubmitUnregistered(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	// inject mock endorser into stack
-	endorser := NewMockEndorser()
+	endorser := NewMockEndorser(stack.db)
 	stack.endorser = endorser
 	if err := stack.Submit(nil); err == nil {
 		t.Errorf("Transaction submission did not check for unregistered")
@@ -232,8 +230,12 @@ func TestSubmitAppIdNoMatch(t *testing.T) {
 func TestSubmit(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	// inject mock endorser into stack
-	endorser := NewMockEndorser()
+	endorser := NewMockEndorser(stack.db)
 	stack.endorser = endorser
+	// inject mock sharder into stack
+	sharder := NewMockSharder(stack.db)
+	stack.sharder = sharder
+	// inject mock p2p layer into stack
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	app := TestAppConfig()
@@ -243,27 +245,133 @@ func TestSubmit(t *testing.T) {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
-	tx := TestSignedTransaction("test payload")
+	// get an anchor
+	a := stack.Anchor()
+	if a == nil {
+		t.Errorf("Failed to get anchor")
+	}
+
+	tx := TestAnchoredTransaction(a, "test payload")
 	if err := stack.Submit(tx); err != nil {
 		t.Errorf("Transaction submission failed, err: %s", err)
 	}
-	if !p2p.DidBroadcast {
-		t.Errorf("Transaction did not get broadcast to peers")
+
+	// walk down the DLT stack and validate expectations
+
+	// validate sharding layer
+	// verify that sharding layer gets called for submission
+	if !sharder.ApproverCalled {
+		t.Errorf("Sharder did not get called for submission")
 	}
 
 	// verify that endorser gets called for submission
-	if !endorser.TxHandlerCalled {
+	if !endorser.ApproverCalled {
 		t.Errorf("Endorser did not get called for submission")
 	}
-
 	// verify that endorser got the right transaction
 	if endorser.TxId != tx.Id() {
 		t.Errorf("Endorser transaction does not match submitted transaction")
 	}
 
+	// validate p2p layer
+	if !p2p.DidBroadcast {
+		t.Errorf("Transaction did not get broadcast to peers")
+	}
 	// verify that transaction's node ID was set correctly
 	if string(tx.NodeId) != string(p2p.Id()) {
 		t.Errorf("Transaction's node ID not initialized correctly\nExpected: %x\nActual: %x", p2p.Id(), tx.NodeId)
+	}
+}
+
+// transaction submission of a seen transaction
+func TestReSubmitSeen(t *testing.T) {
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+	// inject mock endorser into stack
+	endorser := NewMockEndorser(stack.db)
+	stack.endorser = endorser
+	// inject mock sharder into stack
+	sharder := NewMockSharder(stack.db)
+	stack.sharder = sharder
+	// inject mock p2p layer into stack
+	p2p := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = p2p
+	app := TestAppConfig()
+	txHandler := func(tx *dto.Transaction) error { return nil }
+
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
+		t.Errorf("Registration failed, err: %s", err)
+		return
+	}
+	// get an anchor
+	a := stack.Anchor()
+	if a == nil {
+		t.Errorf("Failed to get anchor")
+	}
+
+	tx := TestAnchoredTransaction(a, "test payload")
+	if err := stack.Submit(tx); err != nil {
+		t.Errorf("Transaction submission failed, err: %s", err)
+	}
+
+	// reset and re-submit same transaction
+	sharder.Reset()
+	endorser.Reset()
+	if err := stack.Submit(tx); err == nil {
+		t.Errorf("Transaction re-submission did not fail")
+	}
+
+	// verify that sharding layer does not gets called for seen submission
+	if sharder.ApproverCalled {
+		t.Errorf("Sharder should not get called for seen submission")
+	}
+
+	// verify that endorser does not gets called for seen submission
+	if endorser.ApproverCalled {
+		t.Errorf("Endorser should not get called for seen submission")
+	}
+}
+
+// transaction submission of a seen transaction
+func TestSubmitNetworkSeen(t *testing.T) {
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+	// inject mock endorser into stack
+	endorser := NewMockEndorser(stack.db)
+	stack.endorser = endorser
+	// inject mock sharder into stack
+	sharder := NewMockSharder(stack.db)
+	stack.sharder = sharder
+	// inject mock p2p layer into stack
+	p2p := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = p2p
+	app := TestAppConfig()
+	txHandler := func(tx *dto.Transaction) error { return nil }
+
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
+		t.Errorf("Registration failed, err: %s", err)
+		return
+	}
+	// get an anchor
+	a := stack.Anchor()
+	if a == nil {
+		t.Errorf("Failed to get anchor")
+	}
+
+	// simulate a submission of transaction that is already seen by stack
+	tx := TestAnchoredTransaction(a, "test payload")
+	stack.isSeen(tx.Id())
+
+	if err := stack.Submit(tx); err == nil {
+		t.Errorf("Seen transaction submission did not fail")
+	}
+
+	// verify that sharding layer does not gets called for seen submission
+	if sharder.TxHandlerCalled {
+		t.Errorf("Sharder should not get called for seen submission")
+	}
+
+	// verify that endorser does not gets called for seen submission
+	if endorser.TxHandlerCalled {
+		t.Errorf("Endorser should not get called for seen submission")
 	}
 }
 
@@ -344,11 +452,11 @@ func TestPeerListenerNoApp(t *testing.T) {
 	stack.p2p = mockP2PLayer
 
 	// inject mock sharding layer into stack
-	sharder := NewMockSharder()
+	sharder := NewMockSharder(stack.db)
 	stack.sharder = sharder
 
 	// inject mock endorser into stack
-	endorser := NewMockEndorser()
+	endorser := NewMockEndorser(stack.db)
 	stack.endorser = endorser
 
 	// build a mock peer
@@ -377,7 +485,7 @@ func TestPeerListenerNoApp(t *testing.T) {
 	}
 
 	// we should have marked the message as seen for stack
-	if !stack.isSeen(tx.Signature) {
+	if !stack.isSeen(tx.Id()) {
 		t.Errorf("Listener did not mark the transaction as seen while headless")
 	}
 
@@ -405,7 +513,7 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 	stack.p2p = mockP2PLayer
 
 	// inject mock endorser into stack
-	endorser := NewMockEndorser()
+	endorser := NewMockEndorser(stack.db)
 	stack.endorser = endorser
 
 	// build a mock peer
@@ -428,7 +536,7 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
 
 	// mark the message seen with stack
-	stack.isSeen(tx.Signature)
+	stack.isSeen(tx.Id())
 
 	// now call stack's listener
 	if err := stack.listener(peer); err != nil {
@@ -499,7 +607,7 @@ func TestAppCallbackTxRejected(t *testing.T) {
 	}
 
 	// we should have marked the message as seen for stack
-	if !stack.isSeen(tx.Signature) {
+	if !stack.isSeen(tx.Id()) {
 		t.Errorf("Listener did not mark the transaction as seen while headless")
 	}
 }
@@ -568,11 +676,11 @@ func TestStackRunner(t *testing.T) {
 	stack.p2p = p2p.TestP2PLayer("mock p2p")
 
 	// inject mock sharding layer into stack
-	sharder := NewMockSharder()
+	sharder := NewMockSharder(stack.db)
 	stack.sharder = sharder
 
 	// inject mock endorser into stack
-	endorser := NewMockEndorser()
+	endorser := NewMockEndorser(stack.db)
 	stack.endorser = endorser
 
 	// define a detault tx handler call back for app

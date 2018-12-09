@@ -1,6 +1,7 @@
 package shard
 
 import (
+	"fmt"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/repo"
 	"testing"
@@ -47,6 +48,11 @@ func TestRegistration(t *testing.T) {
 	if testDb.AddTxCallCount != 1 {
 		t.Errorf("Incorrect method call count: %d", testDb.AddTxCallCount)
 	}
+
+	// validate that DltDb's UpdateShard method was called to update DAG and Tips with first genesis transaction
+	if testDb.UpdateShardCount != 1 {
+		t.Errorf("Incorrect method call count: %d", testDb.UpdateShardCount)
+	}
 }
 
 // test that app registration gets a replay of existing transactions
@@ -56,6 +62,7 @@ func TestRegistrationReplay(t *testing.T) {
 
 	// send a mock network transaction with shard seq 1 to sharder before app is registered
 	tx, _ := SignedShardTransaction("test payload")
+	s.db.AddTx(tx)
 	s.Handle(tx)
 
 	// register an app using same shard as network transaction
@@ -138,6 +145,96 @@ func TestUnregistration(t *testing.T) {
 	}
 }
 
+func TestAnchorRegistered(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	// register an app
+	txHandler := func(tx *dto.Transaction) error { return nil }
+	s.Register([]byte("test shard"), txHandler)
+
+	// call sharder's anchor update
+	a := dto.Anchor{}
+	if err := s.Anchor(&a); err != nil {
+		t.Errorf("Anchor update failed: %s", err)
+	}
+
+	// anchor should have registered app's ID
+	if string(a.ShardId) != "test shard" {
+		t.Errorf("Incorrect shard ID: %s", a.ShardId)
+	}
+
+	// anchor should have shard's 1st sequence (since no other transaction after genesis)
+	if a.ShardSeq != 0x01 {
+		t.Errorf("Incorrect shard Seq: %x", a.ShardSeq)
+	}
+
+	// anchor should have shard's genesis as parent (since no other transaction after genesis)
+	if a.ShardParent != GenesisShardTx(a.ShardId).Id() {
+		t.Errorf("Incorrect shard parent: %x", a.ShardParent)
+	}
+}
+
+func TestAnchorUnregistered(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	// call sharder's anchor update without app registration
+	a := dto.Anchor{}
+	if err := s.Anchor(&a); err == nil {
+		t.Errorf("Anchor update failed to check app registration")
+	}
+}
+
+func TestAnchorMultiTip(t *testing.T) {
+	fmt.Printf("#######################\n")
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	// register an app
+	txHandler := func(tx *dto.Transaction) error { return nil }
+	s.Register([]byte("test shard"), txHandler)
+
+	// add 2 child network transactions nodes for same parent as genesis
+	child1, _ := SignedShardTransaction("child1")
+	child2, _ := SignedShardTransaction("child2")
+	if err := s.db.AddTx(child1); err != nil {
+		t.Errorf("Failed to add child1: %s", err)
+	}
+
+	if err := s.Handle(child1); err != nil {
+		t.Errorf("Failed to handle child1: %s", err)
+	}
+	if err := s.db.AddTx(child2); err != nil {
+		t.Errorf("Failed to add child2: %s", err)
+	}
+
+	if err := s.Handle(child2); err != nil {
+		t.Errorf("Failed to handle child2: %s", err)
+	}
+
+	// call sharder's anchor update
+	a := dto.Anchor{}
+	if err := s.Anchor(&a); err != nil {
+		t.Errorf("Anchor update failed: %s", err)
+	}
+
+	// anchor should have shard's 2nd sequence (since 1st seq is the network transaction after genesis)
+	if a.ShardSeq != 0x02 {
+		t.Errorf("Incorrect shard Seq: %x", a.ShardSeq)
+	}
+
+	// anchor should have highest numeric tip from the two
+	parent := child1.Id()
+	id2 := child2.Id()
+	if numeric(parent[:]) < numeric(id2[:]) {
+		parent = id2
+	}
+	if a.ShardParent != parent {
+		t.Errorf("Incorrect shard parent: %x", a.ShardParent)
+	}
+}
+
 // test behavior for handling 1st transaction of a shard from network
 func TestHandlerUnregisteredFirstSeq(t *testing.T) {
 	testDb := repo.NewMockDltDb()
@@ -145,6 +242,7 @@ func TestHandlerUnregisteredFirstSeq(t *testing.T) {
 
 	// send a mock network transaction with shard seq 1 to sharder with no app registered
 	tx, genesis := SignedShardTransaction("test payload")
+	s.db.AddTx(tx)
 	if err := s.Handle(tx); err != nil {
 		t.Errorf("Network handling of 1st shard transacton failed: %s", err)
 	}
@@ -175,7 +273,7 @@ func TestHandlerIncorrectGenesisFirstSeq(t *testing.T) {
 	// send a mock network transaction with shard seq 1 but incorrect parent not matching correct genesis
 	tx, genesis := SignedShardTransaction("test payload")
 	tx.ShardParent = [64]byte{}
-	tx.ShardParent[0]=0xff
+	tx.ShardParent[0] = 0xff
 	if err := s.Handle(tx); err == nil {
 		t.Errorf("Network handling of 1st shard transacton did not validate genesis parent")
 	}
@@ -227,7 +325,7 @@ func TestHandlerAppFiltering(t *testing.T) {
 	// register an app for shard different from network transaction
 	called := false
 	txHandler := func(tx *dto.Transaction) error { called = true; return nil }
-	s.Register([]byte(string(tx.ShardId) + "extra"), txHandler)
+	s.Register([]byte(string(tx.ShardId)+"extra"), txHandler)
 
 	// send the mock network transaction to sharder from different shard
 	if err := s.Handle(tx); err != nil {
@@ -260,5 +358,60 @@ func TestHandlerTransactionValidation(t *testing.T) {
 	// verify that callback did not get called
 	if called {
 		t.Errorf("Sharder did not filter invalid transaction")
+	}
+}
+
+// test behavior for approving a transaction when not registered (should not happen)
+func TestApproverUnregisteredFirstSeq(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	// send a network transaction for approval with no app registered
+	tx, _ := SignedShardTransaction("test payload")
+	if err := s.Approve(tx); err == nil {
+		t.Errorf("Approval of transacton did not check for app registration")
+	}
+
+	// validate that DltDb's GetShardDagNode method was NOT called for unregistered approval
+	if testDb.GetShardDagNodeCallCount != 0 {
+		t.Errorf("Incorrect method call count: %d", testDb.GetShardDagNodeCallCount)
+	}
+
+	// validate that DltDb's AddTx method was NOT called
+	if testDb.AddTxCallCount != 0 {
+		t.Errorf("Incorrect method call count: %d", testDb.AddTxCallCount)
+	}
+}
+
+func TestApproverHappyPath(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	tx, _ := SignedShardTransaction("test payload")
+
+	// register an app for transaction's shard
+	called := false
+	txHandler := func(tx *dto.Transaction) error { called = true; return nil }
+	s.Register(tx.ShardId, txHandler)
+	testDb.Reset()
+
+	// send the transaction to sharder for approval
+	if err := s.Approve(tx); err != nil {
+		t.Errorf("Transaction approval failed: %s", err)
+	}
+
+	// verify that callback did not get called for submitted transaction
+	if called {
+		t.Errorf("Callback not expected for application submitted transaction")
+	}
+
+	// verify that DLT DB's shard was updated for submitted transaction
+	if testDb.UpdateShardCount != 1 {
+		t.Errorf("DLT DB's shard was NOT updated for submitted transaction: %d", testDb.UpdateShardCount)
+	}
+
+	// verify that submitted transaction was saved in DB
+	if testDb.AddTxCallCount != 1 {
+		t.Errorf("Submitted transaction NOT saved in DB: %d", testDb.AddTxCallCount)
 	}
 }

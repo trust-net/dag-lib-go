@@ -1,7 +1,6 @@
 package stack
 
-import (
-)
+import ()
 
 // protocol specs
 const (

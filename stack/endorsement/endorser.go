@@ -9,15 +9,20 @@ import (
 )
 
 type Endorser interface {
-	// Handle Transaction
+	// populate a transaction Anchor
+	Anchor(*dto.Anchor) error
+	// Handle network transaction
 	Handle(tx *dto.Transaction) error
-//	// Replay transactions for newly registered app
-//	Replay(txHandler func(tx *dto.Transaction) error) error
-//  let sharding layer handle replay using the new DltDb, no point processing ALL tx's, only need to process shard's DAG
+	// Approve submitted transaction
+	Approve(tx *dto.Transaction) error
 }
 
 type endorser struct {
 	db repo.DltDb
+}
+
+func (e *endorser) Anchor(a *dto.Anchor) error {
+	return errors.New("not implemented")
 }
 
 func (e *endorser) Handle(tx *dto.Transaction) error {
@@ -27,20 +32,6 @@ func (e *endorser) Handle(tx *dto.Transaction) error {
 		return errors.New("invalid transaction")
 	}
 
-//	// check for duplicate transaction
-//	if present, _ := e.db.Has(tx.Id()); present {
-//		return errors.New("duplicate transaction")
-//	}
-//
-//	// save transaction
-//	var data []byte
-//	var err error
-//	if data, err = tx.Serialize(); err != nil {
-//		return err
-//	}
-//	if err = e.db.Put(tx.Id(), data); err != nil {
-//		return err
-//	}
 	if err := e.db.AddTx(tx); err != nil {
 		return err
 	}
@@ -51,21 +42,16 @@ func (e *endorser) Handle(tx *dto.Transaction) error {
 	return nil
 }
 
-//func (e *endorser) Replay(txHandler func(tx *dto.Transaction) error) error {
-//	// get all transactions from DB and process each of them
-//	for _, data := range e.db.GetAll() {
-//		// deserialize the transaction read from DB
-//		tx := &dto.Transaction{}
-//		if err := tx.DeSerialize(data); err != nil {
-//			return err
-//		}
-//		// process the transaction via callback
-//		if err := txHandler(tx); err != nil {
-//			return err
-//		}
-//	}
-//	return nil
-//}
+func (e *endorser) Approve(tx *dto.Transaction) error {
+	// validate transaction
+	if tx == nil {
+		return errors.New("invalid transaction")
+	}
+
+	// TBD: sign the node's signature on transaction
+
+	return nil
+}
 
 func NewEndorser(db repo.DltDb) (*endorser, error) {
 	return &endorser{

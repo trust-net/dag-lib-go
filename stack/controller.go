@@ -9,8 +9,8 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/endorsement"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
-	"github.com/trust-net/dag-lib-go/stack/shard"
 	"github.com/trust-net/dag-lib-go/stack/repo"
+	"github.com/trust-net/dag-lib-go/stack/shard"
 	"github.com/trust-net/go-trust-net/common"
 	"sync"
 )
@@ -22,6 +22,8 @@ type DLT interface {
 	Unregister() error
 	// submit a transaction to the network
 	Submit(tx *dto.Transaction) error
+	// get a transaction Anchor
+	Anchor() *dto.Anchor
 	// start the controller
 	Start() error
 	// stop the controller
@@ -60,13 +62,13 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx *dto.Trans
 	// register app with sharder
 	d.sharder.Register(shardId, txHandler)
 
-//	// replay endorsement layer transactions to the registered app via sharder
-//	if err := d.endorser.Replay(d.sharder.Handle); err != nil {
-//		// unregister upon replay failure
-//		d.unregister()
-//		return err
-//	}
-// TBD: reply will actually happen at sharder when app registers, it already has transactions
+	//	// replay endorsement layer transactions to the registered app via sharder
+	//	if err := d.endorser.Replay(d.sharder.Handle); err != nil {
+	//		// unregister upon replay failure
+	//		d.unregister()
+	//		return err
+	//	}
+	// TBD: reply will actually happen at sharder when app registers, it already has transactions
 	return nil
 }
 
@@ -109,18 +111,40 @@ func (d *dlt) Submit(tx *dto.Transaction) error {
 		return errors.New("nil transaction submitter ID")
 	}
 
-	// send the submitted transaction to sharding layer
-	// TBD
+	// check if message was already seen by stack
+	if d.isSeen(tx.Id()) {
+		return errors.New("seen transaction")
+	}
+
+	// send the submitted transaction for approval to sharding layer
+	if err := d.sharder.Approve(tx); err != nil {
+		return err
+	}
 
 	// next in line process with endorsement layer
 	// TBD: below needs to change to a different method that will check whether transaction
 	// has correct TxAnchor in the submitted transaction
-	if err := d.endorser.Handle(tx); err != nil {
+	if err := d.endorser.Approve(tx); err != nil {
 		return err
 	}
 
 	// finally send it to p2p layer, to broadcase to others
 	return d.p2p.Broadcast(tx.Signature, TransactionMsgCode, tx)
+}
+
+func (d *dlt) Anchor() *dto.Anchor {
+	a := &dto.Anchor{}
+	if err := d.sharder.Anchor(a); err != nil {
+		fmt.Printf("Failed to get sharder's anchor: %s\n", err)
+		return nil
+	}
+
+	// TBD: get endorser's update on anchor
+	//	if err := d.endorser.Anchor(a); err != nil {
+	//		fmt.Printf("Failed to get endorser's anchor: %s\n", err)
+	//		return nil
+	//	}
+	return a
 }
 
 func (d *dlt) Start() error {
@@ -165,7 +189,7 @@ func (d *dlt) listener(peer p2p.Peer) error {
 			}
 
 			// check if message was already seen by stack
-			if d.isSeen(tx.Signature) {
+			if d.isSeen(tx.Id()) {
 				continue
 			}
 
@@ -176,18 +200,19 @@ func (d *dlt) listener(peer p2p.Peer) error {
 
 			// send transaction to endorsing layer for handling
 			if err := d.endorser.Handle(tx); err != nil {
-				// fmt.Printf("\nFailed to endorse transaction: %s\n", err)
+				fmt.Printf("\nFailed to endorse transaction: %s\n", err)
 				continue
 			}
 
 			// let sharding layer process transaction
 			if err := d.sharder.Handle(tx); err != nil {
-				// fmt.Printf("\nFailed to shard transaction: %s\n", err)
+				fmt.Printf("\nFailed to shard transaction: %s\n", err)
 				continue
 			}
 
 			// mark sender of the message as seen
-			peer.Seen(tx.Signature)
+			id := tx.Id()
+			peer.Seen(id[:])
 			d.p2p.Broadcast(tx.Signature, TransactionMsgCode, tx)
 
 		// case 1 message type
@@ -218,7 +243,7 @@ func (d *dlt) runner(peer p2p.Peer) error {
 }
 
 // mark a message as seen for stack (different from marking it seen for connected peer nodes)
-func (d *dlt) isSeen(msgId []byte) bool {
+func (d *dlt) isSeen(msgId [64]byte) bool {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.seen.Size() > 100 {
@@ -226,8 +251,8 @@ func (d *dlt) isSeen(msgId []byte) bool {
 			d.seen.Pop()
 		}
 	}
-	if !d.seen.Has(string(msgId)) {
-		d.seen.Add(string(msgId))
+	if !d.seen.Has(msgId) {
+		d.seen.Add(msgId)
 		return false
 	} else {
 		return true
@@ -239,7 +264,7 @@ func NewDltStack(conf p2p.Config, dbp db.DbProvider) (*dlt, error) {
 	var err error
 	if db, err = repo.NewDltDb(dbp); err != nil {
 		return nil, err
-	} 
+	}
 	stack := &dlt{
 		db:   db,
 		seen: common.NewSet(),
