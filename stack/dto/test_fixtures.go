@@ -21,10 +21,10 @@ func TestTransaction() *Transaction {
 
 func TestSignedTransaction(data string) *Transaction {
 	tx := &Transaction{
-		Payload: []byte(data),
-		ShardId: []byte("test shard"),
-		NodeId:  []byte("test app ID"),
-		ShardSeq: [8]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01},
+		Payload:  []byte(data),
+		ShardId:  []byte("test shard"),
+		NodeId:   []byte("test app ID"),
+		ShardSeq: 0x01,
 	}
 	// create a new ECDSA key for submitter client
 	key, _ := crypto.GenerateKey()

@@ -16,7 +16,7 @@ type DagNode struct {
 	// reference to Transaction ID in transaction table
 	TxId [64]byte
 	// Depth of the node in DAG
-	Depth [8]byte
+	Depth uint64
 }
 
 type DltDb interface {
@@ -24,6 +24,8 @@ type DltDb interface {
 	GetTx(id [64]byte) *dto.Transaction
 	// add a new transaction to transaction history (no duplicates, no updates)
 	AddTx(tx *dto.Transaction) error
+	// update a shard's DAG and tips for a new transaction
+	UpdateShard(tx *dto.Transaction) error
 	// delete an existing transaction from transaction history (deleting a non-tip transaction will cause errors)
 	DeleteTx(id [64]byte) error
 	// get the shard's DAG node for given transaction Id (no entry == nil)
@@ -35,17 +37,17 @@ type DltDb interface {
 	// get list of submitters seen so far based on transaction history
 	GetSubmitters() []byte
 	// get tip DAG nodes for sharder's DAG
-	ShardTips(shardId []byte) []DagNode
+	ShardTips(shardId []byte) [][64]byte
 	// get tip DAG nodes for submmiter's DAG
 	SubmitterTips(submitterId []byte) []DagNode
 }
 
 type dltDb struct {
-	txDb        db.Database
-	shardDb     db.Database
-	submitterDb db.Database
-	dagDb       db.Database
-	lock        sync.RWMutex
+	txDb            db.Database
+	shardDAGsDb     db.Database
+	shardTipsDb     db.Database
+	submitterDAGsDb db.Database
+	lock            sync.RWMutex
 }
 
 func (d *dltDb) GetTx(id [64]byte) *dto.Transaction {
@@ -63,7 +65,6 @@ func (d *dltDb) GetTx(id [64]byte) *dto.Transaction {
 		return tx
 	}
 }
-
 func (d *dltDb) AddTx(tx *dto.Transaction) error {
 	// save transaction
 	var data []byte
@@ -83,6 +84,14 @@ func (d *dltDb) AddTx(tx *dto.Transaction) error {
 	if err = d.txDb.Put(id[:], data); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (d *dltDb) UpdateShard(tx *dto.Transaction) error {
+	// save transaction
+	var err error
+	d.lock.Lock()
+	defer d.lock.Unlock()
 
 	// add the DAG node for the transaction to shard DAG db
 	dagNode := DagNode{
@@ -94,12 +103,30 @@ func (d *dltDb) AddTx(tx *dto.Transaction) error {
 		return err
 	}
 
-	// TBD: update the children of the parent DAG (if present)
+	// update the children of the parent DAG (if present)
 	if parent := d.getShardDagNode(tx.ShardParent); parent != nil {
 		parent.Children = append(parent.Children, tx.Id())
 		if err := d.saveShardDagNode(parent); err != nil {
 			return err
 		}
+	}
+
+	// remove parent from shard's TIPs (if present)
+	tips := d.shardTips(tx.ShardId)
+	newTips := make([][64]byte, 0, len(tips))
+	for _, tip := range tips {
+		if tip != tx.ShardParent {
+			newTips = append(newTips, tip)
+		} else {
+			// fmt.Printf("removing parent tip: %x\n", tip)
+		}
+	}
+	// add new transaction to the shard's tips
+	newTips = append(newTips, tx.Id())
+	// fmt.Printf("adding child tip: %x\n", tx.Id())
+	// update shard's tips
+	if err = d.updateShardTips(tx.ShardId, newTips); err != nil {
+		return err
 	}
 
 	return nil
@@ -111,7 +138,7 @@ func (d *dltDb) saveShardDagNode(node *DagNode) error {
 	if data, err = common.Serialize(node); err != nil {
 		return err
 	}
-	if err = d.shardDb.Put(node.TxId[:], data); err != nil {
+	if err = d.shardDAGsDb.Put(node.TxId[:], data); err != nil {
 		return err
 	}
 	return nil
@@ -120,9 +147,13 @@ func (d *dltDb) saveShardDagNode(node *DagNode) error {
 func (d *dltDb) DeleteTx(id [64]byte) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	// TBD: check that its a tip transaction, otherwise cannot delete
+
 	if err := d.txDb.Delete(id[:]); err != nil {
 		return err
 	}
+
+	// TBD: remove from DAGs and update tips
 	return nil
 }
 
@@ -134,7 +165,7 @@ func (d *dltDb) GetShardDagNode(id [64]byte) *DagNode {
 
 func (d *dltDb) getShardDagNode(id [64]byte) *DagNode {
 	// get serialized DAG node from DB
-	if data, err := d.shardDb.Get(id[:]); err != nil {
+	if data, err := d.shardDAGsDb.Get(id[:]); err != nil {
 		return nil
 	} else {
 		// deserialize the DAG node read from DB
@@ -158,7 +189,37 @@ func (d *dltDb) GetSubmitters() []byte {
 	return nil
 }
 
-func (d *dltDb) ShardTips(shardId []byte) []DagNode {
+func (d *dltDb) ShardTips(shardId []byte) [][64]byte {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	return d.shardTips(shardId)
+}
+
+func (d *dltDb) shardTips(shardId []byte) [][64]byte {
+	// get serialized tips from DB
+	if data, err := d.shardTipsDb.Get(shardId); err != nil {
+		return nil
+	} else {
+		// deserialize the tips read from DB
+		tips := [][64]byte{}
+		if err := common.Deserialize(data, &tips); err != nil {
+			return nil
+		}
+		return tips
+	}
+	return nil
+}
+
+func (d *dltDb) updateShardTips(shardId []byte, tips [][64]byte) error {
+	var data []byte
+	var err error
+	if data, err = common.Serialize(tips); err != nil {
+		return err
+	}
+	if err = d.shardTipsDb.Put(shardId, data); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -168,9 +229,9 @@ func (d *dltDb) SubmitterTips(submitterId []byte) []DagNode {
 
 func NewDltDb(dbp db.DbProvider) (*dltDb, error) {
 	return &dltDb{
-		txDb:        dbp.DB("dlt_transactions"),
-		shardDb:     dbp.DB("dlt_shards"),
-		submitterDb: dbp.DB("dlt_submitters"),
-		dagDb:       dbp.DB("dlt_dags"),
+		txDb:            dbp.DB("dlt_transactions"),
+		shardDAGsDb:     dbp.DB("dlt_shard_dags"),
+		shardTipsDb:     dbp.DB("dlt_shard_tips"),
+		submitterDAGsDb: dbp.DB("dlt_submitter_dags"),
 	}, nil
 }

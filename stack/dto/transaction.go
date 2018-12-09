@@ -4,6 +4,7 @@ package dto
 
 import (
 	"crypto/sha512"
+	"encoding/binary"
 	"github.com/trust-net/go-trust-net/common"
 )
 
@@ -21,7 +22,7 @@ type Transaction struct {
 	// transaction approver application's shard ID
 	ShardId []byte
 	// sequence of this transaction within the shard
-	ShardSeq [8]byte
+	ShardSeq uint64
 	// parent transaction within the shard
 	ShardParent [64]byte
 	// transaction submitter's public ID
@@ -39,7 +40,9 @@ func (tx *Transaction) Id() [64]byte {
 	// append shard ID etc
 	// TBD: replace with TxAnchor when available
 	data = append(data, tx.ShardId...)
-	data = append(data, tx.ShardSeq[:]...)
+	seq := [8]byte{}
+	binary.BigEndian.PutUint64(seq[:], tx.ShardSeq)
+	data = append(data, seq[:]...)
 	data = append(data, tx.ShardParent[:]...)
 	tx.id = sha512.Sum512(data)
 	tx.idDone = true
