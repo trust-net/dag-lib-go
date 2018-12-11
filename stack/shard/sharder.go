@@ -12,33 +12,34 @@ var ShardSeqOne = uint64(0x01)
 
 type Sharder interface {
 	// register application shard with the DLT stack
-	Register(shardId []byte, txHandler func(tx *dto.Transaction) error) error
+	Register(shardId []byte, txHandler func(tx dto.Transaction) error) error
 	// unregister application shard from DLT stack
 	Unregister() error
 	// populate a transaction Anchor
 	Anchor(a *dto.Anchor) error
 	// Approve submitted transaction
-	Approve(tx *dto.Transaction) error
+	Approve(tx dto.Transaction) error
 	// Handle Transaction
-	Handle(tx *dto.Transaction) error
+	Handle(tx dto.Transaction) error
 }
 
 type sharder struct {
 	db repo.DltDb
 
 	shardId   []byte
-	genesisTx *dto.Transaction
-	txHandler func(tx *dto.Transaction) error
+	genesisTx dto.Transaction
+	txHandler func(tx dto.Transaction) error
 }
 
-func GenesisShardTx(shardId []byte) *dto.Transaction {
-	return &dto.Transaction{
-		Payload: shardId,
+func GenesisShardTx(shardId []byte) dto.Transaction {
+	tx := dto.NewTransaction(&dto.Anchor{
 		ShardId: shardId,
-	}
+	})
+	tx.Self().Signature = shardId
+	return tx
 }
 
-func (s *sharder) Register(shardId []byte, txHandler func(tx *dto.Transaction) error) error {
+func (s *sharder) Register(shardId []byte, txHandler func(tx dto.Transaction) error) error {
 	s.shardId = append(shardId)
 	s.txHandler = txHandler
 
@@ -130,12 +131,17 @@ func (s *sharder) Anchor(a *dto.Anchor) error {
 
 	// find the deepest node as parent
 	parent := s.db.GetShardDagNode(tips[0])
+	uncles := [][64]byte{}
 	for i := 1; i < len(tips); i += 1 {
 		node := s.db.GetShardDagNode(tips[i])
 		if parent.Depth < node.Depth {
+			uncles = append(uncles, parent.TxId)
 			parent = node
 		} else if parent.Depth == node.Depth && numeric(parent.TxId[:]) < numeric(node.TxId[:]) {
+			uncles = append(uncles, parent.TxId)
 			parent = node
+		} else {
+			uncles = append(uncles, node.TxId)
 		}
 	}
 
@@ -145,24 +151,26 @@ func (s *sharder) Anchor(a *dto.Anchor) error {
 	// assign sequence 1 greater than DAG's parent node
 	a.ShardSeq = parent.Depth + 1
 
+	// assign uncles to anchor
+	a.ShardUncles = uncles
 	return nil
 }
 
-func (s *sharder) Approve(tx *dto.Transaction) error {
+func (s *sharder) Approve(tx dto.Transaction) error {
 	// make sure app is registered
 	if s.shardId == nil {
 		return errors.New("app not registered")
 	}
 
 	// validate transaction
-	if len(tx.ShardId) == 0 {
+	if len(tx.Anchor().ShardId) == 0 {
 		return errors.New("missing shard id in transaction")
 	}
 
 	// TBD: lock and unlock
 
 	// check if parent for the transaction is known
-	if parent := s.db.GetShardDagNode(tx.ShardParent); parent == nil {
+	if parent := s.db.GetShardDagNode(tx.Anchor().ShardParent); parent == nil {
 		return errors.New("parent transaction unknown for shard")
 	} else {
 		// should we add transaction here, or should we expect that transaction will be added by lower layer?
@@ -178,19 +186,19 @@ func (s *sharder) Approve(tx *dto.Transaction) error {
 	return nil
 }
 
-func (s *sharder) Handle(tx *dto.Transaction) error {
+func (s *sharder) Handle(tx dto.Transaction) error {
 	// validate transaction
-	if len(tx.ShardId) == 0 {
+	if len(tx.Anchor().ShardId) == 0 {
 		return errors.New("missing shard id in transaction")
 	}
 
 	// TBD: lock and unlock
 
 	// check for first network transactions of a new shard
-	if tx.ShardSeq == ShardSeqOne {
-		genesis := GenesisShardTx(tx.ShardId)
+	if tx.Anchor().ShardSeq == ShardSeqOne {
+		genesis := GenesisShardTx(tx.Anchor().ShardId)
 		// ensure that transaction's parent is really genesis
-		if genesis.Id() != tx.ShardParent {
+		if genesis.Id() != tx.Anchor().ShardParent {
 			return errors.New("genesis mismatch for 1st shard transaction")
 		}
 		// this is very first network transaction for a new shard, register the shard's genesis
@@ -203,7 +211,7 @@ func (s *sharder) Handle(tx *dto.Transaction) error {
 	}
 
 	// check if parent for the transaction is known
-	if parent := s.db.GetShardDagNode(tx.ShardParent); parent == nil {
+	if parent := s.db.GetShardDagNode(tx.Anchor().ShardParent); parent == nil {
 		return errors.New("parent transaction unknown for shard")
 	} else {
 		// should we add transaction here, or should we expect that transaction has already been added by lower layer?
@@ -217,7 +225,7 @@ func (s *sharder) Handle(tx *dto.Transaction) error {
 
 	// if an app is registered, call app's transaction handler
 	if s.txHandler != nil {
-		if string(s.shardId) == string(tx.ShardId) {
+		if string(s.shardId) == string(tx.Anchor().ShardId) {
 			return s.txHandler(tx)
 		}
 	}

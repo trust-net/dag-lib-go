@@ -17,13 +17,13 @@ import (
 
 type DLT interface {
 	// register application shard with the DLT stack
-	Register(shardId []byte, name string, txHandler func(tx *dto.Transaction) error) error
+	Register(shardId []byte, name string, txHandler func(tx dto.Transaction) error) error
 	// unregister application shard from DLT stack
 	Unregister() error
 	// submit a transaction to the network
-	Submit(tx *dto.Transaction) error
-	// get a transaction Anchor
-	Anchor() *dto.Anchor
+	Submit(tx dto.Transaction) error
+	// get a transaction Anchor for specified submitter id
+	Anchor(id []byte) *dto.Anchor
 	// start the controller
 	Start() error
 	// stop the controller
@@ -32,7 +32,7 @@ type DLT interface {
 
 type dlt struct {
 	app       *AppConfig
-	txHandler func(tx *dto.Transaction) error
+	txHandler func(tx dto.Transaction) error
 	db        repo.DltDb
 	p2p       p2p.Layer
 	sharder   shard.Sharder
@@ -41,7 +41,7 @@ type dlt struct {
 	lock      sync.RWMutex
 }
 
-func (d *dlt) Register(shardId []byte, name string, txHandler func(tx *dto.Transaction) error) error {
+func (d *dlt) Register(shardId []byte, name string, txHandler func(tx dto.Transaction) error) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.app != nil {
@@ -84,7 +84,7 @@ func (d *dlt) unregister() error {
 	return d.sharder.Unregister()
 }
 
-func (d *dlt) Submit(tx *dto.Transaction) error {
+func (d *dlt) Submit(tx dto.Transaction) error {
 	if d.app == nil {
 		return errors.New("app not registered")
 	}
@@ -92,7 +92,7 @@ func (d *dlt) Submit(tx *dto.Transaction) error {
 	if tx == nil {
 		return errors.New("nil transaction")
 	}
-	if string(tx.ShardId) != string(d.app.ShardId) {
+	if string(tx.Anchor().ShardId) != string(d.app.ShardId) {
 		return errors.New("incorrect shard id")
 	}
 	// check for TxAnchor
@@ -100,14 +100,14 @@ func (d *dlt) Submit(tx *dto.Transaction) error {
 
 	// set NodeId for transaction
 	// TBD: this will be part of TxAnchor later
-	tx.NodeId = d.p2p.Id()
+	tx.Anchor().NodeId = d.p2p.Id()
 
 	switch {
-	case tx.Payload == nil:
+	case tx.Self().Payload == nil:
 		return errors.New("nil transaction payload")
-	case tx.Signature == nil:
+	case tx.Self().Signature == nil:
 		return errors.New("nil transaction signature")
-	case tx.Submitter == nil:
+	case tx.Anchor().Submitter == nil:
 		return errors.New("nil transaction submitter ID")
 	}
 
@@ -129,11 +129,13 @@ func (d *dlt) Submit(tx *dto.Transaction) error {
 	}
 
 	// finally send it to p2p layer, to broadcase to others
-	return d.p2p.Broadcast(tx.Signature, TransactionMsgCode, tx)
+	return d.p2p.Broadcast(tx.Self().Id(), TransactionMsgCode, tx)
 }
 
-func (d *dlt) Anchor() *dto.Anchor {
-	a := &dto.Anchor{}
+func (d *dlt) Anchor(id []byte) *dto.Anchor {
+	a := &dto.Anchor{
+		Submitter: id,
+	}
 	if err := d.sharder.Anchor(a); err != nil {
 		fmt.Printf("Failed to get sharder's anchor: %s\n", err)
 		return nil
@@ -177,14 +179,14 @@ func (d *dlt) listener(peer p2p.Peer) error {
 
 		case TransactionMsgCode:
 			// deserialize the transaction message from payload
-			tx := &dto.Transaction{}
+			tx := dto.NewTransaction(&dto.Anchor{})
 			if err := msg.Decode(tx); err != nil {
 				fmt.Printf("\nFailed to decode message: %s\n", err)
 				return err
 			}
 
 			// validate transaction signature using transaction submitter's ID
-			if !d.p2p.Verify(tx.Payload, tx.Signature, tx.Submitter) {
+			if !d.p2p.Verify(tx.Self().Payload, tx.Self().Signature, tx.Anchor().Submitter) {
 				return errors.New("Transaction signature invalid")
 			}
 
@@ -213,7 +215,7 @@ func (d *dlt) listener(peer p2p.Peer) error {
 			// mark sender of the message as seen
 			id := tx.Id()
 			peer.Seen(id[:])
-			d.p2p.Broadcast(tx.Signature, TransactionMsgCode, tx)
+			d.p2p.Broadcast(tx.Self().Id(), TransactionMsgCode, tx)
 
 		// case 1 message type
 

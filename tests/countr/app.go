@@ -38,58 +38,46 @@ type testTx struct {
 	Delta  int64
 }
 
-func sign(tx *dto.Transaction) *dto.Transaction {
+func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
 	// sign the test payload using SHA512 hash and ECDSA private key
 	type signature struct {
 		R *big.Int
 		S *big.Int
 	}
 	s := signature{}
-	hash := sha512.Sum512(tx.Payload)
+	hash := sha512.Sum512(txPayload)
 	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
-	tx.Signature, _ = common.Serialize(s)
-	tx.Submitter = submitter
+	tx.Self().Payload = txPayload
+	tx.Self().Signature, _ = common.Serialize(s)
 	return tx
 }
 
-func incrementTx(a *dto.Anchor, name string, delta int) *dto.Transaction {
+func incrementTx(a *dto.Anchor, name string, delta int) dto.Transaction {
 	if a == nil {
 		return nil
 	}
 	applyDelta(name, delta)
-	tx := testTx{
+	op := testTx{
 		Op:     "incr",
 		Target: name,
 		Delta:  int64(delta),
 	}
-	txPayload, _ := common.Serialize(tx)
-	return sign(&dto.Transaction{
-		Payload:     txPayload,
-		Submitter:   []byte("countr CLI"),
-		ShardId:     a.ShardId,
-		ShardSeq:    a.ShardSeq,
-		ShardParent: a.ShardParent,
-	})
+	txPayload, _ := common.Serialize(op)
+	return sign(dto.NewTransaction(a), txPayload)
 }
 
-func decrementTx(a *dto.Anchor, name string, delta int) *dto.Transaction {
+func decrementTx(a *dto.Anchor, name string, delta int) dto.Transaction {
 	if a == nil {
 		return nil
 	}
 	applyDelta(name, -delta)
-	tx := testTx{
+	op := testTx{
 		Op:     "decr",
 		Target: name,
 		Delta:  int64(delta),
 	}
-	txPayload, _ := common.Serialize(tx)
-	return sign(&dto.Transaction{
-		Payload:     txPayload,
-		Submitter:   []byte("countr CLI"),
-		ShardId:     a.ShardId,
-		ShardSeq:    a.ShardSeq,
-		ShardParent: a.ShardParent,
-	})
+	txPayload, _ := common.Serialize(op)
+	return sign(dto.NewTransaction(a), txPayload)
 }
 
 type op struct {
@@ -152,11 +140,11 @@ func applyDelta(name string, delta int) int64 {
 	return last
 }
 
-func txHandler(tx *dto.Transaction) error {
+func txHandler(tx dto.Transaction) error {
 	fmt.Printf("\n")
 	op := testTx{}
-	if err := common.Deserialize(tx.Payload, &op); err != nil {
-		fmt.Printf("Invalid TX from %x\n%s", tx.NodeId, cmdPrompt)
+	if err := common.Deserialize(tx.Self().Payload, &op); err != nil {
+		fmt.Printf("Invalid TX from %x\n%s", tx.Anchor().NodeId, cmdPrompt)
 		return err
 	}
 	fmt.Printf("TX: %s %s %d\n", op.Op, op.Target, op.Delta)
@@ -224,7 +212,7 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: incr %s %d\n", op.name, op.delta)
-								if err := dlt.Submit(incrementTx(dlt.Anchor(), op.name, op.delta)); err != nil {
+								if err := dlt.Submit(incrementTx(dlt.Anchor(submitter), op.name, op.delta)); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
 								}
 							}
@@ -236,7 +224,7 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: decr %s %d\n", op.name, op.delta)
-								if err := dlt.Submit(decrementTx(dlt.Anchor(), op.name, op.delta)); err != nil {
+								if err := dlt.Submit(decrementTx(dlt.Anchor(submitter), op.name, op.delta)); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
 								}
 							}
@@ -245,7 +233,7 @@ func cli(dlt stack.DLT) error {
 						for wordScanner.Scan() {
 							continue
 						}
-						if a := dlt.Anchor(); a == nil {
+						if a := dlt.Anchor(submitter); a == nil {
 							fmt.Printf("failed to get any info...\n")
 						} else {
 							fmt.Printf("ShardId: %s\n", a.ShardId)

@@ -37,7 +37,7 @@ func TestRegister(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
 	cbCalled := false
-	txHandler := func(tx *dto.Transaction) error { cbCalled = true; return nil }
+	txHandler := func(tx dto.Transaction) error { cbCalled = true; return nil }
 
 	// inject mock sharder into stack
 	sharder := NewMockSharder(stack.db)
@@ -54,11 +54,11 @@ func TestRegister(t *testing.T) {
 		t.Errorf("Sharder network transaction failed, err: %s", err)
 	}
 
-	if err := stack.Register(tx.ShardId, app.Name, txHandler); err != nil {
+	if err := stack.Register(tx.Anchor().ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 	// our app's ID should be same as p2p node's ID
-	if string(stack.app.AppId) != string(stack.p2p.Id()) || string(stack.app.ShardId) != string(tx.ShardId) || stack.app.Name != app.Name {
+	if string(stack.app.AppId) != string(stack.p2p.Id()) || string(stack.app.ShardId) != string(tx.Anchor().ShardId) || stack.app.Name != app.Name {
 		t.Errorf("App configuration not initialized correctly")
 	}
 	if stack.txHandler == nil {
@@ -81,7 +81,7 @@ func TestRegister(t *testing.T) {
 func TestRegisterReplayFailure(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
-	txHandler := func(tx *dto.Transaction) error { return errors.New("forced failure") }
+	txHandler := func(tx dto.Transaction) error { return errors.New("forced failure") }
 
 	// inject mock sharder into stack
 	sharder := NewMockSharder(stack.db)
@@ -106,7 +106,7 @@ func TestRegisterReplayFailure(t *testing.T) {
 func TestPreRegistered(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := AppConfig{}
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 
 	// register app one time
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
@@ -134,7 +134,7 @@ func TestPreRegistered(t *testing.T) {
 // unregister a previously registered application
 func TestUnRegister(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 
 	// inject mock sharder into stack
 	sharder := NewMockSharder(stack.db)
@@ -182,7 +182,7 @@ func TestSubmitUnregistered(t *testing.T) {
 func TestSubmitNilValues(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
@@ -195,21 +195,21 @@ func TestSubmitNilValues(t *testing.T) {
 
 	// try submitting nil payload
 	tx := TestTransaction()
-	tx.Payload = nil
+	tx.Self().Payload = nil
 	if err := stack.Submit(tx); err == nil {
 		t.Errorf("Transaction submission did not check for nil payload")
 	}
 
 	// try submitting unsigned transaction
 	tx = TestTransaction()
-	tx.Signature = nil
+	tx.Self().Signature = nil
 	if err := stack.Submit(tx); err == nil {
 		t.Errorf("Transaction submission did not check for signature")
 	}
 
 	// submitter ID needs to be non-null
 	tx = TestTransaction()
-	tx.Submitter = nil
+	tx.Anchor().Submitter = nil
 	if err := stack.Submit(tx); err == nil {
 		t.Errorf("Transaction submission did not check for nil submitter ID")
 	}
@@ -219,7 +219,7 @@ func TestSubmitNilValues(t *testing.T) {
 func TestSubmitAppIdNoMatch(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
@@ -239,14 +239,14 @@ func TestSubmit(t *testing.T) {
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	app := TestAppConfig()
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
 	// get an anchor
-	a := stack.Anchor()
+	a := stack.Anchor([]byte("test submitter"))
 	if a == nil {
 		t.Errorf("Failed to get anchor")
 	}
@@ -278,8 +278,8 @@ func TestSubmit(t *testing.T) {
 		t.Errorf("Transaction did not get broadcast to peers")
 	}
 	// verify that transaction's node ID was set correctly
-	if string(tx.NodeId) != string(p2p.Id()) {
-		t.Errorf("Transaction's node ID not initialized correctly\nExpected: %x\nActual: %x", p2p.Id(), tx.NodeId)
+	if string(tx.Anchor().NodeId) != string(p2p.Id()) {
+		t.Errorf("Transaction's node ID not initialized correctly\nExpected: %x\nActual: %x", p2p.Id(), tx.Anchor().NodeId)
 	}
 }
 
@@ -296,14 +296,14 @@ func TestReSubmitSeen(t *testing.T) {
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	app := TestAppConfig()
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
 	// get an anchor
-	a := stack.Anchor()
+	a := stack.Anchor([]byte("test submitter"))
 	if a == nil {
 		t.Errorf("Failed to get anchor")
 	}
@@ -344,14 +344,14 @@ func TestSubmitNetworkSeen(t *testing.T) {
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	app := TestAppConfig()
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
 	// get an anchor
-	a := stack.Anchor()
+	a := stack.Anchor([]byte("test submitter"))
 	if a == nil {
 		t.Errorf("Failed to get anchor")
 	}
@@ -381,14 +381,14 @@ func TestSubmitValidation(t *testing.T) {
 	p2p := p2p.TestP2PLayer("mock p2p")
 	stack.p2p = p2p
 	app := TestAppConfig()
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
 	}
 	tx := TestTransaction()
-	tx.ShardId = nil
+	tx.Anchor().ShardId = nil
 	if err := stack.Submit(tx); err == nil {
 		t.Errorf("Transaction submission did not check for missing shard Id")
 	}
@@ -522,7 +522,7 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
 
 	// define a default tx handler call back for app
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 
 	// register app
 	app := TestAppConfig()
@@ -575,7 +575,7 @@ func TestAppCallbackTxRejected(t *testing.T) {
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
 
 	// define a tx handler call back for app
-	txHandler := func(tx *dto.Transaction) error {
+	txHandler := func(tx dto.Transaction) error {
 		// we reject all transactions
 		return errors.New("trust no one")
 	}
@@ -624,19 +624,19 @@ func TestStackTxHandlerWrapper(t *testing.T) {
 	txMatch := false
 	gotCallback := false
 	origTx, _ := shard.SignedShardTransaction("test data")
-	txHandler := func(tx *dto.Transaction) error {
+	txHandler := func(tx dto.Transaction) error {
 		gotCallback = true
-		txMatch = (string(origTx.Payload) == string(tx.Payload) &&
-			string(origTx.Signature) == string(tx.Signature) &&
-			string(origTx.ShardId) == string(tx.ShardId) &&
-			string(origTx.Submitter) == string(tx.Submitter))
+		txMatch = (string(origTx.Self().Payload) == string(tx.Self().Payload) &&
+			string(origTx.Self().Signature) == string(tx.Self().Signature) &&
+			string(origTx.Anchor().ShardId) == string(tx.Anchor().ShardId) &&
+			string(origTx.Anchor().Submitter) == string(tx.Anchor().Submitter))
 
 		return nil
 	}
 
 	// register app
 	app := TestAppConfig()
-	if err := stack.Register(origTx.ShardId, app.Name, txHandler); err != nil {
+	if err := stack.Register(origTx.Anchor().ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 
@@ -685,7 +685,7 @@ func TestStackRunner(t *testing.T) {
 
 	// define a detault tx handler call back for app
 	gotCallback := false
-	txHandler := func(tx *dto.Transaction) error { gotCallback = true; return nil }
+	txHandler := func(tx dto.Transaction) error { gotCallback = true; return nil }
 
 	// register app
 	app := TestAppConfig()

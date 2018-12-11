@@ -20,12 +20,24 @@ func TestInitiatization(t *testing.T) {
 	}
 }
 
+func TestGenesis(t *testing.T) {
+	// create 2 different shard genesis transactions
+	gen1 := GenesisShardTx([]byte("shard 1"))
+	gen2 := GenesisShardTx([]byte("shard 2"))
+
+	// verify that they both have different transaction IDs
+	if gen1.Id() == gen2.Id() {
+		t.Errorf("Genesis transactions not unique!!!")
+	}
+
+}
+
 func TestRegistration(t *testing.T) {
 	testDb := repo.NewMockDltDb()
 	s, _ := NewSharder(testDb)
 
 	// register an app
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 
 	if err := s.Register([]byte("test shard"), txHandler); err != nil {
 		t.Errorf("App registration failed: %s", err)
@@ -67,8 +79,8 @@ func TestRegistrationReplay(t *testing.T) {
 
 	// register an app using same shard as network transaction
 	cbCalled := false
-	txHandler := func(tx *dto.Transaction) error { cbCalled = true; return nil }
-	if err := s.Register(tx.ShardId, txHandler); err != nil {
+	txHandler := func(tx dto.Transaction) error { cbCalled = true; return nil }
+	if err := s.Register(tx.Anchor().ShardId, txHandler); err != nil {
 		t.Errorf("App registration failed: %s", err)
 	}
 
@@ -98,7 +110,7 @@ func TestRegistrationKnownShard(t *testing.T) {
 	// submit a network transaction for a shard
 
 	// register an app
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 
 	if err := s.Register([]byte("test shard"), txHandler); err != nil {
 		t.Errorf("App registration failed: %s", err)
@@ -128,7 +140,7 @@ func TestUnregistration(t *testing.T) {
 	s, _ := NewSharder(testDb)
 
 	// register an app
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
 
 	// un-register the app
@@ -150,7 +162,7 @@ func TestAnchorRegistered(t *testing.T) {
 	s, _ := NewSharder(testDb)
 
 	// register an app
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
 
 	// call sharder's anchor update
@@ -192,7 +204,7 @@ func TestAnchorMultiTip(t *testing.T) {
 	s, _ := NewSharder(testDb)
 
 	// register an app
-	txHandler := func(tx *dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
 
 	// add 2 child network transactions nodes for same parent as genesis
@@ -226,12 +238,17 @@ func TestAnchorMultiTip(t *testing.T) {
 
 	// anchor should have highest numeric tip from the two
 	parent := child1.Id()
-	id2 := child2.Id()
-	if numeric(parent[:]) < numeric(id2[:]) {
-		parent = id2
+	uncle := child2.Id()
+	if numeric(parent[:]) < numeric(uncle[:]) {
+		parent, uncle = uncle, parent
 	}
 	if a.ShardParent != parent {
 		t.Errorf("Incorrect shard parent: %x", a.ShardParent)
+	}
+	if len(a.ShardUncles) != 1 {
+		t.Errorf("Incorrect shard uncle count: %d", len(a.ShardUncles))
+	} else if a.ShardUncles[0] != uncle {
+		t.Errorf("Incorrect shard uncle: %x", a.ShardUncles[0])
 	}
 }
 
@@ -272,8 +289,8 @@ func TestHandlerIncorrectGenesisFirstSeq(t *testing.T) {
 
 	// send a mock network transaction with shard seq 1 but incorrect parent not matching correct genesis
 	tx, genesis := SignedShardTransaction("test payload")
-	tx.ShardParent = [64]byte{}
-	tx.ShardParent[0] = 0xff
+	tx.Anchor().ShardParent = [64]byte{}
+	tx.Anchor().ShardParent[0] = 0xff
 	if err := s.Handle(tx); err == nil {
 		t.Errorf("Network handling of 1st shard transacton did not validate genesis parent")
 	}
@@ -302,8 +319,8 @@ func TestHandlerRegistered(t *testing.T) {
 
 	// register an app for transaction's shard
 	called := false
-	txHandler := func(tx *dto.Transaction) error { called = true; return nil }
-	s.Register(tx.ShardId, txHandler)
+	txHandler := func(tx dto.Transaction) error { called = true; return nil }
+	s.Register(tx.Anchor().ShardId, txHandler)
 
 	// send the mock network transaction to sharder with app registered
 	if err := s.Handle(tx); err != nil {
@@ -324,8 +341,8 @@ func TestHandlerAppFiltering(t *testing.T) {
 
 	// register an app for shard different from network transaction
 	called := false
-	txHandler := func(tx *dto.Transaction) error { called = true; return nil }
-	s.Register([]byte(string(tx.ShardId)+"extra"), txHandler)
+	txHandler := func(tx dto.Transaction) error { called = true; return nil }
+	s.Register([]byte(string(tx.Anchor().ShardId)+"extra"), txHandler)
 
 	// send the mock network transaction to sharder from different shard
 	if err := s.Handle(tx); err != nil {
@@ -346,12 +363,12 @@ func TestHandlerTransactionValidation(t *testing.T) {
 
 	// register an app for transaction's shard
 	called := false
-	txHandler := func(tx *dto.Transaction) error { called = true; return nil }
-	s.Register(tx.ShardId, txHandler)
+	txHandler := func(tx dto.Transaction) error { called = true; return nil }
+	s.Register(tx.Anchor().ShardId, txHandler)
 
 	// send the mock transaction to sharder with missing shard ID in transaction
-	tx.ShardId = nil
-	if err := s.Handle(&dto.Transaction{}); err == nil {
+	tx.Anchor().ShardId = nil
+	if err := s.Handle(tx); err == nil {
 		t.Errorf("sharder did not check for missing shard ID")
 	}
 
@@ -391,8 +408,8 @@ func TestApproverHappyPath(t *testing.T) {
 
 	// register an app for transaction's shard
 	called := false
-	txHandler := func(tx *dto.Transaction) error { called = true; return nil }
-	s.Register(tx.ShardId, txHandler)
+	txHandler := func(tx dto.Transaction) error { called = true; return nil }
+	s.Register(tx.Anchor().ShardId, txHandler)
 	testDb.Reset()
 
 	// send the transaction to sharder for approval

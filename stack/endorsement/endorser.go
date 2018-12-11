@@ -12,9 +12,9 @@ type Endorser interface {
 	// populate a transaction Anchor
 	Anchor(*dto.Anchor) error
 	// Handle network transaction
-	Handle(tx *dto.Transaction) error
+	Handle(tx dto.Transaction) error
 	// Approve submitted transaction
-	Approve(tx *dto.Transaction) error
+	Approve(tx dto.Transaction) error
 }
 
 type endorser struct {
@@ -25,7 +25,7 @@ func (e *endorser) Anchor(a *dto.Anchor) error {
 	return errors.New("not implemented")
 }
 
-func (e *endorser) Handle(tx *dto.Transaction) error {
+func (e *endorser) Handle(tx dto.Transaction) error {
 	// validate transaction
 	// TBD
 	if tx == nil {
@@ -42,7 +42,7 @@ func (e *endorser) Handle(tx *dto.Transaction) error {
 	return nil
 }
 
-func (e *endorser) Approve(tx *dto.Transaction) error {
+func (e *endorser) Approve(tx dto.Transaction) error {
 	// validate transaction
 	if tx == nil {
 		return errors.New("invalid transaction")

@@ -15,26 +15,24 @@ func TestAppConfig() AppConfig {
 	}
 }
 
-func TestTransaction() *dto.Transaction {
+func TestTransaction() dto.Transaction {
 	return dto.TestTransaction()
 }
 
-func TestAnchoredTransaction(a *dto.Anchor, data string) *dto.Transaction {
+func TestAnchoredTransaction(a *dto.Anchor, data string) dto.Transaction {
 	tx, _ := shard.SignedShardTransaction(data)
-	tx.ShardId = a.ShardId
-	tx.ShardParent = a.ShardParent
-	tx.ShardSeq = a.ShardSeq
+	tx.Self().TxAnchor = a
 	return tx
 }
 
-func TestSignedTransaction(data string) *dto.Transaction {
+func TestSignedTransaction(data string) dto.Transaction {
 	tx, _ := shard.SignedShardTransaction(data)
 	return tx
 }
 
 type mockEndorser struct {
 	TxId            [64]byte
-	Tx              *dto.Transaction
+	Tx              dto.Transaction
 	TxHandlerCalled bool
 	AnchorCalled    bool
 	ApproverCalled  bool
@@ -47,13 +45,13 @@ func (e *mockEndorser) Anchor(a *dto.Anchor) error {
 	return e.orig.Anchor(a)
 }
 
-func (e *mockEndorser) Approve(tx *dto.Transaction) error {
+func (e *mockEndorser) Approve(tx dto.Transaction) error {
 	e.ApproverCalled = true
 	e.TxId = tx.Id()
 	return e.orig.Approve(tx)
 }
 
-func (e *mockEndorser) Handle(tx *dto.Transaction) error {
+func (e *mockEndorser) Handle(tx dto.Transaction) error {
 	e.TxHandlerCalled = true
 	e.TxId = tx.Id()
 	e.Tx = tx
@@ -82,11 +80,11 @@ type mockSharder struct {
 	AnchorCalled    bool
 	ApproverCalled  bool
 	TxHandlerCalled bool
-	TxHandler       func(tx *dto.Transaction) error
+	TxHandler       func(tx dto.Transaction) error
 	orig            shard.Sharder
 }
 
-func (s *mockSharder) Register(shardId []byte, txHandler func(tx *dto.Transaction) error) error {
+func (s *mockSharder) Register(shardId []byte, txHandler func(tx dto.Transaction) error) error {
 	s.IsRegistered = true
 	s.ShardId = shardId
 	s.TxHandler = txHandler
@@ -104,12 +102,12 @@ func (s *mockSharder) Anchor(a *dto.Anchor) error {
 	return s.orig.Anchor(a)
 }
 
-func (s *mockSharder) Approve(tx *dto.Transaction) error {
+func (s *mockSharder) Approve(tx dto.Transaction) error {
 	s.ApproverCalled = true
 	return s.orig.Approve(tx)
 }
 
-func (s *mockSharder) Handle(tx *dto.Transaction) error {
+func (s *mockSharder) Handle(tx dto.Transaction) error {
 	s.TxHandlerCalled = true
 	return s.orig.Handle(tx)
 }

@@ -66,7 +66,7 @@ func TestUpdateShard(t *testing.T) {
 	}
 
 	// validate that shard tips was updated for the transaction correctly
-	if _, err := repo.shardTipsDb.Get(tx.ShardId); err != nil {
+	if _, err := repo.shardTipsDb.Get(tx.Anchor().ShardId); err != nil {
 		t.Errorf("Error in checking shard tips: %s", err)
 	}
 }
@@ -76,9 +76,9 @@ func TestAddTxShardDagUpdate(t *testing.T) {
 	repo, _ := NewDltDb(db.NewInMemDbProvider())
 	parent := dto.TestSignedTransaction("test data")
 	child1 := dto.TestSignedTransaction("test data")
-	child1.ShardParent = parent.Id()
+	child1.Anchor().ShardParent = parent.Id()
 	child2 := dto.TestSignedTransaction("test data")
-	child2.ShardParent = parent.Id()
+	child2.Anchor().ShardParent = parent.Id()
 
 	// save transactions
 	repo.AddTx(parent)
@@ -111,15 +111,15 @@ func TestAddTxShardTipsUpdate(t *testing.T) {
 	repo, _ := NewDltDb(db.NewInMemDbProvider())
 	parent := dto.TestSignedTransaction("test data")
 	child1 := dto.TestSignedTransaction("test data")
-	child1.ShardParent = parent.Id()
+	child1.Anchor().ShardParent = parent.Id()
 	child2 := dto.TestSignedTransaction("test data")
-	child2.ShardParent = parent.Id()
+	child2.Anchor().ShardParent = parent.Id()
 
 	// add a parent transaction
 	repo.AddTx(parent)
 	repo.UpdateShard(parent)
 	// validate that shard tip was added for the transactions correctly
-	tips := repo.ShardTips(parent.ShardId)
+	tips := repo.ShardTips(parent.Anchor().ShardId)
 	if len(tips) != 1 {
 		t.Errorf("Incorrect number of tips: %d", len(tips))
 	} else if tips[0] != parent.Id() {
@@ -133,7 +133,7 @@ func TestAddTxShardTipsUpdate(t *testing.T) {
 	repo.UpdateShard(child2)
 
 	// validate that shard tip was updated for the transactions correctly
-	tips = repo.ShardTips(parent.ShardId)
+	tips = repo.ShardTips(parent.Anchor().ShardId)
 	if len(tips) != 2 {
 		t.Errorf("Incorrect number of tips: %d", len(tips))
 	} else {
@@ -143,6 +143,40 @@ func TestAddTxShardTipsUpdate(t *testing.T) {
 		if tips[1] != child2.Id() {
 			t.Errorf("Incorrect 2nd tip\nExpected: %x\nActual: %x", child2.Id(), tips[1])
 		}
+	}
+}
+
+// test shard tips coalescing during adding transaction
+func TestAddTxShardTipsCoalesce(t *testing.T) {
+	repo, _ := NewDltDb(db.NewInMemDbProvider())
+	parent := dto.TestSignedTransaction("test data")
+	uncle := dto.TestSignedTransaction("test data")
+	child := dto.TestSignedTransaction("test data")
+	child.Anchor().ShardParent = parent.Id()
+	child.Anchor().ShardUncles = [][64]byte{uncle.Id()}
+
+	// add parent transaction
+	repo.AddTx(parent)
+	repo.UpdateShard(parent)
+	// add uncle transaction
+	repo.AddTx(uncle)
+	repo.UpdateShard(uncle)
+	// validate that shard tip was added for the transactions correctly
+	tips := repo.ShardTips(parent.Anchor().ShardId)
+	if len(tips) != 2 {
+		t.Errorf("Incorrect number of tips: %d", len(tips))
+	}
+
+	// now add child transactions for parent / uncle
+	repo.AddTx(child)
+	repo.UpdateShard(child)
+
+	// validate that shard tip was updated for the transactions correctly
+	tips = repo.ShardTips(parent.Anchor().ShardId)
+	if len(tips) != 1 {
+		t.Errorf("Incorrect number of tips: %d", len(tips))
+	} else if tips[0] != child.Id() {
+		t.Errorf("Incorrect 1st tip\nExpected: %x\nActual: %x", child.Id(), tips[0])
 	}
 }
 
@@ -164,10 +198,10 @@ func TestAddOrphanTx(t *testing.T) {
 	tx := dto.TestSignedTransaction("test data")
 
 	// make transaction orphan
-	tx.ShardSeq = 0x02
+	tx.Anchor().ShardSeq = 0x02
 	parent := []byte("some random parent")
-	for i := 0; i < len(tx.ShardParent) && i < len(parent); i++ {
-		tx.ShardParent[i] = parent[i]
+	for i := 0; i < len(tx.Anchor().ShardParent) && i < len(parent); i++ {
+		tx.Anchor().ShardParent[i] = parent[i]
 	}
 
 	// save the orphaned transaction

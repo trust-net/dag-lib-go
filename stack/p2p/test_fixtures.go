@@ -3,27 +3,27 @@
 package p2p
 
 import (
-	"net"
 	"errors"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/rlp"
+	"net"
 )
 
 func TestConfig() Config {
 	return Config{
-		KeyFile: "key_file.json",
-		KeyType: "ECDSA_S256",
-		MaxPeers: 1,
+		KeyFile:      "key_file.json",
+		KeyType:      "ECDSA_S256",
+		MaxPeers:     1,
 		ProtocolName: "test-protocol",
-		Name: "test node",
+		Name:         "test node",
 	}
 }
 
 type mockMsgReadWriter struct {
 	ReadCount  int
 	WriteCount int
-	msgs []p2p.Msg
+	msgs       []p2p.Msg
 }
 
 func TestConn() *mockMsgReadWriter {
@@ -32,7 +32,7 @@ func TestConn() *mockMsgReadWriter {
 
 func (m *mockMsgReadWriter) NextMsg(msgcode uint64, data interface{}) {
 	size, r, _ := rlp.EncodeToReader(data)
-	msg := p2p.Msg {Code: msgcode, Size: uint32(size), Payload: r}
+	msg := p2p.Msg{Code: msgcode, Size: uint32(size), Payload: r}
 	m.msgs = append(m.msgs, msg)
 }
 
@@ -52,18 +52,18 @@ func (m *mockMsgReadWriter) WriteMsg(p2p.Msg) error {
 }
 
 func TestP2PLayer(name string) *mockP2P {
-	return &mockP2P {
+	return &mockP2P{
 		Name: name,
-		ID: []byte("some random ID"),
+		ID:   []byte("some random ID"),
 	}
 }
 
 type mockP2P struct {
-	IsStarted bool
-	IsStopped bool
+	IsStarted    bool
+	IsStopped    bool
 	DidBroadcast bool
-	Name string
-	ID []byte
+	Name         string
+	ID           []byte
 }
 
 func (p2p *mockP2P) Start() error {
@@ -96,41 +96,41 @@ func (p2p *mockP2P) Verify(payload, sign, id []byte) bool {
 	return true
 }
 
-func (p2p *mockP2P) Broadcast(msgId []byte, msgcode uint64, data interface{}) error {
+func (p2p *mockP2P) Broadcast(msgId [64]byte, msgcode uint64, data interface{}) error {
 	p2p.DidBroadcast = true
 	return nil
 }
 
-// implements peerDEVp2pWrapper interface, so can be used interchangeabily with DEVp2p.Peer 
+// implements peerDEVp2pWrapper interface, so can be used interchangeabily with DEVp2p.Peer
 type mockPeer struct {
-	IdCount int
-	NameCount int
-	RemoteCount int
-	LocalCount int
+	IdCount         int
+	NameCount       int
+	RemoteCount     int
+	LocalCount      int
 	DisconnectCount int
-	StringCount int
+	StringCount     int
 }
 
-func (p* mockPeer) ID() discover.NodeID {
+func (p *mockPeer) ID() discover.NodeID {
 	p.IdCount += 1
 	return discover.NodeID{}
 }
-func (p* mockPeer) Name() string {
-	p.NameCount +=1
+func (p *mockPeer) Name() string {
+	p.NameCount += 1
 	return ""
 }
-func (p* mockPeer) RemoteAddr() net.Addr {
+func (p *mockPeer) RemoteAddr() net.Addr {
 	p.RemoteCount += 1
 	return nil
 }
-func (p* mockPeer) LocalAddr() net.Addr {
+func (p *mockPeer) LocalAddr() net.Addr {
 	p.LocalCount += 1
 	return nil
 }
-func (p* mockPeer) Disconnect(reason p2p.DiscReason) {
+func (p *mockPeer) Disconnect(reason p2p.DiscReason) {
 	p.DisconnectCount += 1
 }
-func (p* mockPeer) String() string {
+func (p *mockPeer) String() string {
 	p.StringCount += 1
 	return ""
 }

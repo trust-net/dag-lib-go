@@ -20,17 +20,17 @@ type mockDb struct {
 	db                           DltDb
 }
 
-func (d *mockDb) GetTx(id [64]byte) *dto.Transaction {
+func (d *mockDb) GetTx(id [64]byte) dto.Transaction {
 	d.GetTxCallCount += 1
 	return d.db.GetTx(id)
 }
 
-func (d *mockDb) AddTx(tx *dto.Transaction) error {
+func (d *mockDb) AddTx(tx dto.Transaction) error {
 	d.AddTxCallCount += 1
 	return d.db.AddTx(tx)
 }
 
-func (d *mockDb) UpdateShard(tx *dto.Transaction) error {
+func (d *mockDb) UpdateShard(tx dto.Transaction) error {
 	d.UpdateShardCount += 1
 	return d.db.UpdateShard(tx)
 }

@@ -21,11 +21,11 @@ type DagNode struct {
 
 type DltDb interface {
 	// get a transaction from transaction history (no entry == nil)
-	GetTx(id [64]byte) *dto.Transaction
+	GetTx(id [64]byte) dto.Transaction
 	// add a new transaction to transaction history (no duplicates, no updates)
-	AddTx(tx *dto.Transaction) error
+	AddTx(tx dto.Transaction) error
 	// update a shard's DAG and tips for a new transaction
-	UpdateShard(tx *dto.Transaction) error
+	UpdateShard(tx dto.Transaction) error
 	// delete an existing transaction from transaction history (deleting a non-tip transaction will cause errors)
 	DeleteTx(id [64]byte) error
 	// get the shard's DAG node for given transaction Id (no entry == nil)
@@ -50,7 +50,7 @@ type dltDb struct {
 	lock            sync.RWMutex
 }
 
-func (d *dltDb) GetTx(id [64]byte) *dto.Transaction {
+func (d *dltDb) GetTx(id [64]byte) dto.Transaction {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	// get serialized transactions from DB
@@ -58,14 +58,14 @@ func (d *dltDb) GetTx(id [64]byte) *dto.Transaction {
 		return nil
 	} else {
 		// deserialize the transaction read from DB
-		tx := &dto.Transaction{}
+		tx := dto.NewTransaction(&dto.Anchor{})
 		if err := tx.DeSerialize(data); err != nil {
 			return nil
 		}
 		return tx
 	}
 }
-func (d *dltDb) AddTx(tx *dto.Transaction) error {
+func (d *dltDb) AddTx(tx dto.Transaction) error {
 	// save transaction
 	var data []byte
 	var err error
@@ -87,7 +87,7 @@ func (d *dltDb) AddTx(tx *dto.Transaction) error {
 	return nil
 }
 
-func (d *dltDb) UpdateShard(tx *dto.Transaction) error {
+func (d *dltDb) UpdateShard(tx dto.Transaction) error {
 	// save transaction
 	var err error
 	d.lock.Lock()
@@ -95,27 +95,31 @@ func (d *dltDb) UpdateShard(tx *dto.Transaction) error {
 
 	// add the DAG node for the transaction to shard DAG db
 	dagNode := DagNode{
-		Parent: tx.ShardParent,
+		Parent: tx.Anchor().ShardParent,
 		TxId:   tx.Id(),
-		Depth:  tx.ShardSeq,
+		Depth:  tx.Anchor().ShardSeq,
 	}
 	if err = d.saveShardDagNode(&dagNode); err != nil {
 		return err
 	}
 
 	// update the children of the parent DAG (if present)
-	if parent := d.getShardDagNode(tx.ShardParent); parent != nil {
+	if parent := d.getShardDagNode(tx.Anchor().ShardParent); parent != nil {
 		parent.Children = append(parent.Children, tx.Id())
 		if err := d.saveShardDagNode(parent); err != nil {
 			return err
 		}
 	}
 
-	// remove parent from shard's TIPs (if present)
-	tips := d.shardTips(tx.ShardId)
+	// remove parent and uncles from shard's TIPs (if present)
+	tips := d.shardTips(tx.Anchor().ShardId)
 	newTips := make([][64]byte, 0, len(tips))
+	uncles := make(map[[64]byte]struct{})
+	for _, uncle := range tx.Anchor().ShardUncles {
+		uncles[uncle] = struct{}{}
+	}
 	for _, tip := range tips {
-		if tip != tx.ShardParent {
+		if _, isUncle := uncles[tip]; tip != tx.Anchor().ShardParent && !isUncle {
 			newTips = append(newTips, tip)
 		} else {
 			// fmt.Printf("removing parent tip: %x\n", tip)
@@ -125,7 +129,7 @@ func (d *dltDb) UpdateShard(tx *dto.Transaction) error {
 	newTips = append(newTips, tx.Id())
 	// fmt.Printf("adding child tip: %x\n", tx.Id())
 	// update shard's tips
-	if err = d.updateShardTips(tx.ShardId, newTips); err != nil {
+	if err = d.updateShardTips(tx.Anchor().ShardId, newTips); err != nil {
 		return err
 	}
 

@@ -9,26 +9,31 @@ import (
 	"math/big"
 )
 
-func TestTransaction() *Transaction {
-	return &Transaction{
+func TestTransaction() *transaction {
+	return &transaction{
 		Payload:   []byte("test data"),
 		Signature: []byte("test signature"),
-		NodeId:    []byte("test node ID"),
-		ShardId:   []byte("test shard"),
-		Submitter: []byte("test submitter"),
+		TxAnchor: &Anchor{
+			NodeId:    []byte("test node ID"),
+			ShardId:   []byte("test shard"),
+			Submitter: []byte("test submitter"),
+		},
 	}
 }
 
-func TestSignedTransaction(data string) *Transaction {
-	tx := &Transaction{
-		Payload:  []byte(data),
-		ShardId:  []byte("test shard"),
-		NodeId:   []byte("test app ID"),
-		ShardSeq: 0x01,
+func TestSignedTransaction(data string) *transaction {
+	tx := &transaction{
+		Payload: []byte(data),
+		TxAnchor: &Anchor{
+			NodeId:    []byte("test node ID"),
+			ShardId:   []byte("test shard"),
+			Submitter: []byte("test submitter"),
+			ShardSeq:  0x01,
+		},
 	}
 	// create a new ECDSA key for submitter client
 	key, _ := crypto.GenerateKey()
-	tx.Submitter = crypto.FromECDSAPub(&key.PublicKey)
+	tx.TxAnchor.Submitter = crypto.FromECDSAPub(&key.PublicKey)
 
 	// sign the test payload using SHA512 hash and ECDSA private key
 	type signature struct {

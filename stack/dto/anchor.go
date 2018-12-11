@@ -1,6 +1,8 @@
 package dto
 
-import ()
+import (
+	"github.com/trust-net/go-trust-net/common"
+)
 
 // transaction message
 type Anchor struct {
@@ -12,4 +14,19 @@ type Anchor struct {
 	ShardSeq uint64
 	// parent transaction within the shard
 	ShardParent [64]byte
+	// uncle transactions within the shard
+	ShardUncles [][64]byte
+	// transaction submitter's public ID
+	Submitter []byte
+}
+
+func (a *Anchor) Serialize() ([]byte, error) {
+	return common.Serialize(a)
+}
+
+func (a *Anchor) DeSerialize(data []byte) error {
+	if err := common.Deserialize(data, a); err != nil {
+		return err
+	}
+	return nil
 }
