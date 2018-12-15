@@ -164,37 +164,15 @@ func (d *dlt) handshake(peer p2p.Peer) error {
 	return nil
 }
 
-// listen on messages from the peer node
-func (d *dlt) listener(peer p2p.Peer) error {
-	for {
-		msg, err := peer.ReadMsg()
-		if err != nil {
-			return err
-		}
-		switch msg.Code() {
-		case NodeShutdownMsgCode:
-			// cleanly shutdown peer connection
-			d.p2p.Disconnect(peer)
-			return nil
-
-		case TransactionMsgCode:
-			// deserialize the transaction message from payload
-			tx := dto.NewTransaction(&dto.Anchor{})
-			if err := msg.Decode(tx); err != nil {
-				fmt.Printf("\nFailed to decode message: %s\n", err)
-				return err
-			}
-
-			// validate transaction signature using transaction submitter's ID
-			if !d.p2p.Verify(tx.Self().Payload, tx.Self().Signature, tx.Anchor().Submitter) {
-				return errors.New("Transaction signature invalid")
-			}
-
-			// check if message was already seen by stack
-			if d.isSeen(tx.Id()) {
-				continue
-			}
-
+// listen on events for a specific peer connection
+func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
+	// fmt.Printf("Entering event listener...\n")
+	done := false
+	for !done {
+		e := <-events
+		switch e.code {
+		case RECV_NewTxBlockMsg:
+			tx := e.data.(dto.Transaction)
 			// transaction message should go to sharding layer
 			// but, should'nt it go to endorsing layer first, to make sure its valid transaction?
 			// also, should sharding layer be invoking the application callback, or should it be invoked by controller?
@@ -216,6 +194,51 @@ func (d *dlt) listener(peer p2p.Peer) error {
 			id := tx.Id()
 			peer.Seen(id[:])
 			d.p2p.Broadcast(tx.Self().Id(), TransactionMsgCode, tx)
+		case SHUTDOWN:
+			// fmt.Printf("Recieved SHUTDOWN event...\n")
+			done = true
+			break
+		default:
+			fmt.Printf("Unknown event: %d...\n", e.code)
+		}
+	}
+	// fmt.Printf("Exiting event listener...\n")
+}
+
+// listen on messages from the peer node
+func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
+	for {
+		msg, err := peer.ReadMsg()
+		if err != nil {
+			return err
+		}
+		switch msg.Code() {
+		case NodeShutdownMsgCode:
+			// cleanly shutdown peer connection
+			d.p2p.Disconnect(peer)
+			events <- newControllerEvent(SHUTDOWN, nil)
+			return nil
+
+		case TransactionMsgCode:
+			// deserialize the transaction message from payload
+			tx := dto.NewTransaction(&dto.Anchor{})
+			if err := msg.Decode(tx); err != nil {
+				fmt.Printf("\nFailed to decode message: %s\n", err)
+				return err
+			}
+
+			// validate transaction signature using transaction submitter's ID
+			if !d.p2p.Verify(tx.Self().Payload, tx.Self().Signature, tx.Anchor().Submitter) {
+				return errors.New("Transaction signature invalid")
+			}
+
+			// check if message was already seen by stack
+			if d.isSeen(tx.Id()) {
+				continue
+			} else {
+				// emit a RECV_NewTxBlockMsg event
+				events <- newControllerEvent(RECV_NewTxBlockMsg, tx)
+			}
 
 		// case 1 message type
 
@@ -240,8 +263,11 @@ func (d *dlt) runner(peer p2p.Peer) error {
 			// TODO: perform any cleanup here upon exit
 		}()
 	}
+	// start the event listener for this connection
+	events := make(chan controllerEvent, 10)
+	go d.peerEventsListener(peer, events)
 	// start listening on messages from peer node
-	return d.listener(peer)
+	return d.listener(peer, events)
 }
 
 // mark a message as seen for stack (different from marking it seen for connected peer nodes)

@@ -7,6 +7,7 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/shard"
 	"testing"
+	"time"
 )
 
 // initialize DLT stack and validate
@@ -442,8 +443,8 @@ func TestPeerHandshake(t *testing.T) {
 	}
 }
 
-// statck controller listener with no app registered, happy path
-func TestPeerListenerNoApp(t *testing.T) {
+// test stack controller event listener handles RECV_NewTxBlockMsg correctly
+func TestEventListenerHandleNewTxBlockMsgEvent(t *testing.T) {
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 
@@ -464,29 +465,27 @@ func TestPeerListenerNoApp(t *testing.T) {
 	mockConn := p2p.TestConn()
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
 
-	// setup mock connection to send a signed transaction followed by clean shutdown
-	tx, _ := shard.SignedShardTransaction("test payload")
-	mockConn.NextMsg(TransactionMsgCode, tx)
-	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
 
-	// now call stack's listener
-	if err := stack.listener(peer); err != nil {
-		t.Errorf("Listener failed to process transaction as headless: %s", err)
-	}
+	// now emit RECV_NewTxBlockMsg event
+	tx := TestSignedTransaction("test payload")
+	events <- newControllerEvent(RECV_NewTxBlockMsg, tx)
+	events <- newControllerEvent(SHUTDOWN, nil)
 
-	// we should have read 2 messages from peer
-	if mockConn.ReadCount != 2 {
-		t.Errorf("Listener read %d messages", mockConn.ReadCount)
-	}
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle new transaction
 
 	// we should have broadcasted message
 	if !mockP2PLayer.DidBroadcast {
 		t.Errorf("Listener did not froward network transaction as headless")
-	}
-
-	// we should have marked the message as seen for stack
-	if !stack.isSeen(tx.Id()) {
-		t.Errorf("Listener did not mark the transaction as seen while headless")
 	}
 
 	// sharding layer should be asked to handle transaction
@@ -503,8 +502,8 @@ func TestPeerListenerNoApp(t *testing.T) {
 	}
 }
 
-// statck controller listener with a previously seen message
-func TestPeerListenerSeenMessage(t *testing.T) {
+// stack controller listner generates RECV_NewTxBlockMsg event for unseen network message
+func TestPeerListnerGeneratesEventForUnseenTxBlockMsg(t *testing.T) {
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 
@@ -535,12 +534,102 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 	mockConn.NextMsg(TransactionMsgCode, tx)
 	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
 
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	seenNewTxBlockMsgEvent := false
+	finished := make(chan struct{}, 2)
+	go func() {
+		tick := time.Tick(100 * time.Millisecond)
+		for {
+			select {
+			case e := <-events:
+				if e.code == RECV_NewTxBlockMsg {
+					seenNewTxBlockMsgEvent = true
+				} else if e.code == SHUTDOWN {
+					finished <- struct{}{}
+					return
+				}
+			case <-tick:
+				finished <- struct{}{}
+				return
+			}
+		}
+	}()
+
+	// now call stack's listener
+	if err := stack.listener(peer, events); err != nil {
+		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// wait for event listener to process
+	<-finished
+
+	// check if listener generate correct event
+	if !seenNewTxBlockMsgEvent {
+		t.Errorf("Event listener did not generate RECV_NewTxBlockMsg event!!!")
+	}
+
+	// we should have marked the message as seen for stack
+	if !stack.isSeen(tx.Id()) {
+		t.Errorf("Listener did not mark the transaction as seen while headless")
+	}
+}
+
+// stack controller listner does not generate RECV_NewTxBlockMsg event for seen network message
+func TestPeerListnerDoesNotGeneratesEventForSeenTxBlockMsg(t *testing.T) {
+	// create an instance of stack controller
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+
+	// inject mock p2p module into stack
+	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = mockP2PLayer
+
+	// build a mock peer
+	mockP2pPeer := p2p.TestMockPeer("test peer")
+	mockConn := p2p.TestConn()
+	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
+
+	// setup mock connection to send a signed transaction followed by clean shutdown
+	tx := TestSignedTransaction("test payload")
+	mockConn.NextMsg(TransactionMsgCode, tx)
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
 	// mark the message seen with stack
 	stack.isSeen(tx.Id())
 
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	seenNewTxBlockMsgEvent := false
+	finished := make(chan struct{}, 2)
+	go func() {
+		tick := time.Tick(100 * time.Millisecond)
+		for {
+			select {
+			case e := <-events:
+				if e.code == RECV_NewTxBlockMsg {
+					seenNewTxBlockMsgEvent = true
+				} else if e.code == SHUTDOWN {
+					finished <- struct{}{}
+					return
+				}
+			case <-tick:
+				finished <- struct{}{}
+				return
+			}
+		}
+	}()
+
 	// now call stack's listener
-	if err := stack.listener(peer); err != nil {
+	if err := stack.listener(peer, events); err != nil {
 		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// wait for event listener to process
+	<-finished
+
+	// we should have marked the message as seen for stack
+	if !stack.isSeen(tx.Id()) {
+		t.Errorf("Listener did not mark the transaction as seen while headless")
 	}
 
 	// we should have attempted to read messaged 2 times
@@ -548,14 +637,9 @@ func TestPeerListenerSeenMessage(t *testing.T) {
 		t.Errorf("Listener read %d messages", mockConn.ReadCount)
 	}
 
-	// we should not have broadcasted seen message
-	if mockP2PLayer.DidBroadcast {
-		t.Errorf("Listener frowarded a seen transaction")
-	}
-
-	// verify that endorser did not get called for duplicate network message
-	if endorser.TxHandlerCalled {
-		t.Errorf("Endorser got called for duplicate network transaction")
+	// we should not have generated the RECV_NewTxBlockMsg event
+	if seenNewTxBlockMsgEvent {
+		t.Errorf("Event listener should not generate RECV_NewTxBlockMsg event for seen message!!!")
 	}
 }
 
@@ -575,8 +659,10 @@ func TestAppCallbackTxRejected(t *testing.T) {
 	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
 
 	// define a tx handler call back for app
+	txHandlerCalled := false
 	txHandler := func(tx dto.Transaction) error {
 		// we reject all transactions
+		txHandlerCalled = true
 		return errors.New("trust no one")
 	}
 
@@ -586,83 +672,30 @@ func TestAppCallbackTxRejected(t *testing.T) {
 		t.Errorf("Registration failed, err: %s", err)
 	}
 
-	// setup mock connection to send a signed transaction followed by clean shutdown
-	tx, _ := shard.SignedShardTransaction("test data")
-	mockConn.NextMsg(TransactionMsgCode, tx)
-	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
 
-	// now call stack's listener
-	if err := stack.listener(peer); err != nil {
-		t.Errorf("Listener quit on transaction rejected by app: %s", err)
-	}
+	// now emit RECV_NewTxBlockMsg event
+	tx := TestSignedTransaction("test payload")
+	events <- newControllerEvent(RECV_NewTxBlockMsg, tx)
+	events <- newControllerEvent(SHUTDOWN, nil)
 
-	// we should have attempted to read 2 messages
-	if mockConn.ReadCount != 2 {
-		t.Errorf("Listener read %d messages", mockConn.ReadCount)
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle new transaction
+	if !txHandlerCalled {
+		t.Errorf("Registered app's transaction handler not called")
 	}
 
 	// we should not have broadcasted message
 	if mockP2PLayer.DidBroadcast {
 		t.Errorf("Listener frowarded an invalid network transaction")
-	}
-
-	// we should have marked the message as seen for stack
-	if !stack.isSeen(tx.Id()) {
-		t.Errorf("Listener did not mark the transaction as seen while headless")
-	}
-}
-
-// DLT stack controller's transaction callback wrapper between sharder and application
-func TestStackTxHandlerWrapper(t *testing.T) {
-	// create an instance of stack controller
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
-
-	// inject mock p2p module into stack
-	stack.p2p = p2p.TestP2PLayer("mock p2p")
-
-	// define a detault tx handler call back for app
-	txMatch := false
-	gotCallback := false
-	origTx, _ := shard.SignedShardTransaction("test data")
-	txHandler := func(tx dto.Transaction) error {
-		gotCallback = true
-		txMatch = (string(origTx.Self().Payload) == string(tx.Self().Payload) &&
-			string(origTx.Self().Signature) == string(tx.Self().Signature) &&
-			string(origTx.Anchor().ShardId) == string(tx.Anchor().ShardId) &&
-			string(origTx.Anchor().Submitter) == string(tx.Anchor().Submitter))
-
-		return nil
-	}
-
-	// register app
-	app := TestAppConfig()
-	if err := stack.Register(origTx.Anchor().ShardId, app.Name, txHandler); err != nil {
-		t.Errorf("Registration failed, err: %s", err)
-	}
-
-	// build a mock peer
-	mockP2pPeer := p2p.TestMockPeer("test peer")
-	mockConn := p2p.TestConn()
-	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
-
-	// setup mock connection to send following messages:
-	//    transaction message
-	//    node shutdown message
-	mockConn.NextMsg(TransactionMsgCode, origTx)
-	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
-
-	// now simulate a new connection session
-	if err := stack.runner(peer); err != nil {
-		t.Errorf("Peer connection has error: %s", err)
-	}
-
-	// validate that transaction in callback matched the original
-	if !txMatch {
-		t.Errorf("transactions failed to match")
-	}
-
-	if !gotCallback {
-		t.Errorf("Application did not recieve callback")
 	}
 }
 
@@ -709,6 +742,9 @@ func TestStackRunner(t *testing.T) {
 	if err := stack.runner(peer); err != nil {
 		t.Errorf("Peer connection has error: %s", err)
 	}
+
+	// wait for go subroutines to complete
+	time.Sleep(1000 * time.Millisecond)
 
 	// all messages should have been consumed from peer
 	if mockConn.ReadCount != 2 {
