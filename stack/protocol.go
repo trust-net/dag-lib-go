@@ -21,7 +21,9 @@ const (
 	TransactionMsgCode
 	// shard level sync message
 	ShardSyncMsgCode
-	// Length should contain the number of message codes used
+	// ancestors request message to walk back for shard's DAG
+	ShardAncestorRequestMsgCode
+	// ProtocolLength should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength
 )
@@ -37,6 +39,20 @@ type AppConfig struct {
 	Name string
 	// shard ID of the application (same for all nodes of application)
 	ShardId []byte
+}
+
+type ShardAncestorRequestMsg struct {
+	ShardId      []byte
+	StartHash    [64]byte
+	MaxAncestors int
+}
+
+func (m *ShardAncestorRequestMsg) Id() []byte {
+	return append(m.ShardId, m.StartHash[:]...)
+}
+
+func (m *ShardAncestorRequestMsg) Code() uint64 {
+	return ShardAncestorRequestMsgCode
 }
 
 type ShardSyncMsg struct {

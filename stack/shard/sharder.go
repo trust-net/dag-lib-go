@@ -107,7 +107,7 @@ func (s *sharder) Unregister() error {
 	return nil
 }
 
-func numeric(id []byte) uint64 {
+func Numeric(id []byte) uint64 {
 	num := uint64(0)
 	for _, b := range id {
 		num += uint64(b)
@@ -132,12 +132,14 @@ func (s *sharder) Anchor(a *dto.Anchor) error {
 	// find the deepest node as parent
 	parent := s.db.GetShardDagNode(tips[0])
 	uncles := [][64]byte{}
+	weight := parent.Depth
 	for i := 1; i < len(tips); i += 1 {
 		node := s.db.GetShardDagNode(tips[i])
+		weight += node.Depth
 		if parent.Depth < node.Depth {
 			uncles = append(uncles, parent.TxId)
 			parent = node
-		} else if parent.Depth == node.Depth && numeric(parent.TxId[:]) < numeric(node.TxId[:]) {
+		} else if parent.Depth == node.Depth && Numeric(parent.TxId[:]) < Numeric(node.TxId[:]) {
 			uncles = append(uncles, parent.TxId)
 			parent = node
 		} else {
@@ -150,6 +152,9 @@ func (s *sharder) Anchor(a *dto.Anchor) error {
 
 	// assign sequence 1 greater than DAG's parent node
 	a.ShardSeq = parent.Depth + 1
+
+	// assign weight as summation of all tip's depth + 1
+	a.Weight = weight + 1
 
 	// assign uncles to anchor
 	a.ShardUncles = uncles

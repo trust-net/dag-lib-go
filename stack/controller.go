@@ -184,10 +184,6 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 		switch e.code {
 		case RECV_NewTxBlockMsg:
 			tx := e.data.(dto.Transaction)
-			// transaction message should go to sharding layer
-			// but, should'nt it go to endorsing layer first, to make sure its valid transaction?
-			// also, should sharding layer be invoking the application callback, or should it be invoked by controller?
-			// TBD, TBD, TBD ...
 
 			// send transaction to endorsing layer for handling
 			if err := d.endorser.Handle(tx); err != nil {
@@ -205,10 +201,35 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			id := tx.Id()
 			peer.Seen(id[:])
 			d.p2p.Broadcast(tx.Self().Id(), TransactionMsgCode, tx)
+
+		case RECV_ShardSyncMsg:
+			msg := e.data.(*ShardSyncMsg)
+
+			// compare local anchor with remote anchor
+			myAnchor := &dto.Anchor{}
+
+			// TBD: below need to change, to fetch anchor only for remote peer's shard,
+			// since our local shard maybe different, but we may have more recent data
+			// due to network updates from other nodes
+			d.sharder.Anchor(myAnchor)
+
+			if string(myAnchor.ShardId) != string(msg.Anchor.ShardId) ||
+				myAnchor.Weight < msg.Anchor.Weight ||
+				shard.Numeric(myAnchor.ShardParent[:]) < shard.Numeric(msg.Anchor.ShardParent[:]) {
+				// local shard's anchor is behind, initiate sync with remote by walking up the DAG
+				req := &ShardAncestorRequestMsg{
+					ShardId:      msg.Anchor.ShardId,
+					StartHash:    msg.Anchor.ShardParent,
+					MaxAncestors: 10,
+				}
+				peer.Send(req.Id(), req.Code(), req)
+			}
+
 		case SHUTDOWN:
 			// fmt.Printf("Recieved SHUTDOWN event...\n")
 			done = true
 			break
+
 		default:
 			fmt.Printf("Unknown event: %d...\n", e.code)
 		}

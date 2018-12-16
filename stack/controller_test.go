@@ -2,6 +2,7 @@ package stack
 
 import (
 	"errors"
+	"fmt"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
@@ -538,8 +539,8 @@ func TestEventListenerHandleRECV_NewTxBlockMsgEvent(t *testing.T) {
 	}
 }
 
-// test stack controller event listener handles RECV_ShardSyncMsg correctly
-func TestEventListenerHandleRECV_ShardSyncMsgEvent(t *testing.T) {
+// test stack controller event listener handles RECV_ShardSyncMsg correctly when remote weight is more
+func TestRECV_ShardSyncMsgEvent_RemoteHeavy(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, _, _, _ := initMocks()
 
@@ -569,8 +570,234 @@ func TestEventListenerHandleRECV_ShardSyncMsgEvent(t *testing.T) {
 	// check if event listener correctly processed the event to handle shard sync
 	// when peer's Anchor is heavier than local shard's Anchor
 
-	// we should have sent the ParentRequest message from peer Anchor's parent to walk back on DAG
-	// TBD
+	// we should have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardAncestorRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	}
+}
+
+// test stack controller event listener handles RECV_ShardSyncMsg correctly when local shard is heavy
+func TestRECV_ShardSyncMsgEvent_LocalHeavy(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// submit a transaction to add weight to local shard's Anchor
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload")
+	if err := stack.Submit(tx); err != nil {
+		t.Errorf("Transaction submission failed, err: %s", err)
+	}
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a shard sync message with default Anchor but same shard as local
+	a := dto.TestAnchor()
+	a.ShardId = stack.Anchor([]byte("test")).ShardId
+	msg := NewShardSyncMsg(a)
+	// now emit RECV_ShardSyncMsg event
+	events <- newControllerEvent(RECV_ShardSyncMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle shard sync
+	// since local Anchor is heavier than remote shard's Anchor, no further sync message should be sent
+
+	// we should not have sent the ShardAncestorRequestMsg message
+	if peer.SendCalled {
+		t.Errorf("should not send any message to peer")
+	}
+}
+
+// test stack controller event listener handles RECV_ShardSyncMsg correctly when both weights are same
+func TestRECV_ShardSyncMsgEvent_SameWeight(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a shard sync message with same weight but parent hash that is higher numeric value
+	a := stack.Anchor([]byte("test submitter"))
+	for i := 0; i < 64; i++ {
+		a.ShardParent[i] = 0xff
+	}
+	msg := NewShardSyncMsg(a)
+	// now emit RECV_ShardSyncMsg event
+	events <- newControllerEvent(RECV_ShardSyncMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle shard sync
+	// when peer's Anchor is heavier than local shard's Anchor
+
+	// we should have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardAncestorRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	}
+}
+
+// test stack controller event listener handles RECV_ShardSyncMsg correctly when both shards have same anchor
+func TestRECV_ShardSyncMsgEvent_SameAnchors(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// submit a transaction to add weight to local shard's Anchor
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload")
+	if err := stack.Submit(tx); err != nil {
+		t.Errorf("Transaction submission failed, err: %s", err)
+	}
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a shard sync message with same anchor as local
+	local := stack.Anchor([]byte("test submitter"))
+	remote := &dto.Anchor{
+		ShardId:     local.ShardId,
+		Weight:      local.Weight,
+		ShardSeq:    local.ShardSeq,
+		ShardParent: local.ShardParent,
+	}
+	msg := NewShardSyncMsg(remote)
+	// now emit RECV_ShardSyncMsg event
+	events <- newControllerEvent(RECV_ShardSyncMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle shard sync
+	// when peer's Anchor is same as local shard's Anchor
+
+	// we should not have sent any ShardAncestorRequestMsg message
+	if peer.SendCalled {
+		t.Errorf("should not send any message to peer")
+	}
+}
+
+// test stack controller event listener handles RECV_ShardSyncMsg correctly when app is not registered
+func TestRECV_ShardSyncMsgEvent_NoLocalShard(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// unregister the app
+	stack.Unregister()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a shard sync message with default Anchor
+	a := dto.TestAnchor()
+	msg := NewShardSyncMsg(a)
+	// now emit RECV_ShardSyncMsg event
+	events <- newControllerEvent(RECV_ShardSyncMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle shard sync
+	// when peer's Anchor is heavier than local shard's Anchor
+
+	// we should have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardAncestorRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	}
+}
+
+// test stack controller event listener handles RECV_ShardSyncMsg correctly when remote shard is different
+func TestRECV_ShardSyncMsgEvent_DifferentRemoteShard(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// submit a transaction to add weight to local shard's Anchor
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload")
+	if err := stack.Submit(tx); err != nil {
+		t.Errorf("Transaction submission failed, err: %s", err)
+	} else {
+		fmt.Printf("Anchor weight: %d\n", stack.Anchor([]byte("test")).Weight)
+	}
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a shard sync message with default Anchor
+	a := dto.TestAnchor()
+	a.ShardId = []byte("some random id")
+	msg := NewShardSyncMsg(a)
+	// now emit RECV_ShardSyncMsg event
+	events <- newControllerEvent(RECV_ShardSyncMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle shard sync
+	// even when local Anchor is heavier than remote shard's Anchor, because shards are different
+
+	// we should have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardAncestorRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if string(peer.SendMsg.(*ShardAncestorRequestMsg).ShardId) != string(a.ShardId) {
+		t.Errorf("Incorrect shard ID sent: %s", peer.SendMsg.(*ShardAncestorRequestMsg).ShardId)
+	}
 }
 
 // stack controller listner generates RECV_NewTxBlockMsg event for unseen network message

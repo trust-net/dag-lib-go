@@ -236,10 +236,15 @@ func TestAnchorMultiTip(t *testing.T) {
 		t.Errorf("Incorrect shard Seq: %x", a.ShardSeq)
 	}
 
+	// anchor should have weight of all tip's sequence summation + 1
+	if a.Weight != (1+1)+1 {
+		t.Errorf("Incorrect shard weight: %x", a.Weight)
+	}
+
 	// anchor should have highest numeric tip from the two
 	parent := child1.Id()
 	uncle := child2.Id()
-	if numeric(parent[:]) < numeric(uncle[:]) {
+	if Numeric(parent[:]) < Numeric(uncle[:]) {
 		parent, uncle = uncle, parent
 	}
 	if a.ShardParent != parent {
