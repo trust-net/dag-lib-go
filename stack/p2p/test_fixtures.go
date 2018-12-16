@@ -51,14 +51,14 @@ func (m *mockMsgReadWriter) WriteMsg(p2p.Msg) error {
 	return nil
 }
 
-func TestP2PLayer(name string) *mockP2P {
-	return &mockP2P{
+func TestP2PLayer(name string) *MockP2P {
+	return &MockP2P{
 		Name: name,
 		ID:   []byte("some random ID"),
 	}
 }
 
-type mockP2P struct {
+type MockP2P struct {
 	IsStarted    bool
 	IsStopped    bool
 	DidBroadcast bool
@@ -66,37 +66,37 @@ type mockP2P struct {
 	ID           []byte
 }
 
-func (p2p *mockP2P) Start() error {
+func (p2p *MockP2P) Start() error {
 	p2p.IsStarted = true
 	return nil
 }
 
-func (p2p *mockP2P) Disconnect(peer Peer) {
+func (p2p *MockP2P) Disconnect(peer Peer) {
 	return
 }
 
-func (p2p *mockP2P) Stop() {
+func (p2p *MockP2P) Stop() {
 	p2p.IsStopped = true
 	return
 }
 
-func (p2p *mockP2P) Self() string {
+func (p2p *MockP2P) Self() string {
 	return p2p.Name
 }
 
-func (p2p *mockP2P) Id() []byte {
+func (p2p *MockP2P) Id() []byte {
 	return p2p.ID
 }
 
-func (p2p *mockP2P) Sign(data []byte) ([]byte, error) {
+func (p2p *MockP2P) Sign(data []byte) ([]byte, error) {
 	return []byte("signature"), nil
 }
 
-func (p2p *mockP2P) Verify(payload, sign, id []byte) bool {
+func (p2p *MockP2P) Verify(payload, sign, id []byte) bool {
 	return true
 }
 
-func (p2p *mockP2P) Broadcast(msgId [64]byte, msgcode uint64, data interface{}) error {
+func (p2p *MockP2P) Broadcast(msgId [64]byte, msgcode uint64, data interface{}) error {
 	p2p.DidBroadcast = true
 	return nil
 }
