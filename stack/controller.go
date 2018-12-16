@@ -141,11 +141,11 @@ func (d *dlt) Anchor(id []byte) *dto.Anchor {
 		return nil
 	}
 
-	// TBD: get endorser's update on anchor
-	//	if err := d.endorser.Anchor(a); err != nil {
-	//		fmt.Printf("Failed to get endorser's anchor: %s\n", err)
-	//		return nil
-	//	}
+	// get endorser's update on anchor
+	if err := d.endorser.Anchor(a); err != nil {
+		fmt.Printf("Failed to get endorser's anchor: %s\n", err)
+		return nil
+	}
 	return a
 }
 

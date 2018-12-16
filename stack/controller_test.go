@@ -378,6 +378,49 @@ func TestStop(t *testing.T) {
 	}
 }
 
+// get an anchor from DLT stack when app is registered
+func TestAnchorRegisteredApp(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, _ := initMocks()
+
+	// get an anchor
+	a := stack.Anchor([]byte("test submitter"))
+	if a == nil {
+		t.Errorf("Failed to get anchor")
+	}
+
+	if !sharder.AnchorCalled {
+		t.Errorf("DLT stack did not called sharder's Anchor")
+	}
+
+	if !endorser.AnchorCalled {
+		t.Errorf("DLT stack did not called endorser's Anchor")
+	}
+}
+
+// get an anchor from DLT stack when app is not registered
+func TestAnchorUnregisteredApp(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, _ := initMocks()
+
+	// unregister app
+	stack.Unregister()
+
+	// get an anchor
+	a := stack.Anchor([]byte("test submitter"))
+	if a != nil {
+		t.Errorf("should not get anchor when app is not registered")
+	}
+
+	if !sharder.AnchorCalled {
+		t.Errorf("DLT stack did not called sharder's Anchor")
+	}
+
+	if endorser.AnchorCalled {
+		t.Errorf("DLT stack should not call endorser's Anchor when app is not registered")
+	}
+}
+
 // peer connection handshake, happy path
 func TestPeerHandshake(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
@@ -513,8 +556,9 @@ func TestEventListenerHandleRECV_ShardSyncMsgEvent(t *testing.T) {
 	}()
 
 	// build a shard sync message with heavier Anchor
-	msg := NewShardSyncMsg(dto.TestAnchor())
-	msg.Anchor.Weight = 0xff
+	a := stack.Anchor([]byte("test submitter"))
+	a.Weight += 10
+	msg := NewShardSyncMsg(a)
 	// now emit RECV_ShardSyncMsg event
 	events <- newControllerEvent(RECV_ShardSyncMsg, msg)
 	events <- newControllerEvent(SHUTDOWN, nil)
