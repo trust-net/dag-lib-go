@@ -12,6 +12,8 @@ type Anchor struct {
 	ShardId []byte
 	// sequence of this transaction within the shard
 	ShardSeq uint64
+	// weight of this transaction withing shard DAG (sum of all ancestor's weight + 1)
+	Weight uint64
 	// parent transaction within the shard
 	ShardParent [64]byte
 	// uncle transactions within the shard

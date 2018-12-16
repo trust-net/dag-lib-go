@@ -1,6 +1,8 @@
 package stack
 
-import ()
+import (
+	"github.com/trust-net/dag-lib-go/stack/dto"
+)
 
 // protocol specs
 const (
@@ -9,18 +11,19 @@ const (
 
 	// Version should contain the version number of the protocol.
 	ProtocolVersion = uint(0x01)
-
-	// Length should contain the number of message codes used
-	// by the protocol.
-	ProtocolLength = uint64(2)
 )
 
 // protocol messages
 const (
 	// peer connection shutdown
-	NodeShutdownMsgCode = uint64(0)
+	NodeShutdownMsgCode uint64 = iota
 	// application's transaction message
-	TransactionMsgCode = uint64(1)
+	TransactionMsgCode
+	// shard level sync message
+	ShardSyncMsgCode
+	// Length should contain the number of message codes used
+	// by the protocol.
+	ProtocolLength
 )
 
 // node shutdown message
@@ -34,4 +37,22 @@ type AppConfig struct {
 	Name string
 	// shard ID of the application (same for all nodes of application)
 	ShardId []byte
+}
+
+type ShardSyncMsg struct {
+	Anchor *dto.Anchor
+}
+
+func (m *ShardSyncMsg) Id() []byte {
+	return append([]byte("ShardSyncMsg"), m.Anchor.ShardId...)
+}
+
+func (m *ShardSyncMsg) Code() uint64 {
+	return ShardSyncMsgCode
+}
+
+func NewShardSyncMsg(anchor *dto.Anchor) *ShardSyncMsg {
+	return &ShardSyncMsg{
+		Anchor: anchor,
+	}
 }

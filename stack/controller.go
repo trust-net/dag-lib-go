@@ -159,8 +159,19 @@ func (d *dlt) Stop() {
 
 // perform handshake with the peer node
 func (d *dlt) handshake(peer p2p.Peer) error {
-	// Iteration 1 will not have any sync or protocol level handshake
-	//	fmt.Printf("\nNew Peer Connection: %x\n", peer.ID())
+	// if there is a registered app, send shard sync message for the app's shard
+	//   1) ask sharding layer for the current shard's Anchor
+	//   2) ask endorsing layer for the current Anchor's update
+	//   3) send the ShardSyncMsg message to peer
+	a := &dto.Anchor{}
+	if err := d.sharder.Anchor(a); err != nil {
+		fmt.Printf("\nCannot run handshake: %s\n", err)
+	} else if err = d.endorser.Anchor(a); err != nil {
+		fmt.Printf("\nCannot run handshake: %s\n", err)
+	} else {
+		msg := NewShardSyncMsg(a)
+		return peer.Send(msg.Id(), msg.Code(), msg)
+	}
 	return nil
 }
 
@@ -210,6 +221,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 	for {
 		msg, err := peer.ReadMsg()
 		if err != nil {
+			fmt.Printf("\nFailed to read message: %s\n", err)
 			return err
 		}
 		switch msg.Code() {
@@ -240,6 +252,17 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 				events <- newControllerEvent(RECV_NewTxBlockMsg, tx)
 			}
 
+		case ShardSyncMsgCode:
+			// deserialize the transaction message from payload
+			m := &ShardSyncMsg{}
+			if err := msg.Decode(m); err != nil {
+				fmt.Printf("\nFailed to decode message: %s\n", err)
+				return err
+			} else {
+				// emit a RECV_ShardSyncMsg event
+				events <- newControllerEvent(RECV_ShardSyncMsg, m)
+			}
+
 		// case 1 message type
 
 		// case 2 message type
@@ -257,6 +280,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 func (d *dlt) runner(peer p2p.Peer) error {
 	// initiate handshake with peer's sharding layer
 	if err := d.handshake(peer); err != nil {
+		fmt.Printf("\nHanshake failed: %s\n", err)
 		return err
 	} else {
 		defer func() {

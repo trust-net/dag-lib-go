@@ -21,15 +21,20 @@ func TestTransaction() *transaction {
 	}
 }
 
+func TestAnchor() *Anchor {
+	return &Anchor{
+		NodeId:    []byte("test node ID"),
+		ShardId:   []byte("test shard"),
+		Submitter: []byte("test submitter"),
+		ShardSeq:  0x01,
+		Weight:    0x01,
+	}
+}
+
 func TestSignedTransaction(data string) *transaction {
 	tx := &transaction{
-		Payload: []byte(data),
-		TxAnchor: &Anchor{
-			NodeId:    []byte("test node ID"),
-			ShardId:   []byte("test shard"),
-			Submitter: []byte("test submitter"),
-			ShardSeq:  0x01,
-		},
+		Payload:  []byte(data),
+		TxAnchor: TestAnchor(),
 	}
 	// create a new ECDSA key for submitter client
 	key, _ := crypto.GenerateKey()

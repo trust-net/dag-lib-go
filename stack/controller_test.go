@@ -427,24 +427,105 @@ func TestPeerHandshake(t *testing.T) {
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 
+	// inject mock p2p module into stack
+	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = mockP2PLayer
+
+	// inject mock sharding layer into stack
+	sharder := NewMockSharder(stack.db)
+	stack.sharder = sharder
+
+	// inject mock endorser into stack
+	endorser := NewMockEndorser(stack.db)
+	stack.endorser = endorser
+
 	// build a mock peer
-	mockP2pPeer := p2p.TestMockPeer("test peer")
 	mockConn := p2p.TestConn()
-	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
+	peer := NewMockPeer(mockConn)
+
+	// define a detault tx handler call back for app
+	gotCallback := false
+	txHandler := func(tx dto.Transaction) error { gotCallback = true; return nil }
+
+	// register app
+	app := TestAppConfig()
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
+		t.Errorf("Registration failed, err: %s", err)
+	}
 
 	// invoke handshake
 	if err := stack.handshake(peer); err != nil {
 		t.Errorf("Handshake failed, err: %s", err)
 	}
 
-	// for iteration #1 no handshake message should be exchanged
+	// we should have got anchor from sharding layer
+	if !sharder.AnchorCalled {
+		t.Errorf("Handshake did not fetch Anchor from sharding layer")
+	}
+
+	// we should have got anchor from endorsing layer
+	if !endorser.AnchorCalled {
+		t.Errorf("Handshake did not fetch Anchor from endorser layer")
+	}
+
+	// we should have sent ShardSyncMsg to peer
+	if !peer.SendCalled {
+		t.Errorf("Handshake did not send any message to peer")
+	} else if peer.SendMsgCode != ShardSyncMsgCode {
+		t.Errorf("Handshake did not send ShardSyncMsg message to peer")
+	}
+	if mockConn.WriteCount != 1 {
+		t.Errorf("Handshake sent unexpected number of messages: %d", mockConn.WriteCount)
+	}
+}
+
+// peer connection handshake when no app registered
+func TestPeerHandshakeUnregistered(t *testing.T) {
+	// create an instance of stack controller
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+
+	// inject mock p2p module into stack
+	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = mockP2PLayer
+
+	// inject mock sharding layer into stack
+	sharder := NewMockSharder(stack.db)
+	stack.sharder = sharder
+
+	// inject mock endorser into stack
+	endorser := NewMockEndorser(stack.db)
+	stack.endorser = endorser
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// invoke handshake
+	if err := stack.handshake(peer); err != nil {
+		t.Errorf("Handshake failed, err: %s", err)
+	}
+
+	// we should have got anchor from sharding layer
+	if !sharder.AnchorCalled {
+		t.Errorf("Handshake did not fetch Anchor from sharding layer")
+	}
+
+	// we should not have got anchor from endorsing layer
+	if endorser.AnchorCalled {
+		t.Errorf("Handshake should not fetch Anchor from endorser layer for unregistered app")
+	}
+
+	// we should not have sent ShardSyncMsg to peer
+	if peer.SendCalled {
+		t.Errorf("Handshake should not send any message to peer for unregistered app")
+	}
 	if mockConn.WriteCount != 0 {
-		t.Errorf("Handshake exchanged %d messages", mockConn.WriteCount)
+		t.Errorf("Handshake sent unexpected number of messages: %d", mockConn.WriteCount)
 	}
 }
 
 // test stack controller event listener handles RECV_NewTxBlockMsg correctly
-func TestEventListenerHandleNewTxBlockMsgEvent(t *testing.T) {
+func TestEventListenerHandleRECV_NewTxBlockMsgEvent(t *testing.T) {
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 
@@ -500,6 +581,52 @@ func TestEventListenerHandleNewTxBlockMsgEvent(t *testing.T) {
 	if endorser.TxId != tx.Id() {
 		t.Errorf("Endorser transaction does not match network transaction")
 	}
+}
+
+// test stack controller event listener handles RECV_ShardSyncMsg correctly
+func TestEventListenerHandleRECV_ShardSyncMsgEvent(t *testing.T) {
+	// create an instance of stack controller
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+
+	// inject mock p2p module into stack
+	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = mockP2PLayer
+
+	// inject mock sharding layer into stack
+	sharder := NewMockSharder(stack.db)
+	stack.sharder = sharder
+
+	// inject mock endorser into stack
+	endorser := NewMockEndorser(stack.db)
+	stack.endorser = endorser
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a shard sync message with heavier Anchor
+	msg := NewShardSyncMsg(dto.TestAnchor())
+	msg.Anchor.Weight = 0xff
+	// now emit RECV_ShardSyncMsg event
+	events <- newControllerEvent(RECV_ShardSyncMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle shard sync
+	// when peer's Anchor is heavier than local shard's Anchor
+
+	// we should have sent the ParentRequest message from peer Anchor's parent to walk back on DAG
+	// TBD
 }
 
 // stack controller listner generates RECV_NewTxBlockMsg event for unseen network message
@@ -572,6 +699,74 @@ func TestPeerListnerGeneratesEventForUnseenTxBlockMsg(t *testing.T) {
 	// we should have marked the message as seen for stack
 	if !stack.isSeen(tx.Id()) {
 		t.Errorf("Listener did not mark the transaction as seen while headless")
+	}
+}
+
+// stack controller listner generates RECV_ShardSyncMsg event for unseen network message
+func TestPeerListnerGeneratesEventForShardSyncMsg(t *testing.T) {
+	// create an instance of stack controller
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+
+	// inject mock p2p module into stack
+	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
+	stack.p2p = mockP2PLayer
+
+	// inject mock endorser into stack
+	endorser := NewMockEndorser(stack.db)
+	stack.endorser = endorser
+
+	// build a mock peer
+	mockP2pPeer := p2p.TestMockPeer("test peer")
+	mockConn := p2p.TestConn()
+	peer := p2p.NewDEVp2pPeer(mockP2pPeer, mockConn)
+
+	// define a default tx handler call back for app
+	txHandler := func(tx dto.Transaction) error { return nil }
+
+	// register app
+	app := TestAppConfig()
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
+		t.Errorf("Registration failed, err: %s", err)
+	}
+
+	// setup mock connection to send a signed transaction followed by clean shutdown
+	msg := NewShardSyncMsg(&dto.Anchor{})
+	mockConn.NextMsg(ShardSyncMsgCode, msg)
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	seenShardSyncMsgEvent := false
+	finished := make(chan struct{}, 2)
+	go func() {
+		tick := time.Tick(100 * time.Millisecond)
+		for {
+			select {
+			case e := <-events:
+				if e.code == RECV_ShardSyncMsg {
+					seenShardSyncMsgEvent = true
+				} else if e.code == SHUTDOWN {
+					finished <- struct{}{}
+					return
+				}
+			case <-tick:
+				finished <- struct{}{}
+				return
+			}
+		}
+	}()
+
+	// now call stack's listener
+	if err := stack.listener(peer, events); err != nil {
+		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// wait for event listener to process
+	<-finished
+
+	// check if listener generate correct event
+	if !seenShardSyncMsgEvent {
+		t.Errorf("Event listener did not generate RECV_ShardSyncMsg event!!!")
 	}
 }
 
@@ -751,8 +946,8 @@ func TestStackRunner(t *testing.T) {
 		t.Errorf("Did not expect %d messages consumed from peer", mockConn.ReadCount)
 	}
 
-	// no messages should have been sent to peer (yet)
-	if mockConn.WriteCount != 0 {
+	// handshake message should have been sent to peer
+	if mockConn.WriteCount != 1 {
 		t.Errorf("Did not expect %d messages sent to peer", mockConn.WriteCount)
 	}
 

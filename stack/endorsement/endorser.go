@@ -22,7 +22,8 @@ type endorser struct {
 }
 
 func (e *endorser) Anchor(a *dto.Anchor) error {
-	return errors.New("not implemented")
+	// no op
+	return nil
 }
 
 func (e *endorser) Handle(tx dto.Transaction) error {
