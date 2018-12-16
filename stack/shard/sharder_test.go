@@ -198,6 +198,61 @@ func TestAnchorUnregistered(t *testing.T) {
 	}
 }
 
+func TestSyncAnchorRegsiteredKnown(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	// register an app
+	txHandler := func(tx dto.Transaction) error { return nil }
+	s.Register([]byte("test shard"), txHandler)
+
+	// call sharder's sync anchor for same shard as registered
+	if a := s.SyncAnchor([]byte("test shard")); a == nil {
+		t.Errorf("failed to get sync anchor for registered shard")
+	}
+}
+
+func TestSyncAnchorRegsiteredUnknown(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	// register an app
+	txHandler := func(tx dto.Transaction) error { return nil }
+	s.Register([]byte("test shard"), txHandler)
+
+	// call sharder's sync anchor for some unknown shard
+	if a := s.SyncAnchor([]byte("unknown shard")); a != nil {
+		t.Errorf("should not get sync anchor for unknown shard")
+	}
+}
+
+func TestSyncAnchorUnregsiteredKnown(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	// register an app
+	txHandler := func(tx dto.Transaction) error { return nil }
+	s.Register([]byte("test shard"), txHandler)
+
+	// unregister the app
+	s.Unregister()
+
+	// call sharder's sync anchor for shard that is known from earlier
+	if a := s.SyncAnchor([]byte("test shard")); a == nil {
+		t.Errorf("failed to get sync anchor for known shard")
+	}
+}
+
+func TestSyncAnchorUnregsiteredUnknown(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	// call sharder's sync anchor without app registration
+	if a := s.SyncAnchor([]byte("unknown shard")); a != nil {
+		t.Errorf("should not get sync anchor for unknown shard")
+	}
+}
+
 func TestAnchorMultiTip(t *testing.T) {
 	fmt.Printf("#######################\n")
 	testDb := repo.NewMockDltDb()

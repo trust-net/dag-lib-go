@@ -17,6 +17,8 @@ type Sharder interface {
 	Unregister() error
 	// populate a transaction Anchor
 	Anchor(a *dto.Anchor) error
+	// provide anchor for syncing with specified shard
+	SyncAnchor(shardId []byte) *dto.Anchor
 	// Approve submitted transaction
 	Approve(tx dto.Transaction) error
 	// Handle Transaction
@@ -121,13 +123,30 @@ func (s *sharder) Anchor(a *dto.Anchor) error {
 	// make sure app is registered
 	if s.shardId == nil {
 		return errors.New("app not registered")
+	} else {
+		return s.updateAnchor(s.shardId, a)
 	}
+}
 
-	// assign shard ID of registered app
-	a.ShardId = s.shardId
+func (s *sharder) SyncAnchor(shardId []byte) *dto.Anchor {
+	a := &dto.Anchor{}
+	if err := s.updateAnchor(shardId, a); err != nil {
+		return nil
+	}
+	return a
+}
+
+func (s *sharder) updateAnchor(shardId []byte, a *dto.Anchor) error {
+
+	// assign shard ID of specified shard
+	a.ShardId = shardId
 
 	// get tips of the shard's DAG
-	tips := s.db.ShardTips(s.shardId)
+	tips := s.db.ShardTips(shardId)
+
+	if len(tips) == 0 {
+		return errors.New("shard unknown")
+	}
 
 	// find the deepest node as parent
 	parent := s.db.GetShardDagNode(tips[0])

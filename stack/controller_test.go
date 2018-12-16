@@ -2,7 +2,6 @@ package stack
 
 import (
 	"errors"
-	"fmt"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
@@ -542,7 +541,7 @@ func TestEventListenerHandleRECV_NewTxBlockMsgEvent(t *testing.T) {
 // test stack controller event listener handles RECV_ShardSyncMsg correctly when remote weight is more
 func TestRECV_ShardSyncMsgEvent_RemoteHeavy(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, sharder, _, _ := initMocks()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -569,6 +568,11 @@ func TestRECV_ShardSyncMsgEvent_RemoteHeavy(t *testing.T) {
 
 	// check if event listener correctly processed the event to handle shard sync
 	// when peer's Anchor is heavier than local shard's Anchor
+
+	// we should have used sharder's shard sync anchor
+	if !sharder.SyncAnchorCalled {
+		t.Errorf("controller did not use sharder's shard sync anchor")
+	}
 
 	// we should have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
 	if !peer.SendCalled {
@@ -711,11 +715,12 @@ func TestRECV_ShardSyncMsgEvent_SameAnchors(t *testing.T) {
 }
 
 // test stack controller event listener handles RECV_ShardSyncMsg correctly when app is not registered
-func TestRECV_ShardSyncMsgEvent_NoLocalShard(t *testing.T) {
+func TestRECV_ShardSyncMsgEvent_NoAppRegistered(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, _, _, _ := initMocks()
 
-	// unregister the app
+	// save app's shard for later use and then unregister the app
+	ShardId := stack.Anchor([]byte("test submitter")).ShardId
 	stack.Unregister()
 
 	// build a mock peer
@@ -730,8 +735,10 @@ func TestRECV_ShardSyncMsgEvent_NoLocalShard(t *testing.T) {
 		finished <- struct{}{}
 	}()
 
-	// build a shard sync message with default Anchor
+	// build a shard sync message with Anchor for previously known shard, and with heavier weight so that Anchors are not same
 	a := dto.TestAnchor()
+	a.ShardId = ShardId
+	a.Weight += 10
 	msg := NewShardSyncMsg(a)
 	// now emit RECV_ShardSyncMsg event
 	events <- newControllerEvent(RECV_ShardSyncMsg, msg)
@@ -741,7 +748,7 @@ func TestRECV_ShardSyncMsgEvent_NoLocalShard(t *testing.T) {
 	<-finished
 
 	// check if event listener correctly processed the event to handle shard sync
-	// when peer's Anchor is heavier than local shard's Anchor
+	// when peer's is known to us, even though there is no local app registered for that shard currently
 
 	// we should have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
 	if !peer.SendCalled {
@@ -755,14 +762,6 @@ func TestRECV_ShardSyncMsgEvent_NoLocalShard(t *testing.T) {
 func TestRECV_ShardSyncMsgEvent_DifferentRemoteShard(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, _, _, _ := initMocks()
-
-	// submit a transaction to add weight to local shard's Anchor
-	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload")
-	if err := stack.Submit(tx); err != nil {
-		t.Errorf("Transaction submission failed, err: %s", err)
-	} else {
-		fmt.Printf("Anchor weight: %d\n", stack.Anchor([]byte("test")).Weight)
-	}
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -788,15 +787,13 @@ func TestRECV_ShardSyncMsgEvent_DifferentRemoteShard(t *testing.T) {
 	<-finished
 
 	// check if event listener correctly processed the event to handle shard sync
-	// even when local Anchor is heavier than remote shard's Anchor, because shards are different
+	// when remote shard is unknown to local sharder
 
-	// we should have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
+	// we should have sent the ShardAncestorRequestMsg message to walk back on remote shard's DAG
 	if !peer.SendCalled {
 		t.Errorf("did not send any message to peer")
 	} else if peer.SendMsgCode != ShardAncestorRequestMsgCode {
 		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
-	} else if string(peer.SendMsg.(*ShardAncestorRequestMsg).ShardId) != string(a.ShardId) {
-		t.Errorf("Incorrect shard ID sent: %s", peer.SendMsg.(*ShardAncestorRequestMsg).ShardId)
 	}
 }
 

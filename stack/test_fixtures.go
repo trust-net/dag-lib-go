@@ -78,13 +78,14 @@ func NewMockEndorser(db repo.DltDb) *mockEndorser {
 }
 
 type mockSharder struct {
-	IsRegistered    bool
-	ShardId         []byte
-	AnchorCalled    bool
-	ApproverCalled  bool
-	TxHandlerCalled bool
-	TxHandler       func(tx dto.Transaction) error
-	orig            shard.Sharder
+	IsRegistered     bool
+	ShardId          []byte
+	AnchorCalled     bool
+	SyncAnchorCalled bool
+	ApproverCalled   bool
+	TxHandlerCalled  bool
+	TxHandler        func(tx dto.Transaction) error
+	orig             shard.Sharder
 }
 
 func (s *mockSharder) Register(shardId []byte, txHandler func(tx dto.Transaction) error) error {
@@ -103,6 +104,11 @@ func (s *mockSharder) Unregister() error {
 func (s *mockSharder) Anchor(a *dto.Anchor) error {
 	s.AnchorCalled = true
 	return s.orig.Anchor(a)
+}
+
+func (s *mockSharder) SyncAnchor(shardId []byte) *dto.Anchor {
+	s.SyncAnchorCalled = true
+	return s.orig.SyncAnchor(shardId)
 }
 
 func (s *mockSharder) Approve(tx dto.Transaction) error {

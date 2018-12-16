@@ -205,16 +205,14 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 		case RECV_ShardSyncMsg:
 			msg := e.data.(*ShardSyncMsg)
 
-			// compare local anchor with remote anchor
-			myAnchor := &dto.Anchor{}
-
-			// TBD: below need to change, to fetch anchor only for remote peer's shard,
+			// compare local anchor with remote anchor,
+			// fetch anchor only for remote peer's shard,
 			// since our local shard maybe different, but we may have more recent data
-			// due to network updates from other nodes
-			d.sharder.Anchor(myAnchor)
+			// due to network updates from other nodes,
+			// or if local sharder knows nothing about remot shard (sync anchor will be nil)
+			myAnchor := d.sharder.SyncAnchor(msg.Anchor.ShardId)
 
-			if string(myAnchor.ShardId) != string(msg.Anchor.ShardId) ||
-				myAnchor.Weight < msg.Anchor.Weight ||
+			if myAnchor == nil || myAnchor.Weight < msg.Anchor.Weight ||
 				shard.Numeric(myAnchor.ShardParent[:]) < shard.Numeric(msg.Anchor.ShardParent[:]) {
 				// local shard's anchor is behind, initiate sync with remote by walking up the DAG
 				req := &ShardAncestorRequestMsg{
