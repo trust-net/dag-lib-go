@@ -23,6 +23,8 @@ const (
 	ShardSyncMsgCode
 	// ancestors request message to walk back for shard's DAG
 	ShardAncestorRequestMsgCode
+	// ancestors response message
+	ShardAncestorResponseMsgCode
 	// ProtocolLength should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength
@@ -42,17 +44,31 @@ type AppConfig struct {
 }
 
 type ShardAncestorRequestMsg struct {
-	ShardId      []byte
 	StartHash    [64]byte
-	MaxAncestors int
+	MaxAncestors uint64
 }
 
 func (m *ShardAncestorRequestMsg) Id() []byte {
-	return append(m.ShardId, m.StartHash[:]...)
+	id := []byte("ShardAncestorRequestMsg")
+	return append(id, m.StartHash[:]...)
 }
 
 func (m *ShardAncestorRequestMsg) Code() uint64 {
 	return ShardAncestorRequestMsgCode
+}
+
+type ShardAncestorResponseMsg struct {
+	StartHash [64]byte
+	Ancestors [][64]byte
+}
+
+func (m *ShardAncestorResponseMsg) Id() []byte {
+	id := []byte("ShardAncestorResponseMsg")
+	return append(id, m.StartHash[:]...)
+}
+
+func (m *ShardAncestorResponseMsg) Code() uint64 {
+	return ShardAncestorResponseMsgCode
 }
 
 type ShardSyncMsg struct {

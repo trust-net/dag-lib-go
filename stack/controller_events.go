@@ -9,9 +9,10 @@ const (
 	SEND_ShardSyncMsg eventEnum = iota
 	RECV_ShardSyncMsg
 	RECV_NewTxBlockMsg
-	SEND_AncestorsRequestMsg
-	RECV_AncestorsRequestMsg
-	SEND_AncestorsResponseMsg
+	SEND_ShardAncestorRequestMsg
+	RECV_ShardAncestorRequestMsg
+	SEND_ShardAncestorResponseMsg
+	RECV_ShardAncestorResponseMsg
 	RECV_ChildrenRequestMsg
 	SEND_ChildrenResponseMsg
 	RECV_TxBlockSyncRequestMsg

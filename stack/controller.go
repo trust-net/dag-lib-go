@@ -216,12 +216,22 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				shard.Numeric(myAnchor.ShardParent[:]) < shard.Numeric(msg.Anchor.ShardParent[:]) {
 				// local shard's anchor is behind, initiate sync with remote by walking up the DAG
 				req := &ShardAncestorRequestMsg{
-					ShardId:      msg.Anchor.ShardId,
 					StartHash:    msg.Anchor.ShardParent,
 					MaxAncestors: 10,
 				}
 				peer.Send(req.Id(), req.Code(), req)
 			}
+
+		case RECV_ShardAncestorRequestMsg:
+			msg := e.data.(*ShardAncestorRequestMsg)
+
+			// fetch the ancestors for specified shard at the starting hash
+			ancestors := d.sharder.Ancestors(msg.StartHash, msg.MaxAncestors)
+			req := &ShardAncestorResponseMsg{
+				StartHash: msg.StartHash,
+				Ancestors: ancestors,
+			}
+			peer.Send(req.Id(), req.Code(), req)
 
 		case SHUTDOWN:
 			// fmt.Printf("Recieved SHUTDOWN event...\n")
@@ -280,6 +290,17 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			} else {
 				// emit a RECV_ShardSyncMsg event
 				events <- newControllerEvent(RECV_ShardSyncMsg, m)
+			}
+
+		case ShardAncestorRequestMsgCode:
+			// deserialize the transaction message from payload
+			m := &ShardAncestorRequestMsg{}
+			if err := msg.Decode(m); err != nil {
+				fmt.Printf("\nFailed to decode message: %s\n", err)
+				return err
+			} else {
+				// emit a RECV_ShardAncestorRequestMsgCode event
+				events <- newControllerEvent(RECV_ShardAncestorRequestMsg, m)
 			}
 
 		// case 1 message type

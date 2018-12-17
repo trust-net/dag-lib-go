@@ -71,6 +71,41 @@ func TestUpdateShard(t *testing.T) {
 	}
 }
 
+// test updating sequential transactions
+func TestUpdateShardInSequence(t *testing.T) {
+	repo, _ := NewDltDb(db.NewInMemDbProvider())
+	tx1 := dto.TestSignedTransaction("test data")
+	tx2 := dto.TestSignedTransaction("test data")
+	tx2.Anchor().ShardParent = tx1.Id()
+	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq
+
+	// update shard with transaction sequence
+	if err := repo.UpdateShard(tx1); err != nil {
+		t.Errorf("Failed to add 1st transaction: %s", err)
+	}
+	if err := repo.UpdateShard(tx2); err != nil {
+		t.Errorf("Failed to add 2nd transaction: %s", err)
+	}
+
+	// validate that shard DAG node was added for 1st transaction correctly
+	if node := repo.GetShardDagNode(tx1.Id()); node == nil {
+		t.Errorf("Did not save DAG node in shard DB for 1st transaction")
+	} else if node.TxId != tx1.Id() {
+		t.Errorf("Did not update node's TxId for 1st transaction")
+	} else if node.Parent != tx1.Anchor().ShardParent {
+		t.Errorf("Did not update node's parent for 1st transaction")
+	}
+
+	// validate that shard DAG node was added for 2nd transaction correctly
+	if node := repo.GetShardDagNode(tx2.Id()); node == nil {
+		t.Errorf("Did not save DAG node in shard DB for 2nd transaction")
+	} else if node.TxId != tx2.Id() {
+		t.Errorf("Did not update node's TxId for 2nd transaction")
+	} else if node.Parent != tx1.Id() {
+		t.Errorf("Did not update node's parent for 2nd transaction")
+	}
+}
+
 // test shard DAG update during adding transaction
 func TestAddTxShardDagUpdate(t *testing.T) {
 	repo, _ := NewDltDb(db.NewInMemDbProvider())

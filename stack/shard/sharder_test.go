@@ -492,3 +492,69 @@ func TestApproverHappyPath(t *testing.T) {
 		t.Errorf("Submitted transaction NOT saved in DB: %d", testDb.AddTxCallCount)
 	}
 }
+
+func TestAncestorsKnownStartHash(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	tx1, genesis := SignedShardTransaction("test payload")
+	tx2 := dto.TestSignedTransaction("test payload")
+	tx2.Anchor().ShardParent = tx1.Id()
+	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
+	// register an app for transaction's shard
+	txHandler := func(tx dto.Transaction) error { return nil }
+	s.Register(tx1.Anchor().ShardId, txHandler)
+
+	// add transactions to sharder's DAG
+	if err := s.Handle(tx1); err != nil {
+		t.Errorf("Failed to add 1st transaction: %s", err)
+	}
+	if err := s.Handle(tx2); err != nil {
+		t.Errorf("Failed to add 2nd transaction: %s", err)
+	}
+
+	// now fetch ancestors from tx2 as starting hash
+	ancestors := s.Ancestors(tx2.Id(), 5)
+
+	// we should get 2 ancestors: tx1 and genesis
+	if len(ancestors) != 2 {
+		t.Errorf("Incorrect number of ancestors: %d", len(ancestors))
+	} else if ancestors[0] != tx1.Id() {
+		t.Errorf("Incorrect 1st ancestor:\n%x\nExpected:\n%x", ancestors[0], tx1.Id())
+	} else if ancestors[1] != genesis.Id() {
+		t.Errorf("Incorrect 1st ancestor:\n%x\nExpected:\n%x", ancestors[1], genesis.Id())
+	}
+}
+
+func TestAncestorsUnknownStartHash(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	tx1, _ := SignedShardTransaction("test payload")
+	tx2 := dto.TestSignedTransaction("test payload")
+	tx2.Anchor().ShardParent = tx1.Id()
+	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
+	// register an app for transaction's shard
+	txHandler := func(tx dto.Transaction) error { return nil }
+	s.Register(tx1.Anchor().ShardId, txHandler)
+
+	// add transactions to sharder's DAG
+	if err := s.Handle(tx1); err != nil {
+		t.Errorf("Failed to add 1st transaction: %s", err)
+	}
+	if err := s.Handle(tx2); err != nil {
+		t.Errorf("Failed to add 2nd transaction: %s", err)
+	}
+
+	// now fetch ancestors from an unknown starting hash
+	hash := tx2.Id()
+	hash[5] = 0x00
+	hash[6] = 0x00
+	hash[7] = 0x00
+	ancestors := s.Ancestors(hash, 5)
+
+	// we should get 0 ancestors
+	if len(ancestors) != 0 {
+		t.Errorf("Incorrect number of ancestors: %d", len(ancestors))
+	}
+}
