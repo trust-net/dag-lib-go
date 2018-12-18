@@ -146,6 +146,12 @@ func (d *dlt) Anchor(id []byte) *dto.Anchor {
 		fmt.Printf("Failed to get endorser's anchor: %s\n", err)
 		return nil
 	}
+
+	// get p2p layer's update on anchor
+	if err := d.p2p.Anchor(a); err != nil {
+		fmt.Printf("Failed to get p2p layer's anchor: %s\n", err)
+		return nil
+	}
 	return a
 }
 

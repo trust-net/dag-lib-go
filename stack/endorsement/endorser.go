@@ -22,7 +22,7 @@ type endorser struct {
 }
 
 func (e *endorser) Anchor(a *dto.Anchor) error {
-	// no op
+	// TBD: fill in submitter's anchor details
 	return nil
 }
 

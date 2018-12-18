@@ -27,8 +27,6 @@ type transaction struct {
 	Signature []byte
 	// transaction anchor from DLT stack
 	TxAnchor *Anchor
-	// anchor signature from DLT stack
-	AnchorSignature []byte
 	//	// transaction approver application instance node ID
 	//	NodeId []byte
 	//	// transaction approver application's shard ID
@@ -52,7 +50,7 @@ func (tx *transaction) Id() [64]byte {
 	// signature should be sufficient to capture payload and submitter ID
 	data = append(data, tx.Signature...)
 	// append anchor's signature
-	data = append(data, tx.AnchorSignature...)
+	data = append(data, tx.TxAnchor.Signature...)
 	//	// append shard ID etc
 	//	data = append(data, tx.ShardId...)
 	//	seq := [8]byte{}

@@ -381,7 +381,7 @@ func TestStop(t *testing.T) {
 // get an anchor from DLT stack when app is registered
 func TestAnchorRegisteredApp(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, sharder, endorser, _ := initMocks()
+	stack, sharder, endorser, p2p := initMocks()
 
 	// get an anchor
 	a := stack.Anchor([]byte("test submitter"))
@@ -395,6 +395,10 @@ func TestAnchorRegisteredApp(t *testing.T) {
 
 	if !endorser.AnchorCalled {
 		t.Errorf("DLT stack did not called endorser's Anchor")
+	}
+
+	if !p2p.IsAnchored {
+		t.Errorf("DLT stack did not called p2p layer's Anchor")
 	}
 }
 

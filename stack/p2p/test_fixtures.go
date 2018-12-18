@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 	"net"
 )
 
@@ -62,8 +63,14 @@ type MockP2P struct {
 	IsStarted    bool
 	IsStopped    bool
 	DidBroadcast bool
+	IsAnchored   bool
 	Name         string
 	ID           []byte
+}
+
+func (p2p *MockP2P) Anchor(a *dto.Anchor) error {
+	p2p.IsAnchored = true
+	return nil
 }
 
 func (p2p *MockP2P) Start() error {

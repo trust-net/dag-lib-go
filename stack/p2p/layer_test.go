@@ -6,7 +6,9 @@ import (
 	"crypto/sha512"
 	"fmt"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/go-trust-net/common"
+	mrand "math/rand"
 	"testing"
 )
 
@@ -141,5 +143,64 @@ func TestDEVp2pBroadcast(t *testing.T) {
 	// we should have sent message on our mock peer connection
 	if mConn.WriteCount != 1 {
 		t.Errorf("did not write message to peer connection")
+	}
+}
+
+func randomHash() [64]byte {
+	hash := [64]byte{}
+	for i := 0; i < 64; i++ {
+		hash[i] = byte(mrand.Int31n(255))
+	}
+	return hash
+}
+
+func TestAnchor(t *testing.T) {
+	// create an instance of the p2p layer
+	conf := TestConfig()
+	p2p, _ := NewDEVp2pLayer(conf, func(peer Peer) error { return nil })
+
+	// build an anchor filled from controller and sharder
+	parent := randomHash()
+	uncles := [][64]byte{randomHash(), randomHash()}
+	a := &dto.Anchor{
+		Submitter:   []byte("test submitter"),
+		ShardId:     []byte("test shard"),
+		ShardSeq:    0x21,
+		Weight:      0xf1,
+		ShardParent: parent,
+		ShardUncles: uncles,
+	}
+
+	// send anchor for processing
+	if err := p2p.Anchor(a); err != nil {
+		t.Errorf("Anchor handling failed: %s", err)
+	}
+
+	// validate that Anchor was updated with node ID correctly
+	if string(a.NodeId) != string(p2p.Id()) {
+		t.Errorf("Incorrect Anchor ID:\n%x\nExpected:\n%x", a.NodeId, p2p.Id())
+	}
+
+	// validate that anchor was signed appropriately
+	payload := []byte{}
+	payload = append(payload, a.ShardId...)
+	payload = append(payload, a.NodeId...)
+	payload = append(payload, a.Submitter...)
+	payload = append(payload, a.ShardParent[:]...)
+	for _, uncle := range a.ShardUncles {
+		payload = append(payload, uncle[:]...)
+	}
+	payload = append(payload, uint64ToBytes(a.ShardSeq)...)
+	payload = append(payload, uint64ToBytes(a.Weight)...)
+	// regenerate signature parameters
+	s := signature{}
+	if err := common.Deserialize(a.Signature, &s); err != nil {
+		t.Errorf("Failed to parse signature: %s", err)
+	}
+	// we want to validate the hash of the payload
+	hash := sha512.Sum512(payload)
+	// validate signature of payload
+	if !ecdsa.Verify(&p2p.key.PublicKey, hash[:], s.R, s.S) {
+		t.Errorf("signature validation failed")
 	}
 }

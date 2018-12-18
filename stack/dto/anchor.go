@@ -20,6 +20,8 @@ type Anchor struct {
 	ShardUncles [][64]byte
 	// transaction submitter's public ID
 	Submitter []byte
+	// anchor signature from DLT stack
+	Signature []byte
 }
 
 func (a *Anchor) Serialize() ([]byte, error) {
