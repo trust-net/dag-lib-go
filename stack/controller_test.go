@@ -582,6 +582,15 @@ func TestRECV_ShardSyncMsgEvent_RemoteHeavy(t *testing.T) {
 		t.Errorf("controller did not use sharder's shard sync anchor")
 	}
 
+	// we should have set the peer state
+	if data := peer.GetState(int(RECV_ShardAncestorResponseMsg)); data == nil {
+		t.Errorf("controller did not save last hash for ancestor response message")
+	} else if state, ok := data.([64]byte); !ok {
+		t.Errorf("controller saved incorrect state type: %T", data)
+	} else if state != a.ShardParent {
+		t.Errorf("controller saved incorrect start hash:\n%x\nExpected:\n%x", state, a.ShardParent)
+	}
+
 	// we should have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
 	if !peer.SendCalled {
 		t.Errorf("did not send any message to peer")
@@ -1079,6 +1088,258 @@ func TestRECV_ShardAncestorRequestMsgCode_KnownStartHash(t *testing.T) {
 		t.Errorf("Incorrect 1st ancestor: %x\nExpected: %x", peer.SendMsg.(*ShardAncestorResponseMsg).Ancestors[0], tx1.Id())
 	} else if peer.SendMsg.(*ShardAncestorResponseMsg).Ancestors[1] != gen {
 		t.Errorf("Incorrect 2nd ancestor: %x\nExpected: %x", peer.SendMsg.(*ShardAncestorResponseMsg).Ancestors[1], gen)
+	}
+}
+
+// stack controller listner generates RECV_ShardAncestorResponseMsg event for ShardAncestorResponseMsg message
+func TestPeerListnerGeneratesEventForShardAncestorResponseMsg(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// setup mock connection to send a ShardAncestorResponseMsg followed by clean shutdown
+	mockConn.NextMsg(ShardAncestorResponseMsgCode, &ShardAncestorResponseMsg{})
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	seenMsgEvent := false
+	finished := make(chan struct{}, 2)
+	go func() {
+		tick := time.Tick(100 * time.Millisecond)
+		for {
+			select {
+			case e := <-events:
+				if e.code == RECV_ShardAncestorResponseMsg {
+					seenMsgEvent = true
+				} else if e.code == SHUTDOWN {
+					finished <- struct{}{}
+					return
+				}
+			case <-tick:
+				finished <- struct{}{}
+				return
+			}
+		}
+	}()
+
+	// now call stack's listener
+	if err := stack.listener(peer, events); err != nil {
+		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// wait for event listener to process
+	<-finished
+
+	// check if listener generate correct event
+	if !seenMsgEvent {
+		t.Errorf("Event listener did not generate RECV_ShardAncestorResponseMsg event!!!")
+	}
+}
+
+// test stack controller event listener handles RECV_ShardAncestorResponseMsg when all hashesh are unknown
+func TestRECV_ShardAncestorResponseMsg_AllUnknown(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// save the start hash with peer
+	startHash := dto.RandomHash()
+	peer.SetState(int(RECV_ShardAncestorResponseMsg), startHash)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build an ancestor response message with hashes of unknown transactions
+	msg := &ShardAncestorResponseMsg{
+		StartHash: startHash,
+	}
+	for i := 0; i < 10; i++ {
+		msg.Ancestors = append(msg.Ancestors, dto.RandomHash())
+	}
+	// now emit RECV_ShardAncestorResponseMsg event
+	events <- newControllerEvent(RECV_ShardAncestorResponseMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle shard's ancestors response
+	// when all hashes are unknown
+
+	// we should have fetched the peer state to validate ancestor response's starting hash
+	if !peer.GetStateCalled {
+		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should have set the peer state to last of the unknown ancestors
+	if data := peer.GetState(int(RECV_ShardAncestorResponseMsg)); data == nil {
+		t.Errorf("controller did not save last hash for ancestor response message")
+	} else if state, ok := data.([64]byte); !ok {
+		t.Errorf("controller saved incorrect state type: %T", data)
+	} else if state != msg.Ancestors[9] {
+		t.Errorf("controller saved incorrect start hash:\n%x\nExpected:\n%x", state, msg.Ancestors[9])
+	}
+
+	// we should have sent the ShardAncestorRequestMsg message back to fetch more ancestors
+	// starting from top ancestor in ShardAncestorResponseMsg
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardAncestorRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if peer.SendMsg.(*ShardAncestorRequestMsg).StartHash != msg.Ancestors[9] {
+		t.Errorf("Incorrect start hash: %x\nExpected: %x", peer.SendMsg.(*ShardAncestorRequestMsg).StartHash, msg.Ancestors[9])
+	}
+}
+
+// test stack controller event listener handles RECV_ShardAncestorResponseMsg when last hash state is not correct
+func TestRECV_ShardAncestorResponseMsg_IncorrectState(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// save the start hash with peer
+	startHash := dto.RandomHash()
+	peer.SetState(int(RECV_ShardAncestorResponseMsg), startHash)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build an ancestor response message with incorrect start hash
+	msg := &ShardAncestorResponseMsg{
+		StartHash: dto.RandomHash(),
+	}
+	for i := 0; i < 10; i++ {
+		msg.Ancestors = append(msg.Ancestors, dto.RandomHash())
+	}
+	// now emit RECV_ShardAncestorResponseMsg event
+	events <- newControllerEvent(RECV_ShardAncestorResponseMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle shard's ancestors response
+	// when all hashes are unknown
+
+	// we should have fetched the peer state to validate ancestor response's starting hash
+	if !peer.GetStateCalled {
+		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should not have changed the peer state
+	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)).([64]byte); state != startHash {
+		t.Errorf("controller changed start hash for incorrect state:\n%x\nExpected:\n%x", state, startHash)
+	}
+
+	// we should not have sent the ShardAncestorRequestMsg message back to fetch more ancestors
+	// starting from top ancestor in ShardAncestorResponseMsg
+	if peer.SendCalled {
+		t.Errorf("should not send any message to peer for incorrect state")
+	}
+}
+
+// test stack controller event listener handles RECV_ShardAncestorResponseMsg there is a known common ancestor
+func TestRECV_ShardAncestorResponseMsg_KnownAncestor(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+	log.SetLogLevel(log.DEBUG)
+	defer log.SetLogLevel(log.NONE)
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// save the start hash with peer
+	startHash := dto.RandomHash()
+	peer.SetState(int(RECV_ShardAncestorResponseMsg), startHash)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build an ancestor response message with common known hash as 6th item
+	msg := &ShardAncestorResponseMsg{
+		StartHash: startHash,
+	}
+	for i := 0; i < 5; i++ {
+		msg.Ancestors = append(msg.Ancestors, dto.RandomHash())
+	}
+	msg.Ancestors = append(msg.Ancestors, tx.Id())
+
+	// now emit RECV_ShardAncestorResponseMsg event
+	events <- newControllerEvent(RECV_ShardAncestorResponseMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle shard's ancestors response
+	// when all hashes are unknown
+
+	// we should have fetched the peer state to validate ancestor response's starting hash
+	if !peer.GetStateCalled {
+		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should have set the peer state to last known common ancestor for RECV_ShardAncestorResponseMsg state
+	// (this is to ensure that any DoS gets blocked right away)
+	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)).([64]byte); state != tx.Id() {
+		t.Errorf("controller did not save start hash to common ancestor:\n%x\nExpected:\n%x", state, tx.Id())
+	}
+
+	// we should also have set the peer state to last known common ancestor for RECV_ShardChildrenResponseMsg state
+	// (this is to ensure that any DoS gets blocked right away)
+	if data := peer.GetState(int(RECV_ShardChildrenResponseMsg)); data == nil {
+		t.Errorf("controller did not save last hash for children response message")
+	} else if state, ok := data.([64]byte); !ok {
+		t.Errorf("controller saved incorrect state type: %T", data)
+	} else if state != tx.Id() {
+		t.Errorf("controller saved incorrect parent hash:\n%x\nExpected:\n%x", state, tx.Id())
+	}
+
+	// we should have sent the ShardChildrenRequestMsg message to start populating the DAG from peer's shard
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardChildrenRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if peer.SendMsg.(*ShardChildrenRequestMsg).Parent != tx.Id() {
+		t.Errorf("Incorrect start hash: %x\nExpected: %x", peer.SendMsg.(*ShardChildrenRequestMsg).Parent, tx.Id())
 	}
 }
 

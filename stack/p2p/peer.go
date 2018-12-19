@@ -31,6 +31,10 @@ type Peer interface {
 	Seen(msgId []byte)
 	// read a message from peer node
 	ReadMsg() (Msg, error)
+	// save state during sync
+	SetState(stateId int, stateData interface{}) error
+	// fetch state during sync
+	GetState(stateId int) interface{}
 }
 
 const (
@@ -57,6 +61,7 @@ type peerDEVp2p struct {
 	rw     p2p.MsgReadWriter
 	seen   *common.Set
 	status int
+	states map[int]interface{}
 }
 
 func NewDEVp2pPeer(peer peerDEVp2pWrapper, rw p2p.MsgReadWriter) *peerDEVp2p {
@@ -65,6 +70,7 @@ func NewDEVp2pPeer(peer peerDEVp2pWrapper, rw p2p.MsgReadWriter) *peerDEVp2p {
 		rw:     rw,
 		status: Connected,
 		seen:   common.NewSet(),
+		states: make(map[int]interface{}),
 	}
 }
 
@@ -121,4 +127,13 @@ func (p *peerDEVp2p) ReadMsg() (Msg, error) {
 	} else {
 		return newMsg(&m), nil
 	}
+}
+
+func (p *peerDEVp2p) SetState(stateId int, stateData interface{}) error {
+	p.states[stateId] = stateData
+	return nil
+}
+
+func (p *peerDEVp2p) GetState(stateId int) interface{} {
+	return p.states[stateId]
 }

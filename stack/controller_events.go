@@ -13,16 +13,15 @@ const (
 	RECV_ShardAncestorRequestMsg
 	SEND_ShardAncestorResponseMsg
 	RECV_ShardAncestorResponseMsg
-	RECV_ChildrenRequestMsg
-	SEND_ChildrenResponseMsg
+	RECV_ShardChildrenRequestMsg
+	SEND_ShardChildrenResponseMsg
+	RECV_ShardChildrenResponseMsg
 	RECV_TxBlockSyncRequestMsg
 	SEND_TxBlockSyncResponseMsg
 	RECV_AncestorsResponseMsg
 	POP_AncestorsStack
 	SEND_TxBlockSyncRequestMsg
 	RECV_TxBlockSyncResponseMsg
-	SEND_ChildrenRequestMsg
-	RECV_ChildrenResponseMsg
 	POP_FirstChild
 	SHUTDOWN
 )

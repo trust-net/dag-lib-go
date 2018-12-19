@@ -164,6 +164,7 @@ func TestAnchorRegistered(t *testing.T) {
 	// register an app
 	txHandler := func(tx dto.Transaction) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
+	testDb.Reset()
 
 	// call sharder's anchor update
 	a := dto.Anchor{}
@@ -205,10 +206,18 @@ func TestSyncAnchorRegsiteredKnown(t *testing.T) {
 	// register an app
 	txHandler := func(tx dto.Transaction) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
+	testDb.Reset()
 
 	// call sharder's sync anchor for same shard as registered
 	if a := s.SyncAnchor([]byte("test shard")); a == nil {
 		t.Errorf("failed to get sync anchor for registered shard")
+	}
+
+	// we should not have created a genesis TX for the shard since its already known from before
+	if testDb.AddTxCallCount != 0 {
+		t.Errorf("should not create genesis transaction for known shard")
+	} else if testDb.UpdateShardCount != 0 {
+		t.Errorf("should not update shard DAG for genesis transaction of known shard")
 	}
 }
 
@@ -219,10 +228,20 @@ func TestSyncAnchorRegsiteredUnknown(t *testing.T) {
 	// register an app
 	txHandler := func(tx dto.Transaction) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
+	testDb.Reset()
 
 	// call sharder's sync anchor for some unknown shard
 	if a := s.SyncAnchor([]byte("unknown shard")); a != nil {
 		t.Errorf("should not get sync anchor for unknown shard")
+	}
+
+	// however, we should have created a genesis TX for the shard, so that sync can happen
+	if testDb.AddTxCallCount != 1 {
+		t.Errorf("did not create genesis transaction for unknown shard")
+	} else if tx := testDb.GetTx(GenesisShardTx([]byte("test shard")).Id()); tx == nil {
+		t.Errorf("created incorrect genesis transaction for unknown shard")
+	} else if testDb.UpdateShardCount != 1 || testDb.GetShardDagNode(tx.Id()) == nil {
+		t.Errorf("did not update shard DAG for genesis transaction of unknown shard")
 	}
 }
 
@@ -233,6 +252,7 @@ func TestSyncAnchorUnregsiteredKnown(t *testing.T) {
 	// register an app
 	txHandler := func(tx dto.Transaction) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
+	testDb.Reset()
 
 	// unregister the app
 	s.Unregister()
@@ -240,6 +260,13 @@ func TestSyncAnchorUnregsiteredKnown(t *testing.T) {
 	// call sharder's sync anchor for shard that is known from earlier
 	if a := s.SyncAnchor([]byte("test shard")); a == nil {
 		t.Errorf("failed to get sync anchor for known shard")
+	}
+
+	// we should not have created a genesis TX for the shard since its already known from before
+	if testDb.AddTxCallCount != 0 {
+		t.Errorf("should not create genesis transaction for known shard")
+	} else if testDb.UpdateShardCount != 0 {
+		t.Errorf("should not update shard DAG for genesis transaction of known shard")
 	}
 }
 
@@ -251,6 +278,15 @@ func TestSyncAnchorUnregsiteredUnknown(t *testing.T) {
 	if a := s.SyncAnchor([]byte("unknown shard")); a != nil {
 		t.Errorf("should not get sync anchor for unknown shard")
 	}
+
+	// however, we should have created a genesis TX for the shard, so that sync can happen
+	if testDb.AddTxCallCount != 1 {
+		t.Errorf("did not create genesis transaction for unknown shard")
+	} else if tx := testDb.GetTx(GenesisShardTx([]byte("unknown shard")).Id()); tx == nil {
+		t.Errorf("created incorrect genesis transaction for unknown shard")
+	} else if testDb.UpdateShardCount != 1 || testDb.GetShardDagNode(tx.Id()) == nil {
+		t.Errorf("did not update shard DAG for genesis transaction of unknown shard")
+	}
 }
 
 func TestAnchorMultiTip(t *testing.T) {
@@ -261,6 +297,7 @@ func TestAnchorMultiTip(t *testing.T) {
 	// register an app
 	txHandler := func(tx dto.Transaction) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
+	testDb.Reset()
 
 	// add 2 child network transactions nodes for same parent as genesis
 	child1, _ := SignedShardTransaction("child1")

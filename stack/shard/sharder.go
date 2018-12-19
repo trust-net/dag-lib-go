@@ -147,6 +147,13 @@ func (s *sharder) updateAnchor(shardId []byte, a *dto.Anchor) error {
 	tips := s.db.ShardTips(shardId)
 
 	if len(tips) == 0 {
+		// create the genesis transaction for this unknown shard
+		genesis := GenesisShardTx(shardId)
+		if err := s.db.AddTx(genesis); err != nil {
+			// ignore, there is already a genesis transaction in DB
+		} else if err = s.db.UpdateShard(genesis); err != nil {
+			return err
+		}
 		return errors.New("shard unknown")
 	}
 

@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/trust-net/go-trust-net/common"
 	"math/big"
+	mrand "math/rand"
 )
 
 func TestTransaction() *transaction {
@@ -50,4 +51,12 @@ func TestSignedTransaction(data string) *transaction {
 	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
 	tx.Signature, _ = common.Serialize(s)
 	return tx
+}
+
+func RandomHash() [64]byte {
+	hash := [64]byte{}
+	for i := 0; i < 64; i++ {
+		hash[i] = byte(mrand.Int31n(255))
+	}
+	return hash
 }

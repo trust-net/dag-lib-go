@@ -209,6 +209,7 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			// mark sender of the message as seen
 			id := tx.Id()
 			peer.Seen(id[:])
+			d.logger.Debug("Boradcasting transaction: %x", tx.Id())
 			d.p2p.Broadcast(tx.Self().Id(), TransactionMsgCode, tx)
 
 		case RECV_ShardSyncMsg:
@@ -228,7 +229,13 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 					StartHash:    msg.Anchor.ShardParent,
 					MaxAncestors: 10,
 				}
+				d.logger.Debug("Initiating shard sync starting by ancestors request for: %x", msg.Anchor.ShardParent)
+				// save the last hash into peer's state to validate ancestors response
+				peer.SetState(int(RECV_ShardAncestorResponseMsg), req.StartHash)
+				// send the ancestors request to peer
 				peer.Send(req.Id(), req.Code(), req)
+			} else {
+				d.logger.Debug("End of sync with peer: %s", peer.String())
 			}
 
 		case RECV_ShardAncestorRequestMsg:
@@ -240,18 +247,61 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				StartHash: msg.StartHash,
 				Ancestors: ancestors,
 			}
+			d.logger.Debug("responding with %d ancestors from: %x", len(ancestors), msg.StartHash)
 			peer.Send(req.Id(), req.Code(), req)
 
+		case RECV_ShardAncestorResponseMsg:
+			msg := e.data.(*ShardAncestorResponseMsg)
+
+			// fetch state from peer to validate response's starting hash
+			if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)); state != msg.StartHash {
+				d.logger.Debug("start hash of ShardAncestorResponseMsg does not match saved state")
+			} else {
+				// walk through each ancestor to check if it's known common ancestor
+				found, i := false, 0
+				for ; !found && i < len(msg.Ancestors); i++ {
+					// look up ancestor hash in DB
+					found = d.db.GetTx(msg.Ancestors[i]) != nil
+				}
+				if !found && i > 0 {
+					// did not find any commone ancestor, so continue walking up the DAG
+					req := &ShardAncestorRequestMsg{
+						StartHash:    msg.Ancestors[i-1],
+						MaxAncestors: 10,
+					}
+					// save the last hash into peer's state to validate ancestors response
+					peer.SetState(int(RECV_ShardAncestorResponseMsg), req.StartHash)
+					// send the ancestors request to peer
+					peer.Send(req.Id(), req.Code(), req)
+				} else if found {
+					d.logger.Debug("Found a known common ancestor: %x", msg.Ancestors[i-1])
+					// update the RECV_ShardAncestorResponseMsg state to known common ancestor
+					// to prevent any DoS attack with never ending ancestor response cycle
+					peer.SetState(int(RECV_ShardAncestorResponseMsg), msg.Ancestors[i-1])
+
+					// update the RECV_ShardChildrenResponseMsg state to validate response for children request sending next
+					peer.SetState(int(RECV_ShardChildrenResponseMsg), msg.Ancestors[i-1])
+					d.logger.Debug("starting DAG sync by requesting children from peer's known common ancestor")
+
+					// now initate DAG walk through from the known common ancestor's children
+					req := &ShardChildrenRequestMsg{
+						Parent: msg.Ancestors[i-1],
+					}
+					peer.Send(req.Id(), req.Code(), req)
+
+				}
+			}
+
 		case SHUTDOWN:
-			d.logger.Debug("Recieved SHUTDOWN event...")
+			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true
 			break
 
 		default:
-			d.logger.Error("Unknown event: %d...", e.code)
+			d.logger.Error("Unknown event: %d", e.code)
 		}
 	}
-	// fmt.Printf("Exiting event listener...\n")
+	d.logger.Info("Exiting event listener...")
 }
 
 // listen on messages from the peer node
@@ -291,7 +341,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			}
 
 		case ShardSyncMsgCode:
-			// deserialize the transaction message from payload
+			// deserialize the shard sync message from payload
 			m := &ShardSyncMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("\nFailed to decode message: %s", err)
@@ -302,7 +352,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			}
 
 		case ShardAncestorRequestMsgCode:
-			// deserialize the transaction message from payload
+			// deserialize the shard ancestors request message from payload
 			m := &ShardAncestorRequestMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
@@ -310,6 +360,17 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			} else {
 				// emit a RECV_ShardAncestorRequestMsgCode event
 				events <- newControllerEvent(RECV_ShardAncestorRequestMsg, m)
+			}
+
+		case ShardAncestorResponseMsgCode:
+			// deserialize the shard ancestors response message from payload
+			m := &ShardAncestorResponseMsg{}
+			if err := msg.Decode(m); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				return err
+			} else {
+				// emit a RECV_ShardAncestorResponseMsg event
+				events <- newControllerEvent(RECV_ShardAncestorResponseMsg, m)
 			}
 
 		// case 1 message type

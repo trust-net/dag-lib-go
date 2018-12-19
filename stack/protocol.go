@@ -25,6 +25,8 @@ const (
 	ShardAncestorRequestMsgCode
 	// ancestors response message
 	ShardAncestorResponseMsgCode
+	// childrens request for a known hash to populate shard's DAG
+	ShardChildrenRequestMsgCode
 	// ProtocolLength should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength
@@ -55,6 +57,19 @@ func (m *ShardAncestorRequestMsg) Id() []byte {
 
 func (m *ShardAncestorRequestMsg) Code() uint64 {
 	return ShardAncestorRequestMsgCode
+}
+
+type ShardChildrenRequestMsg struct {
+	Parent [64]byte
+}
+
+func (m *ShardChildrenRequestMsg) Id() []byte {
+	id := []byte("ShardChildrenRequestMsg")
+	return append(id, m.Parent[:]...)
+}
+
+func (m *ShardChildrenRequestMsg) Code() uint64 {
+	return ShardChildrenRequestMsgCode
 }
 
 type ShardAncestorResponseMsg struct {

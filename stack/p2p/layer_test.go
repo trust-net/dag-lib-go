@@ -8,7 +8,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/go-trust-net/common"
-	mrand "math/rand"
 	"testing"
 )
 
@@ -146,22 +145,14 @@ func TestDEVp2pBroadcast(t *testing.T) {
 	}
 }
 
-func randomHash() [64]byte {
-	hash := [64]byte{}
-	for i := 0; i < 64; i++ {
-		hash[i] = byte(mrand.Int31n(255))
-	}
-	return hash
-}
-
 func TestAnchor(t *testing.T) {
 	// create an instance of the p2p layer
 	conf := TestConfig()
 	p2p, _ := NewDEVp2pLayer(conf, func(peer Peer) error { return nil })
 
 	// build an anchor filled from controller and sharder
-	parent := randomHash()
-	uncles := [][64]byte{randomHash(), randomHash()}
+	parent := dto.RandomHash()
+	uncles := [][64]byte{dto.RandomHash(), dto.RandomHash()}
 	a := &dto.Anchor{
 		Submitter:   []byte("test submitter"),
 		ShardId:     []byte("test shard"),
