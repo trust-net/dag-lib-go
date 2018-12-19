@@ -4,8 +4,8 @@ package stack
 
 import (
 	"errors"
-	"fmt"
 	"github.com/trust-net/dag-lib-go/db"
+	"github.com/trust-net/dag-lib-go/log"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/endorsement"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
@@ -39,6 +39,7 @@ type dlt struct {
 	endorser  endorsement.Endorser
 	seen      *common.Set
 	lock      sync.RWMutex
+	logger    log.Logger
 }
 
 func (d *dlt) Register(shardId []byte, name string, txHandler func(tx dto.Transaction) error) error {
@@ -118,6 +119,7 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 
 	// send the submitted transaction for approval to sharding layer
 	if err := d.sharder.Approve(tx); err != nil {
+		d.logger.Debug("Submitted transaction failed to approve at sharder: %s", err)
 		return err
 	}
 
@@ -125,6 +127,7 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 	// TBD: below needs to change to a different method that will check whether transaction
 	// has correct TxAnchor in the submitted transaction
 	if err := d.endorser.Approve(tx); err != nil {
+		d.logger.Debug("Submitted transaction failed to approve at endorser: %s", err)
 		return err
 	}
 
@@ -137,19 +140,19 @@ func (d *dlt) Anchor(id []byte) *dto.Anchor {
 		Submitter: id,
 	}
 	if err := d.sharder.Anchor(a); err != nil {
-		fmt.Printf("Failed to get sharder's anchor: %s\n", err)
+		d.logger.Debug("Failed to get sharder's anchor: %s", err)
 		return nil
 	}
 
 	// get endorser's update on anchor
 	if err := d.endorser.Anchor(a); err != nil {
-		fmt.Printf("Failed to get endorser's anchor: %s\n", err)
+		d.logger.Debug("Failed to get endorser's anchor: %s", err)
 		return nil
 	}
 
 	// get p2p layer's update on anchor
 	if err := d.p2p.Anchor(a); err != nil {
-		fmt.Printf("Failed to get p2p layer's anchor: %s\n", err)
+		d.logger.Debug("Failed to get p2p layer's anchor: %s", err)
 		return nil
 	}
 	return a
@@ -171,9 +174,9 @@ func (d *dlt) handshake(peer p2p.Peer) error {
 	//   3) send the ShardSyncMsg message to peer
 	a := &dto.Anchor{}
 	if err := d.sharder.Anchor(a); err != nil {
-		fmt.Printf("\nCannot run handshake: %s\n", err)
+		d.logger.Debug("Cannot run handshake: %s", err)
 	} else if err = d.endorser.Anchor(a); err != nil {
-		fmt.Printf("\nCannot run handshake: %s\n", err)
+		d.logger.Debug("Cannot run handshake: %s", err)
 	} else {
 		msg := NewShardSyncMsg(a)
 		return peer.Send(msg.Id(), msg.Code(), msg)
@@ -193,13 +196,13 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 
 			// send transaction to endorsing layer for handling
 			if err := d.endorser.Handle(tx); err != nil {
-				fmt.Printf("\nFailed to endorse transaction: %s\n", err)
+				d.logger.Error("Failed to endorse transaction: %s", err)
 				continue
 			}
 
 			// let sharding layer process transaction
 			if err := d.sharder.Handle(tx); err != nil {
-				fmt.Printf("\nFailed to shard transaction: %s\n", err)
+				d.logger.Error("Failed to shard transaction: %s", err)
 				continue
 			}
 
@@ -240,12 +243,12 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			peer.Send(req.Id(), req.Code(), req)
 
 		case SHUTDOWN:
-			// fmt.Printf("Recieved SHUTDOWN event...\n")
+			d.logger.Debug("Recieved SHUTDOWN event...")
 			done = true
 			break
 
 		default:
-			fmt.Printf("Unknown event: %d...\n", e.code)
+			d.logger.Error("Unknown event: %d...", e.code)
 		}
 	}
 	// fmt.Printf("Exiting event listener...\n")
@@ -256,7 +259,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 	for {
 		msg, err := peer.ReadMsg()
 		if err != nil {
-			fmt.Printf("\nFailed to read message: %s\n", err)
+			d.logger.Debug("Failed to read message: %s", err)
 			return err
 		}
 		switch msg.Code() {
@@ -270,7 +273,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			// deserialize the transaction message from payload
 			tx := dto.NewTransaction(&dto.Anchor{})
 			if err := msg.Decode(tx); err != nil {
-				fmt.Printf("\nFailed to decode message: %s\n", err)
+				d.logger.Debug("Failed to decode message: %s", err)
 				return err
 			}
 
@@ -291,7 +294,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			// deserialize the transaction message from payload
 			m := &ShardSyncMsg{}
 			if err := msg.Decode(m); err != nil {
-				fmt.Printf("\nFailed to decode message: %s\n", err)
+				d.logger.Debug("\nFailed to decode message: %s", err)
 				return err
 			} else {
 				// emit a RECV_ShardSyncMsg event
@@ -302,7 +305,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			// deserialize the transaction message from payload
 			m := &ShardAncestorRequestMsg{}
 			if err := msg.Decode(m); err != nil {
-				fmt.Printf("\nFailed to decode message: %s\n", err)
+				d.logger.Debug("Failed to decode message: %s", err)
 				return err
 			} else {
 				// emit a RECV_ShardAncestorRequestMsgCode event
@@ -317,6 +320,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 
 		default:
 			// error condition, unknown protocol message
+			d.logger.Debug("Unknown protocol message recieved: %d", msg.Code())
 			return errors.New("unknown protocol message recieved")
 		}
 	}
@@ -326,7 +330,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 func (d *dlt) runner(peer p2p.Peer) error {
 	// initiate handshake with peer's sharding layer
 	if err := d.handshake(peer); err != nil {
-		fmt.Printf("\nHanshake failed: %s\n", err)
+		d.logger.Error("Hanshake failed: %s", err)
 		return err
 	} else {
 		defer func() {
@@ -337,7 +341,12 @@ func (d *dlt) runner(peer p2p.Peer) error {
 	events := make(chan controllerEvent, 10)
 	go d.peerEventsListener(peer, events)
 	// start listening on messages from peer node
-	return d.listener(peer, events)
+	if err := d.listener(peer, events); err != nil {
+		d.logger.Info("Peer listener terminated: %s", err)
+		return err
+	} else {
+		return nil
+	}
 }
 
 // mark a message as seen for stack (different from marking it seen for connected peer nodes)
@@ -364,8 +373,9 @@ func NewDltStack(conf p2p.Config, dbp db.DbProvider) (*dlt, error) {
 		return nil, err
 	}
 	stack := &dlt{
-		db:   db,
-		seen: common.NewSet(),
+		db:     db,
+		seen:   common.NewSet(),
+		logger: log.NewLogger(dlt{}),
 	}
 	// update p2p.Config with protocol name, version and message count based on protocol specs
 	conf.ProtocolName = ProtocolName

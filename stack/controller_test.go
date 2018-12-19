@@ -3,6 +3,7 @@ package stack
 import (
 	"errors"
 	"github.com/trust-net/dag-lib-go/db"
+	"github.com/trust-net/dag-lib-go/log"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/shard"
@@ -11,6 +12,9 @@ import (
 )
 
 func initMocks() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P) {
+	// supress all logs
+	log.SetLogLevel(log.NONE)
+
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 
