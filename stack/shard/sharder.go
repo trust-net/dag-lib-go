@@ -19,8 +19,10 @@ type Sharder interface {
 	Anchor(a *dto.Anchor) error
 	// provide anchor for syncing with specified shard
 	SyncAnchor(shardId []byte) *dto.Anchor
-	// provide max ancestors from specified start hash for specified shard
+	// provide max ancestors from specified start hash
 	Ancestors(startHash [64]byte, max uint64) [][64]byte
+	// provide children of specified hash
+	Children(parent [64]byte) [][64]byte
 	// Approve submitted transaction
 	Approve(tx dto.Transaction) error
 	// Handle Transaction
@@ -198,6 +200,13 @@ func (s *sharder) Ancestors(startHash [64]byte, max uint64) [][64]byte {
 		}
 	}
 	return ancestors
+}
+
+func (s *sharder) Children(parent [64]byte) [][64]byte {
+	for parentNode := s.db.GetShardDagNode(parent); parentNode != nil; {
+		return parentNode.Children
+	}
+	return nil
 }
 
 func (s *sharder) Approve(tx dto.Transaction) error {

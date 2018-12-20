@@ -1270,8 +1270,6 @@ func TestRECV_ShardAncestorResponseMsg_IncorrectState(t *testing.T) {
 func TestRECV_ShardAncestorResponseMsg_KnownAncestor(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, _, _, _ := initMocks()
-	log.SetLogLevel(log.DEBUG)
-	defer log.SetLogLevel(log.NONE)
 
 	// submit a transactions to add ancestor to local shard's Anchor
 	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
@@ -1456,5 +1454,113 @@ func TestStackRunner(t *testing.T) {
 	// application should have got call back to process transaction via sharding layer
 	if !sharder.TxHandlerCalled || !gotCallback {
 		t.Errorf("Application did not recieve callback via sharding layer")
+	}
+}
+
+// stack controller listner generates RECV_ShardChildrenRequestMsg event for ShardChildrenRequestMsg message
+func TestPeerListnerGeneratesEventForShardChildrenRequestMsg(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// setup mock connection to send a ShardAncestorRequestMsg followed by clean shutdown
+	mockConn.NextMsg(ShardChildrenRequestMsgCode, &ShardChildrenRequestMsg{})
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	seenMsgEvent := false
+	finished := make(chan struct{}, 2)
+	go func() {
+		tick := time.Tick(100 * time.Millisecond)
+		for {
+			select {
+			case e := <-events:
+				if e.code == RECV_ShardChildrenRequestMsg {
+					seenMsgEvent = true
+				} else if e.code == SHUTDOWN {
+					finished <- struct{}{}
+					return
+				}
+			case <-tick:
+				finished <- struct{}{}
+				return
+			}
+		}
+	}()
+
+	// now call stack's listener
+	if err := stack.listener(peer, events); err != nil {
+		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// wait for event listener to process
+	<-finished
+
+	// check if listener generate correct event
+	if !seenMsgEvent {
+		t.Errorf("Event listener did not generate RECV_ShardChildrenRequestMsg event!!!")
+	}
+}
+
+// test stack controller event listener handles RECV_ShardChildrenRequestMsg when hash is known
+func TestRECV_ShardChildrenRequestMsg_KnownHash(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, _, _ := initMocks()
+	log.SetLogLevel(log.DEBUG)
+	defer log.SetLogLevel(log.NONE)
+
+	// submit 2 transactions to add ancestors to local shard's Anchor
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+	// the second transaction would be Anchor's parent, and hence will be the starting hash
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	stack.Submit(tx2)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build an children request message for stack's shard
+	msg := &ShardChildrenRequestMsg{
+		Parent: tx1.Id(),
+	}
+	// now emit RECV_ShardAncestorRequestMsgCode event
+	events <- newControllerEvent(RECV_ShardChildrenRequestMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle children request
+	// when hash is known and children are present
+
+	// we should have fetched children from sharder
+	if !sharder.ChildrenCalled {
+		t.Errorf("did not fetch children from sharder")
+	}
+
+	// we should have sent the ShardChildrenResponseMsg message back with max ancestors
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardChildrenResponseMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if peer.SendMsg.(*ShardChildrenResponseMsg).Parent != tx1.Id() {
+		t.Errorf("Incorrect parent hash: %x\nExpected: %x", peer.SendMsg.(*ShardChildrenResponseMsg).Parent, tx1.Id())
+	} else if len(peer.SendMsg.(*ShardChildrenResponseMsg).Children) != 1 {
+		t.Errorf("Incorrect number of children: %d, Expected: %d", len(peer.SendMsg.(*ShardChildrenResponseMsg).Children), 1)
+	} else if peer.SendMsg.(*ShardChildrenResponseMsg).Children[0] != tx2.Id() {
+		t.Errorf("Incorrect 1st child: %x\nExpected: %x", peer.SendMsg.(*ShardChildrenResponseMsg).Children[0], tx2.Id())
 	}
 }

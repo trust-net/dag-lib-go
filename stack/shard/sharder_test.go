@@ -595,3 +595,67 @@ func TestAncestorsUnknownStartHash(t *testing.T) {
 		t.Errorf("Incorrect number of ancestors: %d", len(ancestors))
 	}
 }
+
+func TestChildrenKnownParent(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	tx1, _ := SignedShardTransaction("test payload")
+	tx2 := dto.TestSignedTransaction("test payload")
+	tx2.Anchor().ShardParent = tx1.Id()
+	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
+	// register an app for transaction's shard
+	txHandler := func(tx dto.Transaction) error { return nil }
+	s.Register(tx1.Anchor().ShardId, txHandler)
+
+	// add transactions to sharder's DAG
+	if err := s.Handle(tx1); err != nil {
+		t.Errorf("Failed to add 1st transaction: %s", err)
+	}
+	if err := s.Handle(tx2); err != nil {
+		t.Errorf("Failed to add 2nd transaction: %s", err)
+	}
+
+	// now fetch children for tx1 as parent
+	children := s.Children(tx1.Id())
+
+	// we should get 1 child: tx2
+	if len(children) != 1 {
+		t.Errorf("Incorrect number of children: %d", len(children))
+	} else if children[0] != tx2.Id() {
+		t.Errorf("Incorrect 1st child:\n%x\nExpected:\n%x", children[0], tx2.Id())
+	}
+}
+
+func TestChildrenUnknownParent(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb)
+
+	tx1, _ := SignedShardTransaction("test payload")
+	tx2 := dto.TestSignedTransaction("test payload")
+	tx2.Anchor().ShardParent = tx1.Id()
+	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
+	// register an app for transaction's shard
+	txHandler := func(tx dto.Transaction) error { return nil }
+	s.Register(tx1.Anchor().ShardId, txHandler)
+
+	// add transactions to sharder's DAG
+	if err := s.Handle(tx1); err != nil {
+		t.Errorf("Failed to add 1st transaction: %s", err)
+	}
+	if err := s.Handle(tx2); err != nil {
+		t.Errorf("Failed to add 2nd transaction: %s", err)
+	}
+
+	// now fetch children from an unknown parent
+	hash := tx1.Id()
+	hash[5] = 0x00
+	hash[6] = 0x00
+	hash[7] = 0x00
+	children := s.Children(hash)
+
+	// we should get 0 child
+	if len(children) != 0 {
+		t.Errorf("Incorrect number of children: %d", len(children))
+	}
+}

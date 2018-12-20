@@ -83,6 +83,7 @@ type mockSharder struct {
 	AnchorCalled     bool
 	SyncAnchorCalled bool
 	AncestorsCalled  bool
+	ChildrenCalled   bool
 	ApproverCalled   bool
 	TxHandlerCalled  bool
 	TxHandler        func(tx dto.Transaction) error
@@ -115,6 +116,11 @@ func (s *mockSharder) SyncAnchor(shardId []byte) *dto.Anchor {
 func (s *mockSharder) Ancestors(startHash [64]byte, max uint64) [][64]byte {
 	s.AncestorsCalled = true
 	return s.orig.Ancestors(startHash, max)
+}
+
+func (s *mockSharder) Children(parent [64]byte) [][64]byte {
+	s.ChildrenCalled = true
+	return s.orig.Children(parent)
 }
 
 func (s *mockSharder) Approve(tx dto.Transaction) error {

@@ -292,6 +292,18 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				}
 			}
 
+		case RECV_ShardChildrenRequestMsg:
+			msg := e.data.(*ShardChildrenRequestMsg)
+
+			// fetch the children for specified hash
+			children := d.sharder.Children(msg.Parent)
+			req := &ShardChildrenResponseMsg{
+				Parent:   msg.Parent,
+				Children: children,
+			}
+			d.logger.Debug("responding with %d children from: %x", len(children), msg.Parent)
+			peer.Send(req.Id(), req.Code(), req)
+
 		case SHUTDOWN:
 			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true
@@ -371,6 +383,17 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			} else {
 				// emit a RECV_ShardAncestorResponseMsg event
 				events <- newControllerEvent(RECV_ShardAncestorResponseMsg, m)
+			}
+
+		case ShardChildrenRequestMsgCode:
+			// deserialize the shard ancestors request message from payload
+			m := &ShardChildrenRequestMsg{}
+			if err := msg.Decode(m); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				return err
+			} else {
+				// emit a RECV_ShardAncestorRequestMsgCode event
+				events <- newControllerEvent(RECV_ShardChildrenRequestMsg, m)
 			}
 
 		// case 1 message type
