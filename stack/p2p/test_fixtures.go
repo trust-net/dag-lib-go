@@ -108,6 +108,13 @@ func (p2p *MockP2P) Broadcast(msgId [64]byte, msgcode uint64, data interface{}) 
 	return nil
 }
 
+func (p2p *MockP2P) Reset() {
+	*p2p = MockP2P{
+		Name: p2p.Name,
+		ID:   p2p.ID,
+	}
+}
+
 // implements peerDEVp2pWrapper interface, so can be used interchangeabily with DEVp2p.Peer
 type mockPeer struct {
 	IdCount         int

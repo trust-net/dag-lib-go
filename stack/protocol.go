@@ -137,15 +137,27 @@ func (m *TxShardChildRequestMsg) Code() uint64 {
 }
 
 type TxShardChildResponseMsg struct {
-	Tx       dto.Transaction
+	hash     [64]byte
+	Bytes    []byte
 	Children [][64]byte
 }
 
 func (m *TxShardChildResponseMsg) Id() []byte {
-	hash := m.Tx.Id()
-	return append([]byte("TxShardChildResponseMsg"), hash[:]...)
+	return append([]byte("TxShardChildResponseMsg"), m.hash[:]...)
 }
 
 func (m *TxShardChildResponseMsg) Code() uint64 {
 	return TxShardChildResponseMsgCode
+}
+
+func NewTxShardChildResponseMsg(tx dto.Transaction, children [][64]byte) *TxShardChildResponseMsg {
+	if bytes, err := tx.Serialize(); err != nil {
+		return nil
+	} else {
+		return &TxShardChildResponseMsg{
+			hash:     tx.Id(),
+			Bytes:    bytes,
+			Children: children,
+		}
+	}
 }

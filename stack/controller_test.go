@@ -1640,7 +1640,6 @@ func TestRECV_ShardChildrenResponseMsg_UnexpectedHash(t *testing.T) {
 	}
 
 	// we should not have emit the POP_ShardChild event to process ShardChildrenQ
-	// starting from top ancestor in ShardAncestorResponseMsg
 	if len(events) != 0 {
 		t.Errorf("should not emit any event for incorrect state")
 	}
@@ -1710,7 +1709,6 @@ func TestRECV_ShardChildrenResponseMsg_ExpectedHash(t *testing.T) {
 	}
 
 	// we should have emitted the POP_ShardChild event to process ShardChildrenQ
-	// starting from top ancestor in ShardAncestorResponseMsg
 	if len(events) != 1 {
 		t.Errorf("did not emit event for child processing")
 	}
@@ -1787,7 +1785,6 @@ func TestRECV_ShardChildrenResponseMsg_KnownChild(t *testing.T) {
 	}
 
 	// we should have emitted the POP_ShardChild event to process ShardChildrenQ
-	// starting from top ancestor in ShardAncestorResponseMsg
 	if len(events) != 1 {
 		t.Errorf("did not emit event for child processing")
 	}
@@ -1979,8 +1976,8 @@ func TestRECV_TxShardChildRequestMsg_KnownHash(t *testing.T) {
 		t.Errorf("did not send any message to peer")
 	} else if peer.SendMsgCode != TxShardChildResponseMsgCode {
 		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
-	} else if peer.SendMsg.(*TxShardChildResponseMsg).Tx.Id() != tx1.Id() {
-		t.Errorf("Incorrect transaction hash: %x\nExpected: %x", peer.SendMsg.(*TxShardChildResponseMsg).Tx.Id(), tx1.Id())
+	} else if tx1Bytes, _ := tx1.Serialize(); string(peer.SendMsg.(*TxShardChildResponseMsg).Bytes) != string(tx1Bytes) {
+		t.Errorf("Incorrect transaction hash: %x\nExpected: %x", peer.SendMsg.(*TxShardChildResponseMsg).Bytes, tx1Bytes)
 	} else if len(peer.SendMsg.(*TxShardChildResponseMsg).Children) != 1 {
 		t.Errorf("Incorrect number of children: %d, Expected: %d", len(peer.SendMsg.(*TxShardChildResponseMsg).Children), 1)
 	} else if peer.SendMsg.(*TxShardChildResponseMsg).Children[0] != tx2.Id() {
@@ -2039,5 +2036,300 @@ func TestRECV_TxShardChildRequestMsg_UnknownHash(t *testing.T) {
 	// because its an error condition, we should have disconnected
 	if !peer.DisconnectCalled {
 		t.Errorf("did not disconnect with peer")
+	}
+}
+
+// stack controller listner generates RECV_TxShardChildResponseMsg event for TxShardChildResponseMsg message
+func TestPeerListnerGeneratesEventForTxShardChildResponseMsg(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// setup mock connection to send a TxShardChildResponseMsg followed by clean shutdown
+	mockConn.NextMsg(TxShardChildResponseMsgCode, &TxShardChildResponseMsg{})
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	finished := checkForEventCode(RECV_TxShardChildResponseMsg, events)
+
+	// now call stack's listener
+	if err := stack.listener(peer, events); err != nil {
+		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// wait for event listener to process
+	result := <-finished
+
+	// check if listener generate correct event
+	if !result.seenMsgEvent {
+		t.Errorf("Event listener did not generate RECV_TxShardChildResponseMsg event!!!")
+	}
+}
+
+// test stack controller event listener handles RECV_TxShardChildResponseMsg when transaction hash is unexpected
+func TestRECV_TxShardChildResponseMsg_UnexpectedHash(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer := initMocks()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+
+	// build another transaction as child of above transaction to send in response
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// save the expected hash with peer's state
+	peer.SetState(int(RECV_TxShardChildResponseMsg), tx2.Id())
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build an transaction response message using hash unknown to shard
+	msg := NewTxShardChildResponseMsg(dto.TestSignedTransaction("test data"), [][64]byte{})
+	for i := 0; i < 5; i++ {
+		msg.Children = append(msg.Children, dto.RandomHash())
+	}
+
+	// now emit RECV_TxShardChildResponseMsg event
+	events <- newControllerEvent(RECV_TxShardChildResponseMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle children response message
+	// when parent hash of children does not match expected state
+
+	// we should have fetched the peer state to validate transaction response's hash
+	if !peer.GetStateCalled {
+		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should not have changed the peer state
+	if state := peer.GetState(int(RECV_TxShardChildResponseMsg)); state == nil || state.([64]byte) != tx2.Id() {
+		t.Errorf("controller changed start hash for incorrect state:\n%x\nExpected:\n%x", state, tx2.Id())
+	}
+
+	// we should not have marked the message as seen for stack
+	if stack.isSeen(tx2.Id()) {
+		t.Errorf("stack should not mark the unexpected transaction as seen")
+	}
+
+	// we should not have broadcasted message
+	if p2pLayer.DidBroadcast {
+		t.Errorf("stack should not froward unexpected transaction")
+	}
+
+	// sharding layer should not be asked to handle transaction
+	if sharder.TxHandlerCalled {
+		t.Errorf("DLT stack controller should not call sharding layer for unexpected transaction")
+	}
+
+	// verify that endorser does not gets called for un-serializable message
+	if endorser.TxHandlerCalled {
+		t.Errorf("Endorser should not get called for unexpected transaction")
+	}
+
+	// we should not have added children of unexpected transaction to shard children queue
+	if peer.ShardChildrenQ().Count() != 0 {
+		t.Errorf("incorrect number of children in queue: %d, expected: %d", peer.ShardChildrenQ().Count(), 0)
+	}
+
+	// we should not have emitted the POP_ShardChild event to process ShardChildrenQ
+	if len(events) != 0 {
+		t.Errorf("should not emit event for next child processing")
+	}
+}
+
+// test stack controller event listener handles RECV_TxShardChildResponseMsg when transaction is corrupted
+func TestRECV_TxShardChildResponseMsg_UnserializableTx(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer := initMocks()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+
+	// build another transaction as child of above transaction to send in response
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// save the expected hash with peer's state
+	peer.SetState(int(RECV_TxShardChildResponseMsg), tx2.Id())
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build an transaction response message using hash unknown to shard
+	msg := &TxShardChildResponseMsg{
+		Bytes:    []byte("some corrupted bytes"),
+		Children: [][64]byte{},
+	}
+	for i := 0; i < 5; i++ {
+		msg.Children = append(msg.Children, dto.RandomHash())
+	}
+
+	// now emit RECV_TxShardChildResponseMsg event
+	events <- newControllerEvent(RECV_TxShardChildResponseMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle children response message
+	// when parent hash of children does not match expected state
+
+	// we should not event have fetched the peer state to validate transaction response's hash
+	if peer.GetStateCalled {
+		t.Errorf("should not get state from peer to for unserializable transaction")
+	}
+
+	// we should not have changed the peer state
+	if state := peer.GetState(int(RECV_TxShardChildResponseMsg)); state == nil || state.([64]byte) != tx2.Id() {
+		t.Errorf("controller changed start hash for incorrect state:\n%x\nExpected:\n%x", state, tx2.Id())
+	}
+
+	// we should not have marked the message as seen for stack
+	if stack.isSeen(tx2.Id()) {
+		t.Errorf("stack should not mark the un-serializable transaction as seen")
+	}
+
+	// we should not have broadcasted message
+	if p2pLayer.DidBroadcast {
+		t.Errorf("stack should not froward un-serializable transaction")
+	}
+
+	// sharding layer should not be asked to handle transaction
+	if sharder.TxHandlerCalled {
+		t.Errorf("DLT stack controller should not call sharding layer for un-serializable transaction")
+	}
+
+	// verify that endorser does not gets called for un-serializable message
+	if endorser.TxHandlerCalled {
+		t.Errorf("Endorser should not get called for un-serializable transaction")
+	}
+
+	// we should not have added children of un-serializable transaction to shard children queue
+	if peer.ShardChildrenQ().Count() != 0 {
+		t.Errorf("incorrect number of children in queue: %d, expected: %d", peer.ShardChildrenQ().Count(), 0)
+	}
+
+	// we should not have emitted the POP_ShardChild event to process ShardChildrenQ
+	if len(events) != 0 {
+		t.Errorf("should not emit event for next child processing")
+	}
+}
+
+// test stack controller event listener handles RECV_TxShardChildResponseMsg when transaction hash is expected
+func TestRECV_TxShardChildResponseMsg_ExpectedHash(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer := initMocks()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+
+	// build another transaction as child of above transaction to send in response
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// save the expected hash with peer's state
+	peer.SetState(int(RECV_TxShardChildResponseMsg), tx2.Id())
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build an transaction response message using hash unknown to shard
+	msg := NewTxShardChildResponseMsg(tx2, [][64]byte{})
+	for i := 0; i < 5; i++ {
+		msg.Children = append(msg.Children, dto.RandomHash())
+	}
+
+	// now emit RECV_TxShardChildResponseMsg event
+	events <- newControllerEvent(RECV_TxShardChildResponseMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle children response message
+	// when parent hash of children does not match expected state
+
+	// we should have fetched the peer state to validate transaction response's hash
+	if !peer.GetStateCalled {
+		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should have changed the peer state to null
+	if state := peer.GetState(int(RECV_TxShardChildResponseMsg)); state == nil || state.([64]byte) != [64]byte{} {
+		t.Errorf("controller changed hash to incorrect state:\n%x\nExpected:\n%x", state, [64]byte{})
+	}
+
+	// we should have marked the message as seen for stack
+	if !stack.isSeen(tx2.Id()) {
+		t.Errorf("Listener did not mark the received transaction as seen")
+	}
+
+	// we should have broadcasted message
+	if !p2pLayer.DidBroadcast {
+		t.Errorf("Listener did not froward received transaction")
+	}
+
+	// sharding layer should be asked to handle transaction
+	if !sharder.TxHandlerCalled {
+		t.Errorf("DLT stack controller did not call sharding layer")
+	}
+
+	// verify that endorser gets called for network message
+	if !endorser.TxHandlerCalled {
+		t.Errorf("Endorser did not get called for recieved transaction")
+	}
+
+	// we should have added children of expected transaction to shard children queue
+	if peer.ShardChildrenQ().Count() != 5 {
+		t.Errorf("incorrect number of children in queue: %d, expected: %d", peer.ShardChildrenQ().Count(), 5)
+	}
+
+	// we should have emitted the POP_ShardChild event to process ShardChildrenQ
+	if len(events) != 1 {
+		t.Errorf("did not emit event for next child processing")
 	}
 }

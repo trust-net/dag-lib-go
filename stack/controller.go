@@ -184,6 +184,27 @@ func (d *dlt) handshake(peer p2p.Peer) error {
 	return nil
 }
 
+func (d *dlt) handleTransaction(peer p2p.Peer, tx dto.Transaction) error {
+	// send transaction to endorsing layer for handling
+	if err := d.endorser.Handle(tx); err != nil {
+		d.logger.Error("Failed to endorse transaction: %s", err)
+		return err
+	}
+
+	// let sharding layer process transaction
+	if err := d.sharder.Handle(tx); err != nil {
+		d.logger.Error("Failed to shard transaction: %s", err)
+		return err
+	}
+
+	// mark sender of the message as seen
+	id := tx.Id()
+	peer.Seen(id[:])
+	d.logger.Debug("Boradcasting transaction: %x", tx.Id())
+	d.p2p.Broadcast(tx.Self().Id(), TransactionMsgCode, tx)
+	return nil
+}
+
 // listen on events for a specific peer connection
 func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 	// fmt.Printf("Entering event listener...\n")
@@ -192,25 +213,7 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 		e := <-events
 		switch e.code {
 		case RECV_NewTxBlockMsg:
-			tx := e.data.(dto.Transaction)
-
-			// send transaction to endorsing layer for handling
-			if err := d.endorser.Handle(tx); err != nil {
-				d.logger.Error("Failed to endorse transaction: %s", err)
-				continue
-			}
-
-			// let sharding layer process transaction
-			if err := d.sharder.Handle(tx); err != nil {
-				d.logger.Error("Failed to shard transaction: %s", err)
-				continue
-			}
-
-			// mark sender of the message as seen
-			id := tx.Id()
-			peer.Seen(id[:])
-			d.logger.Debug("Boradcasting transaction: %x", tx.Id())
-			d.p2p.Broadcast(tx.Self().Id(), TransactionMsgCode, tx)
+			d.handleTransaction(peer, e.data.(dto.Transaction))
 
 		case RECV_ShardSyncMsg:
 			msg := e.data.(*ShardSyncMsg)
@@ -329,7 +332,6 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			}
 
 		case POP_ShardChild:
-
 			// pop the first child from peer's shard children queue
 			if child, err := peer.ShardChildrenQ().Pop(); err != nil {
 				d.logger.Debug("Did not fetch child from shard children queue: %s", err)
@@ -357,12 +359,61 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			} else {
 				// fetch children for this transaction from shard DAG
 				children := d.sharder.Children(msg.Hash)
-				req := &TxShardChildResponseMsg{
-					Tx:       tx,
-					Children: children,
+				req := NewTxShardChildResponseMsg(tx, children)
+				if req == nil {
+					d.logger.Debug("Failed to serialize transaction: %x", tx.Id())
+				} else {
+					d.logger.Debug("Sending transaction with %d children for: %x", len(children), tx.Id())
+					peer.Send(req.Id(), req.Code(), req)
 				}
-				d.logger.Debug("Sending transaction with %d children for: %x", len(children), tx.Id())
-				peer.Send(req.Id(), req.Code(), req)
+			}
+
+		case RECV_TxShardChildResponseMsg:
+			msg := e.data.(*TxShardChildResponseMsg)
+
+			// deserialize the transaction message from payload
+			tx := dto.NewTransaction(&dto.Anchor{})
+			if err := tx.DeSerialize(msg.Bytes); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				// EndOfSync
+				// TBD: or should we pop next child?
+				break
+			}
+
+			// fetch state from peer to validate response's starting hash
+			if state := peer.GetState(int(RECV_TxShardChildResponseMsg)); state != tx.Id() {
+				d.logger.Debug("Unexpected TxShardChildResponseMsg\nhash: %x\nExpected: %x", tx.Id(), state)
+			} else {
+
+				// validate transaction signature using transaction submitter's ID
+				if !d.p2p.Verify(tx.Self().Payload, tx.Self().Signature, tx.Anchor().Submitter) {
+					d.logger.Debug("Transaction signature invalid")
+					break
+				}
+
+				// check if transaction was already seen by stack
+				if d.isSeen(tx.Id()) {
+					break
+				}
+				// handle transaction for each layer
+				if err := d.handleTransaction(peer, tx); err == nil {
+					// walk through each child to check if it's unknown, then add to child queue
+					for _, child := range msg.Children {
+						if d.db.GetTx(child) == nil {
+							if err := peer.ShardChildrenQ().Push(child); err != nil {
+								d.logger.Debug("Failed to add child to shard queue: %s", err)
+								break
+							}
+						}
+					}
+					d.logger.Debug("Successfully added TxShardChildResponseMsg\nhash: %x\n# of children: %x", tx.Id(), len(msg.Children))
+				}
+
+				// update the RECV_TxShardChildResponseMsg state to null value, to prevent any repeated/cyclic DoS attack
+				peer.SetState(int(RECV_TxShardChildResponseMsg), [64]byte{})
+
+				// emit the POP_ShardChild event for processing children queue
+				events <- newControllerEvent(POP_ShardChild, nil)
 			}
 
 		case SHUTDOWN:
@@ -431,7 +482,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 				d.logger.Debug("Failed to decode message: %s", err)
 				return err
 			} else {
-				// emit a RECV_ShardAncestorRequestMsgCode event
+				// emit a RECV_ShardAncestorRequestMsg event
 				events <- newControllerEvent(RECV_ShardAncestorRequestMsg, m)
 			}
 
@@ -453,7 +504,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 				d.logger.Debug("Failed to decode message: %s", err)
 				return err
 			} else {
-				// emit a RECV_ShardAncestorRequestMsgCode event
+				// emit a RECV_ShardAncestorRequestMsg event
 				events <- newControllerEvent(RECV_ShardChildrenRequestMsg, m)
 			}
 
@@ -475,8 +526,19 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 				d.logger.Debug("Failed to decode message: %s", err)
 				return err
 			} else {
-				// emit a RECV_ShardAncestorRequestMsgCode event
+				// emit a RECV_ShardAncestorRequestMsg event
 				events <- newControllerEvent(RECV_TxShardChildRequestMsg, m)
+			}
+
+		case TxShardChildResponseMsgCode:
+			// deserialize the shard ancestors request message from payload
+			m := &TxShardChildResponseMsg{}
+			if err := msg.Decode(m); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				return err
+			} else {
+				// emit a RECV_TxShardChildResponseMsg event
+				events <- newControllerEvent(RECV_TxShardChildResponseMsg, m)
 			}
 
 		// case 1 message type
