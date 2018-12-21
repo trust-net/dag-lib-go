@@ -501,7 +501,7 @@ func TestPeerHandshakeUnregistered(t *testing.T) {
 }
 
 // test stack controller event listener handles RECV_NewTxBlockMsg correctly
-func TestEventListenerHandleRECV_NewTxBlockMsgEvent(t *testing.T) {
+func TestRECV_NewTxBlockMsgEvent(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, sharder, endorser, p2pLayer := initMocks()
 
@@ -830,25 +830,7 @@ func TestPeerListnerGeneratesEventForUnseenTxBlockMsg(t *testing.T) {
 
 	// setup a test event listener
 	events := make(chan controllerEvent, 10)
-	seenNewTxBlockMsgEvent := false
-	finished := make(chan struct{}, 2)
-	go func() {
-		tick := time.Tick(100 * time.Millisecond)
-		for {
-			select {
-			case e := <-events:
-				if e.code == RECV_NewTxBlockMsg {
-					seenNewTxBlockMsgEvent = true
-				} else if e.code == SHUTDOWN {
-					finished <- struct{}{}
-					return
-				}
-			case <-tick:
-				finished <- struct{}{}
-				return
-			}
-		}
-	}()
+	finished := checkForEventCode(RECV_NewTxBlockMsg, events)
 
 	// now call stack's listener
 	if err := stack.listener(peer, events); err != nil {
@@ -856,10 +838,10 @@ func TestPeerListnerGeneratesEventForUnseenTxBlockMsg(t *testing.T) {
 	}
 
 	// wait for event listener to process
-	<-finished
+	result := <-finished
 
 	// check if listener generate correct event
-	if !seenNewTxBlockMsgEvent {
+	if !result.seenMsgEvent {
 		t.Errorf("Event listener did not generate RECV_NewTxBlockMsg event!!!")
 	}
 
@@ -885,25 +867,7 @@ func TestPeerListnerGeneratesEventForShardSyncMsg(t *testing.T) {
 
 	// setup a test event listener
 	events := make(chan controllerEvent, 10)
-	seenShardSyncMsgEvent := false
-	finished := make(chan struct{}, 2)
-	go func() {
-		tick := time.Tick(100 * time.Millisecond)
-		for {
-			select {
-			case e := <-events:
-				if e.code == RECV_ShardSyncMsg {
-					seenShardSyncMsgEvent = true
-				} else if e.code == SHUTDOWN {
-					finished <- struct{}{}
-					return
-				}
-			case <-tick:
-				finished <- struct{}{}
-				return
-			}
-		}
-	}()
+	finished := checkForEventCode(RECV_ShardSyncMsg, events)
 
 	// now call stack's listener
 	if err := stack.listener(peer, events); err != nil {
@@ -911,10 +875,10 @@ func TestPeerListnerGeneratesEventForShardSyncMsg(t *testing.T) {
 	}
 
 	// wait for event listener to process
-	<-finished
+	result := <-finished
 
 	// check if listener generate correct event
-	if !seenShardSyncMsgEvent {
+	if !result.seenMsgEvent {
 		t.Errorf("Event listener did not generate RECV_ShardSyncMsg event!!!")
 	}
 }
@@ -938,25 +902,7 @@ func TestPeerListnerDoesNotGeneratesEventForSeenTxBlockMsg(t *testing.T) {
 
 	// setup a test event listener
 	events := make(chan controllerEvent, 10)
-	seenNewTxBlockMsgEvent := false
-	finished := make(chan struct{}, 2)
-	go func() {
-		tick := time.Tick(100 * time.Millisecond)
-		for {
-			select {
-			case e := <-events:
-				if e.code == RECV_NewTxBlockMsg {
-					seenNewTxBlockMsgEvent = true
-				} else if e.code == SHUTDOWN {
-					finished <- struct{}{}
-					return
-				}
-			case <-tick:
-				finished <- struct{}{}
-				return
-			}
-		}
-	}()
+	finished := checkForEventCode(RECV_NewTxBlockMsg, events)
 
 	// now call stack's listener
 	if err := stack.listener(peer, events); err != nil {
@@ -964,7 +910,7 @@ func TestPeerListnerDoesNotGeneratesEventForSeenTxBlockMsg(t *testing.T) {
 	}
 
 	// wait for event listener to process
-	<-finished
+	result := <-finished
 
 	// we should have marked the message as seen for stack
 	if !stack.isSeen(tx.Id()) {
@@ -977,7 +923,7 @@ func TestPeerListnerDoesNotGeneratesEventForSeenTxBlockMsg(t *testing.T) {
 	}
 
 	// we should not have generated the RECV_NewTxBlockMsg event
-	if seenNewTxBlockMsgEvent {
+	if result.seenMsgEvent {
 		t.Errorf("Event listener should not generate RECV_NewTxBlockMsg event for seen message!!!")
 	}
 }
@@ -997,25 +943,7 @@ func TestPeerListnerGeneratesEventForShardAncestorRequestMsg(t *testing.T) {
 
 	// setup a test event listener
 	events := make(chan controllerEvent, 10)
-	seenMsgEvent := false
-	finished := make(chan struct{}, 2)
-	go func() {
-		tick := time.Tick(100 * time.Millisecond)
-		for {
-			select {
-			case e := <-events:
-				if e.code == RECV_ShardAncestorRequestMsg {
-					seenMsgEvent = true
-				} else if e.code == SHUTDOWN {
-					finished <- struct{}{}
-					return
-				}
-			case <-tick:
-				finished <- struct{}{}
-				return
-			}
-		}
-	}()
+	finished := checkForEventCode(RECV_ShardAncestorRequestMsg, events)
 
 	// now call stack's listener
 	if err := stack.listener(peer, events); err != nil {
@@ -1023,10 +951,10 @@ func TestPeerListnerGeneratesEventForShardAncestorRequestMsg(t *testing.T) {
 	}
 
 	// wait for event listener to process
-	<-finished
+	result := <-finished
 
 	// check if listener generate correct event
-	if !seenMsgEvent {
+	if !result.seenMsgEvent {
 		t.Errorf("Event listener did not generate RECV_ShardAncestorRequestMsgCode event!!!")
 	}
 }
@@ -1472,25 +1400,7 @@ func TestPeerListnerGeneratesEventForShardChildrenRequestMsg(t *testing.T) {
 
 	// setup a test event listener
 	events := make(chan controllerEvent, 10)
-	seenMsgEvent := false
-	finished := make(chan struct{}, 2)
-	go func() {
-		tick := time.Tick(100 * time.Millisecond)
-		for {
-			select {
-			case e := <-events:
-				if e.code == RECV_ShardChildrenRequestMsg {
-					seenMsgEvent = true
-				} else if e.code == SHUTDOWN {
-					finished <- struct{}{}
-					return
-				}
-			case <-tick:
-				finished <- struct{}{}
-				return
-			}
-		}
-	}()
+	finished := checkForEventCode(RECV_ShardChildrenRequestMsg, events)
 
 	// now call stack's listener
 	if err := stack.listener(peer, events); err != nil {
@@ -1498,10 +1408,10 @@ func TestPeerListnerGeneratesEventForShardChildrenRequestMsg(t *testing.T) {
 	}
 
 	// wait for event listener to process
-	<-finished
+	result := <-finished
 
 	// check if listener generate correct event
-	if !seenMsgEvent {
+	if !result.seenMsgEvent {
 		t.Errorf("Event listener did not generate RECV_ShardChildrenRequestMsg event!!!")
 	}
 }
@@ -1562,5 +1472,270 @@ func TestRECV_ShardChildrenRequestMsg_KnownHash(t *testing.T) {
 		t.Errorf("Incorrect number of children: %d, Expected: %d", len(peer.SendMsg.(*ShardChildrenResponseMsg).Children), 1)
 	} else if peer.SendMsg.(*ShardChildrenResponseMsg).Children[0] != tx2.Id() {
 		t.Errorf("Incorrect 1st child: %x\nExpected: %x", peer.SendMsg.(*ShardChildrenResponseMsg).Children[0], tx2.Id())
+	}
+}
+
+func checkForEventCode(code eventEnum, events chan controllerEvent) chan struct{ seenMsgEvent bool } {
+	finished := make(chan struct{ seenMsgEvent bool }, 2)
+	go func() {
+		tick := time.Tick(100 * time.Millisecond)
+		for {
+			select {
+			case e := <-events:
+				if e.code == code {
+					finished <- struct{ seenMsgEvent bool }{seenMsgEvent: true}
+				} else if e.code == SHUTDOWN {
+					finished <- struct{ seenMsgEvent bool }{}
+					return
+				}
+			case <-tick:
+				finished <- struct{ seenMsgEvent bool }{}
+				return
+			}
+		}
+	}()
+	return finished
+}
+
+// stack controller listner generates RECV_ShardChildrenResponseMsg event for ShardChildrenResponseMsg message
+func TestPeerListnerGeneratesEventForShardChildrenResponseMsg(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// setup mock connection to send a ShardAncestorRequestMsg followed by clean shutdown
+	mockConn.NextMsg(ShardChildrenResponseMsgCode, &ShardChildrenResponseMsg{})
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	finished := checkForEventCode(RECV_ShardChildrenResponseMsg, events)
+
+	// now call stack's listener
+	if err := stack.listener(peer, events); err != nil {
+		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// wait for event listener to process
+	result := <-finished
+
+	// check if listener generate correct event
+	if !result.seenMsgEvent {
+		t.Errorf("Event listener did not generate RECV_ShardChildrenResponseMsg event!!!")
+	}
+}
+
+// test stack controller event listener handles RECV_ShardChildrenResponseMsg when Parent hash is unexpected
+func TestRECV_ShardChildrenResponseMsg_UnexpectedHash(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// save the start hash with peer
+	peer.SetState(int(RECV_ShardChildrenResponseMsg), tx1.Id())
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build an children response message using parent hash known to shard
+	msg := &ShardChildrenResponseMsg{
+		Parent:   dto.RandomHash(),
+		Children: [][64]byte{},
+	}
+	for i := 0; i < 5; i++ {
+		msg.Children = append(msg.Children, dto.RandomHash())
+	}
+
+	// now emit RECV_ShardChildrenResponseMsg event
+	events <- newControllerEvent(RECV_ShardChildrenResponseMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle children response message
+	// when parent hash of children does not match expected state
+
+	// we should have fetched the peer state to validate ancestor response's starting hash
+	if !peer.GetStateCalled {
+		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should not have changed the peer state
+	if state := peer.GetState(int(RECV_ShardChildrenResponseMsg)).([64]byte); state != tx1.Id() {
+		t.Errorf("controller changed start hash for incorrect state:\n%x\nExpected:\n%x", state, tx1.Id())
+	}
+
+	// we should not have fetched queue to get or set
+	if peer.ShardChildrenQCallCount != 0 {
+		t.Errorf("should not access peer's shard children queue")
+	}
+
+	// we should not have emit the POP_ShardChild event to process ShardChildrenQ
+	// starting from top ancestor in ShardAncestorResponseMsg
+	if len(events) != 0 {
+		t.Errorf("should not emit any event for incorrect state")
+	}
+}
+
+// test stack controller event listener handles RECV_ShardChildrenResponseMsg when Parent hash is as expected
+func TestRECV_ShardChildrenResponseMsg_ExpectedHash(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// save the start hash with peer
+	peer.SetState(int(RECV_ShardChildrenResponseMsg), tx1.Id())
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build an children response message using parent hash known to shard
+	msg := &ShardChildrenResponseMsg{
+		Parent:   tx1.Id(),
+		Children: [][64]byte{},
+	}
+	for i := 0; i < 5; i++ {
+		msg.Children = append(msg.Children, dto.RandomHash())
+	}
+
+	// now emit RECV_ShardChildrenResponseMsg event
+	events <- newControllerEvent(RECV_ShardChildrenResponseMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle children response message
+	// when parent hash of children does not match expected state
+
+	// we should have fetched the peer state to validate ancestor response's starting hash
+	if !peer.GetStateCalled {
+		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should have changed the peer state to null so that no further children response can be processed
+	if state := peer.GetState(int(RECV_ShardChildrenResponseMsg)).([64]byte); state != [64]byte{} {
+		t.Errorf("controller did not change start hash, current:\n%x\nExpected:\n%x", state, [64]byte{})
+	}
+
+	// we should have fetched queue to add children for processing
+	if peer.ShardChildrenQCallCount == 0 {
+		t.Errorf("did not access peer's shard children queue")
+	}
+
+	// we should have added all children to shard children q
+	if peer.ShardChildrenQ().Count() != 5 {
+		t.Errorf("incorrect number of children in queue: %d, expected: %d", peer.ShardChildrenQ().Count(), 5)
+	}
+
+	// we should have emitted the POP_ShardChild event to process ShardChildrenQ
+	// starting from top ancestor in ShardAncestorResponseMsg
+	if len(events) != 1 {
+		t.Errorf("did not emit event for child processing")
+	}
+}
+
+// test stack controller event listener handles RECV_ShardChildrenResponseMsg when one of the children is already known
+func TestRECV_ShardChildrenResponseMsg_KnownChild(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+
+	// submit another transactions to add child to local shard's Anchor
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	stack.Submit(tx2)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// save the start hash with peer
+	peer.SetState(int(RECV_ShardChildrenResponseMsg), tx1.Id())
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build an children response message using parent hash known to shard
+	msg := &ShardChildrenResponseMsg{
+		Parent:   tx1.Id(),
+		Children: [][64]byte{},
+	}
+	for i := 0; i < 4; i++ {
+		msg.Children = append(msg.Children, dto.RandomHash())
+	}
+
+	// make one of the child known to local shard
+	msg.Children = append(msg.Children, tx2.Id())
+
+	// now emit RECV_ShardChildrenResponseMsg event
+	events <- newControllerEvent(RECV_ShardChildrenResponseMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle children response message
+	// when parent hash of children does not match expected state
+
+	// we should have fetched the peer state to validate ancestor response's starting hash
+	if !peer.GetStateCalled {
+		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should have changed the peer state to null so that no further children response can be processed
+	if state := peer.GetState(int(RECV_ShardChildrenResponseMsg)).([64]byte); state != [64]byte{} {
+		t.Errorf("controller did not change start hash, current:\n%x\nExpected:\n%x", state, [64]byte{})
+	}
+
+	// we should have fetched queue to add children for processing
+	if peer.ShardChildrenQCallCount == 0 {
+		t.Errorf("did not access peer's shard children queue")
+	}
+
+	// we should have added all but 1 children to shard children q
+	if peer.ShardChildrenQ().Count() != 4 {
+		t.Errorf("incorrect number of children in queue: %d, expected: %d", peer.ShardChildrenQ().Count(), 4)
+	}
+
+	// we should have emitted the POP_ShardChild event to process ShardChildrenQ
+	// starting from top ancestor in ShardAncestorResponseMsg
+	if len(events) != 1 {
+		t.Errorf("did not emit event for child processing")
 	}
 }

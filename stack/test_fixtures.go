@@ -156,16 +156,17 @@ type mockPeer struct {
 	SendMsg          interface{}
 	SeenCalled       bool
 	ReadMsgCalled    bool
-	states           map[int]interface{}
-	GetStateCalled   bool
-	SetStateCalled   bool
+	//	states           map[int]interface{}
+	GetStateCalled          bool
+	SetStateCalled          bool
+	ShardChildrenQCallCount int
 }
 
 func NewMockPeer(mockConn devp2p.MsgReadWriter) *mockPeer {
 	mockP2pPeer := p2p.TestMockPeer("test peer")
 	return &mockPeer{
-		peer:   p2p.NewDEVp2pPeer(mockP2pPeer, mockConn),
-		states: make(map[int]interface{}),
+		peer: p2p.NewDEVp2pPeer(mockP2pPeer, mockConn),
+		//		states: make(map[int]interface{}),
 	}
 }
 
@@ -223,11 +224,18 @@ func (p *mockPeer) ReadMsg() (p2p.Msg, error) {
 
 func (p *mockPeer) SetState(stateId int, stateData interface{}) error {
 	p.SetStateCalled = true
-	p.states[stateId] = stateData
-	return nil
+	//	p.states[stateId] = stateData
+	//	return nil
+	return p.peer.SetState(stateId, stateData)
 }
 
 func (p *mockPeer) GetState(stateId int) interface{} {
 	p.GetStateCalled = true
-	return p.states[stateId]
+	//	return p.states[stateId]
+	return p.peer.GetState(stateId)
+}
+
+func (p *mockPeer) ShardChildrenQ() repo.Queue {
+	p.ShardChildrenQCallCount += 1
+	return p.peer.ShardChildrenQ()
 }

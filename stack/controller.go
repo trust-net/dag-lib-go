@@ -304,6 +304,30 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			d.logger.Debug("responding with %d children from: %x", len(children), msg.Parent)
 			peer.Send(req.Id(), req.Code(), req)
 
+		case RECV_ShardChildrenResponseMsg:
+			msg := e.data.(*ShardChildrenResponseMsg)
+
+			// fetch state from peer to validate response's starting hash
+			if state := peer.GetState(int(RECV_ShardChildrenResponseMsg)); state != msg.Parent {
+				d.logger.Debug("start hash of ShardChildrenResponseMsg does not match saved state")
+			} else {
+				// walk through each child to check if it's unknown, then add to child queue
+				for _, child := range msg.Children {
+					if d.db.GetTx(child) == nil {
+						if err := peer.ShardChildrenQ().Push(child); err != nil {
+							d.logger.Debug("Failed to add child to shard queue: %s", err)
+							// EndOfSync
+							break
+						}
+					}
+				}
+				// update the RECV_ShardChildrenResponseMsg state to null value, to prevent any repeated/cyclic DoS attack
+				peer.SetState(int(RECV_ShardChildrenResponseMsg), [64]byte{})
+
+				// emit the POP_ShardChild event for processing children queue
+				events <- newControllerEvent(POP_ShardChild, nil)
+			}
+
 		case SHUTDOWN:
 			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true
@@ -394,6 +418,17 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			} else {
 				// emit a RECV_ShardAncestorRequestMsgCode event
 				events <- newControllerEvent(RECV_ShardChildrenRequestMsg, m)
+			}
+
+		case ShardChildrenResponseMsgCode:
+			// deserialize the shard ancestors request message from payload
+			m := &ShardChildrenResponseMsg{}
+			if err := msg.Decode(m); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				return err
+			} else {
+				// emit a RECV_ShardAncestorRequestMsgCode event
+				events <- newControllerEvent(RECV_ShardChildrenResponseMsg, m)
 			}
 
 		// case 1 message type

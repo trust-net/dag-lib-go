@@ -22,7 +22,7 @@ const (
 	POP_AncestorsStack
 	SEND_TxBlockSyncRequestMsg
 	RECV_TxBlockSyncResponseMsg
-	POP_FirstChild
+	POP_ShardChild
 	SHUTDOWN
 )
 

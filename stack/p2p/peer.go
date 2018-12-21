@@ -5,6 +5,7 @@ package p2p
 import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/discover"
+	"github.com/trust-net/dag-lib-go/stack/repo"
 	"github.com/trust-net/go-trust-net/common"
 	"net"
 )
@@ -35,6 +36,8 @@ type Peer interface {
 	SetState(stateId int, stateData interface{}) error
 	// fetch state during sync
 	GetState(stateId int) interface{}
+	// Shard children Q
+	ShardChildrenQ() repo.Queue
 }
 
 const (
@@ -57,20 +60,26 @@ type peerDEVp2pWrapper interface {
 
 // a DEVp2p based implementation of P2P layer's Peer interface
 type peerDEVp2p struct {
-	peer   peerDEVp2pWrapper
-	rw     p2p.MsgReadWriter
-	seen   *common.Set
-	status int
-	states map[int]interface{}
+	peer           peerDEVp2pWrapper
+	rw             p2p.MsgReadWriter
+	seen           *common.Set
+	status         int
+	states         map[int]interface{}
+	shardChildrenQ repo.Queue
 }
 
 func NewDEVp2pPeer(peer peerDEVp2pWrapper, rw p2p.MsgReadWriter) *peerDEVp2p {
+	q, err := repo.NewQueue(100)
+	if err != nil {
+		return nil
+	}
 	return &peerDEVp2p{
-		peer:   peer,
-		rw:     rw,
-		status: Connected,
-		seen:   common.NewSet(),
-		states: make(map[int]interface{}),
+		peer:           peer,
+		rw:             rw,
+		status:         Connected,
+		seen:           common.NewSet(),
+		states:         make(map[int]interface{}),
+		shardChildrenQ: q,
 	}
 }
 
@@ -136,4 +145,8 @@ func (p *peerDEVp2p) SetState(stateId int, stateData interface{}) error {
 
 func (p *peerDEVp2p) GetState(stateId int) interface{} {
 	return p.states[stateId]
+}
+
+func (p *peerDEVp2p) ShardChildrenQ() repo.Queue {
+	return p.shardChildrenQ
 }
