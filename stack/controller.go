@@ -345,6 +345,26 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				peer.Send(req.Id(), req.Code(), req)
 			}
 
+		case RECV_TxShardChildRequestMsg:
+			msg := e.data.(*TxShardChildRequestMsg)
+
+			// fetch the transaction for requested hash
+			if tx := d.db.GetTx(msg.Hash); tx == nil {
+				d.logger.Error("No transaction exists for requested hash: %x", msg.Hash)
+				// this is an error condition, terminate connection with peer
+				peer.Disconnect()
+				// EndOfSync
+			} else {
+				// fetch children for this transaction from shard DAG
+				children := d.sharder.Children(msg.Hash)
+				req := &TxShardChildResponseMsg{
+					Tx:       tx,
+					Children: children,
+				}
+				d.logger.Debug("Sending transaction with %d children for: %x", len(children), tx.Id())
+				peer.Send(req.Id(), req.Code(), req)
+			}
+
 		case SHUTDOWN:
 			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true
@@ -446,6 +466,17 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			} else {
 				// emit a RECV_ShardAncestorRequestMsgCode event
 				events <- newControllerEvent(RECV_ShardChildrenResponseMsg, m)
+			}
+
+		case TxShardChildRequestMsgCode:
+			// deserialize the shard ancestors request message from payload
+			m := &TxShardChildRequestMsg{}
+			if err := msg.Decode(m); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				return err
+			} else {
+				// emit a RECV_ShardAncestorRequestMsgCode event
+				events <- newControllerEvent(RECV_TxShardChildRequestMsg, m)
 			}
 
 		// case 1 message type

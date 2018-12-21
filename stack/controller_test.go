@@ -1444,7 +1444,7 @@ func TestRECV_ShardChildrenRequestMsg_KnownHash(t *testing.T) {
 	msg := &ShardChildrenRequestMsg{
 		Parent: tx1.Id(),
 	}
-	// now emit RECV_ShardAncestorRequestMsgCode event
+	// now emit RECV_ShardChildrenRequestMsg event
 	events <- newControllerEvent(RECV_ShardChildrenRequestMsg, msg)
 	events <- newControllerEvent(SHUTDOWN, nil)
 
@@ -1470,6 +1470,61 @@ func TestRECV_ShardChildrenRequestMsg_KnownHash(t *testing.T) {
 		t.Errorf("Incorrect number of children: %d, Expected: %d", len(peer.SendMsg.(*ShardChildrenResponseMsg).Children), 1)
 	} else if peer.SendMsg.(*ShardChildrenResponseMsg).Children[0] != tx2.Id() {
 		t.Errorf("Incorrect 1st child: %x\nExpected: %x", peer.SendMsg.(*ShardChildrenResponseMsg).Children[0], tx2.Id())
+	}
+}
+
+// test stack controller event listener handles RECV_ShardChildrenRequestMsg when hash is unknown
+func TestRECV_ShardChildrenRequestMsg_UnknownHash(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, _, _ := initMocks()
+
+	// submit 2 transactions to add ancestors to local shard's Anchor
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+	// the second transaction would be Anchor's parent, and hence will be the starting hash
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	stack.Submit(tx2)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build an children request message for stack's shard with unknown hash
+	msg := &ShardChildrenRequestMsg{
+		Parent: dto.RandomHash(),
+	}
+	// now emit RECV_ShardChildrenRequestMsg event
+	events <- newControllerEvent(RECV_ShardChildrenRequestMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle children request
+	// when hash is unknown
+
+	// we should have fetched children from sharder
+	if !sharder.ChildrenCalled {
+		t.Errorf("did not fetch children from sharder")
+	}
+
+	// we should have sent the ShardChildrenResponseMsg message back with 0 children
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardChildrenResponseMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if peer.SendMsg.(*ShardChildrenResponseMsg).Parent != msg.Parent {
+		t.Errorf("Incorrect parent hash: %x\nExpected: %x", peer.SendMsg.(*ShardChildrenResponseMsg).Parent, msg.Parent)
+	} else if len(peer.SendMsg.(*ShardChildrenResponseMsg).Children) != 0 {
+		t.Errorf("Incorrect number of children: %d, Expected: %d", len(peer.SendMsg.(*ShardChildrenResponseMsg).Children), 0)
 	}
 }
 
@@ -1842,5 +1897,147 @@ func TestPOP_ShardChild_NoChild(t *testing.T) {
 	// we should not have sent TxBlockShardRequestMsg to peer, to get child transaction and its descendents
 	if peer.SendCalled {
 		t.Errorf("should not send any message to peer")
+	}
+}
+
+// stack controller listner generates RECV_TxShardChildRequestMsg event for TxShardChildRequestMsg message
+func TestPeerListnerGeneratesEventForTxShardChildRequestMsg(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// setup mock connection to send a TxShardChildRequestMsg followed by clean shutdown
+	mockConn.NextMsg(TxShardChildRequestMsgCode, &TxShardChildRequestMsg{})
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	finished := checkForEventCode(RECV_TxShardChildRequestMsg, events)
+
+	// now call stack's listener
+	if err := stack.listener(peer, events); err != nil {
+		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// wait for event listener to process
+	result := <-finished
+
+	// check if listener generate correct event
+	if !result.seenMsgEvent {
+		t.Errorf("Event listener did not generate RECV_TxShardChildRequestMsg event!!!")
+	}
+}
+
+// test stack controller event listener handles RECV_TxShardChildRequestMsg when hash is known
+func TestRECV_TxShardChildRequestMsg_KnownHash(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, _, _ := initMocks()
+
+	// submit 2 transactions to add a tx and its child to local shard's Anchor
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+	// the second transaction would be Anchor's parent, and hence will be the starting hash
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	stack.Submit(tx2)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a transaction request with shard children for known hash
+	msg := &TxShardChildRequestMsg{
+		Hash: tx1.Id(),
+	}
+	// now emit RECV_TxShardChildRequestMsg event
+	events <- newControllerEvent(RECV_TxShardChildRequestMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle children request
+	// when hash is known and children are present
+
+	// we should have fetched children from sharder
+	if !sharder.ChildrenCalled {
+		t.Errorf("did not fetch children from sharder")
+	}
+
+	// we should have sent the TxShardChildResponseMsg message back with 1 child
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != TxShardChildResponseMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if peer.SendMsg.(*TxShardChildResponseMsg).Tx.Id() != tx1.Id() {
+		t.Errorf("Incorrect transaction hash: %x\nExpected: %x", peer.SendMsg.(*TxShardChildResponseMsg).Tx.Id(), tx1.Id())
+	} else if len(peer.SendMsg.(*TxShardChildResponseMsg).Children) != 1 {
+		t.Errorf("Incorrect number of children: %d, Expected: %d", len(peer.SendMsg.(*TxShardChildResponseMsg).Children), 1)
+	} else if peer.SendMsg.(*TxShardChildResponseMsg).Children[0] != tx2.Id() {
+		t.Errorf("Incorrect 1st child: %x\nExpected: %x", peer.SendMsg.(*TxShardChildResponseMsg).Children[0], tx2.Id())
+	}
+}
+
+// test stack controller event listener handles RECV_TxShardChildRequestMsg when hash is unknown
+func TestRECV_TxShardChildRequestMsg_UnknownHash(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, _, _ := initMocks()
+
+	// submit 2 transactions to add a tx and its child to local shard's Anchor
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+	// the second transaction would be Anchor's parent, and hence will be the starting hash
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	stack.Submit(tx2)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a transaction request with shard children for unknown hash
+	msg := &TxShardChildRequestMsg{
+		Hash: dto.RandomHash(),
+	}
+	// now emit RECV_TxShardChildRequestMsg event
+	events <- newControllerEvent(RECV_TxShardChildRequestMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle transaction request
+	// when hash is unknown
+
+	// we should not have fetched children from sharder
+	if sharder.ChildrenCalled {
+		t.Errorf("should not fetch children from sharder")
+	}
+
+	// we should not have sent the TxShardChildResponseMsg message
+	if peer.SendCalled {
+		t.Errorf("should not send any message to peer")
+	}
+
+	// because its an error condition, we should have disconnected
+	if !peer.DisconnectCalled {
+		t.Errorf("did not disconnect with peer")
 	}
 }
