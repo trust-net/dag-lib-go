@@ -29,6 +29,8 @@ const (
 	ShardChildrenRequestMsgCode
 	// childrens response for a known hash
 	ShardChildrenResponseMsgCode
+	// shard child transaction and its descendents request
+	TxShardChildRequestMsgCode
 	// ProtocolLength should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength
@@ -118,4 +120,16 @@ func NewShardSyncMsg(anchor *dto.Anchor) *ShardSyncMsg {
 	return &ShardSyncMsg{
 		Anchor: anchor,
 	}
+}
+
+type TxShardChildRequestMsg struct {
+	Hash [64]byte
+}
+
+func (m *TxShardChildRequestMsg) Id() []byte {
+	return append([]byte("TxShardChildRequestMsg"), m.Hash[:]...)
+}
+
+func (m *TxShardChildRequestMsg) Code() uint64 {
+	return TxShardChildRequestMsgCode
 }

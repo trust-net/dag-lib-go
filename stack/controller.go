@@ -328,6 +328,23 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				events <- newControllerEvent(POP_ShardChild, nil)
 			}
 
+		case POP_ShardChild:
+
+			// pop the first child from peer's shard children queue
+			if child, err := peer.ShardChildrenQ().Pop(); err != nil {
+				d.logger.Debug("Did not fetch child from shard children queue: %s", err)
+				// EndOfSync
+			} else {
+				// send the request to fetch child transaction and its children from peer's shard DAG
+				req := &TxShardChildRequestMsg{
+					Hash: child.([64]byte),
+				}
+				// update the RECV_ShardChildrenResponseMsg state to null value, to prevent any repeated/cyclic DoS attack
+				peer.SetState(int(RECV_TxShardChildResponseMsg), req.Hash)
+				d.logger.Debug("Requesting transaction and shard DAG children for: %x", req.Hash)
+				peer.Send(req.Id(), req.Code(), req)
+			}
+
 		case SHUTDOWN:
 			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true

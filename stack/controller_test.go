@@ -1420,8 +1420,6 @@ func TestPeerListnerGeneratesEventForShardChildrenRequestMsg(t *testing.T) {
 func TestRECV_ShardChildrenRequestMsg_KnownHash(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, sharder, _, _ := initMocks()
-	log.SetLogLevel(log.DEBUG)
-	defer log.SetLogLevel(log.NONE)
 
 	// submit 2 transactions to add ancestors to local shard's Anchor
 	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
@@ -1737,5 +1735,112 @@ func TestRECV_ShardChildrenResponseMsg_KnownChild(t *testing.T) {
 	// starting from top ancestor in ShardAncestorResponseMsg
 	if len(events) != 1 {
 		t.Errorf("did not emit event for child processing")
+	}
+}
+
+// test stack controller event listener handles POP_ShardChild when there is a child in shard children queue
+func TestPOP_ShardChild_HasChild(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// add 2 children to peer's shard children queue
+	child1 := dto.RandomHash()
+	child2 := dto.RandomHash()
+	peer.ShardChildrenQ().Push(child1)
+	peer.ShardChildrenQ().Push(child2)
+	peer.Reset()
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// now emit POP_ShardChild event
+	events <- newControllerEvent(POP_ShardChild, nil)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle pop shard child event
+	// when shard children queue has children
+
+	// we should have fetched queue to pop child
+	if peer.ShardChildrenQCallCount == 0 {
+		t.Errorf("did not access peer's shard children queue")
+	}
+
+	// peer's shard children queue should have 1 less element left
+	if peer.ShardChildrenQ().Count() != 1 {
+		t.Errorf("incorrect number of children in queue: %d", peer.ShardChildrenQ().Count())
+	}
+
+	// we should not have emit the POP_ShardChild event to process ShardChildrenQ
+	if len(events) != 0 {
+		t.Errorf("should not emit any event until TxBlockShardResponseMsg is recieved")
+	}
+
+	// we should set the peer state to expect shard child transaction for requested hash
+	if state := peer.GetState(int(RECV_TxShardChildResponseMsg)); state == nil || state.([64]byte) != child1 {
+		t.Errorf("controller set expected state to incorrect hash:\n%x\nExpected:\n%x", state, child1)
+	}
+
+	// we should have sent TxBlockShardRequestMsg to peer, to get child transaction and its descendents
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != TxShardChildRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if peer.SendMsg.(*TxShardChildRequestMsg).Hash != child1 {
+		t.Errorf("Incorrect child tx requested: %x\nExpected: %x", peer.SendMsg.(*TxShardChildRequestMsg).Hash, child1)
+	}
+}
+
+// test stack controller event listener handles POP_ShardChild when there is no child in shard children queue
+func TestPOP_ShardChild_NoChild(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// build a mock peer with empty queue
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// now emit POP_ShardChild event
+	events <- newControllerEvent(POP_ShardChild, nil)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle pop shard child event
+	// when shard children queue has no children
+
+	// we should not set the peer state to expect shard child transaction
+	if state := peer.GetState(int(RECV_TxShardChildResponseMsg)); state != nil {
+		t.Errorf("controller set expected state when it should not")
+	}
+
+	// we should have fetched queue to pop child
+	if peer.ShardChildrenQCallCount == 0 {
+		t.Errorf("did not access peer's shard children queue")
+	}
+
+	// we should not have sent TxBlockShardRequestMsg to peer, to get child transaction and its descendents
+	if peer.SendCalled {
+		t.Errorf("should not send any message to peer")
 	}
 }

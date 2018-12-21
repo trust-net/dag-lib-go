@@ -16,12 +16,7 @@ const (
 	RECV_ShardChildrenRequestMsg
 	SEND_ShardChildrenResponseMsg
 	RECV_ShardChildrenResponseMsg
-	RECV_TxBlockSyncRequestMsg
-	SEND_TxBlockSyncResponseMsg
-	RECV_AncestorsResponseMsg
-	POP_AncestorsStack
-	SEND_TxBlockSyncRequestMsg
-	RECV_TxBlockSyncResponseMsg
+	RECV_TxShardChildResponseMsg
 	POP_ShardChild
 	SHUTDOWN
 )

@@ -170,6 +170,12 @@ func NewMockPeer(mockConn devp2p.MsgReadWriter) *mockPeer {
 	}
 }
 
+func (p *mockPeer) Reset() {
+	*p = mockPeer{
+		peer: p.peer,
+	}
+}
+
 func (p *mockPeer) ID() []byte {
 	p.IDCalled = true
 	return p.peer.ID()
