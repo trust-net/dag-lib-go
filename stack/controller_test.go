@@ -63,7 +63,7 @@ func TestInitiatization(t *testing.T) {
 // register application
 func TestRegister(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, sharder, endorser, _ := initMocks()
+	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// register a transaction with sharder to be replayed upon app registration
 	tx, _ := shard.SignedShardTransaction("test payload")
@@ -76,6 +76,8 @@ func TestRegister(t *testing.T) {
 	cbCalled := false
 	txHandler := func(tx dto.Transaction) error { cbCalled = true; return nil }
 	sharder.Reset()
+	endorser.Reset()
+	p2pLayer.Reset()
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed upon replay error: %s", err)
 	}
@@ -96,6 +98,26 @@ func TestRegister(t *testing.T) {
 	// replay should have called application's transaction handler
 	if !cbCalled {
 		t.Errorf("DLT stack app registration did not replay transactions to the app")
+	}
+
+	// we should have fetched Anchor from sharder for the app to initiate sync
+	if !sharder.AnchorCalled {
+		t.Errorf("Handshake did not fetch Anchor from sharding layer")
+	}
+
+	// we should have got anchor from endorsing layer (Q: Why? A: To sign it)
+	if !endorser.AnchorCalled {
+		t.Errorf("Handshake did not fetch Anchor from endorser layer")
+	}
+
+	// we should have broadcast the ForceShardSyncMsg to all connected peers
+	anchor := stack.Anchor([]byte("test submitter"))
+	if !p2pLayer.DidBroadcast {
+		t.Errorf("stack did not broadcast any message")
+	} else if p2pLayer.BroadcastCode != ForceShardSyncMsgCode {
+		t.Errorf("Incorrect message code send: %d", p2pLayer.BroadcastCode)
+	} else if p2pLayer.BroadcastMsg.(*ForceShardSyncMsg).Anchor.ShardParent != anchor.ShardParent {
+		t.Errorf("Incorrect Anchor hash: %x\nExpected: %x", p2pLayer.BroadcastMsg.(*ForceShardSyncMsg).Anchor.ShardParent, anchor.ShardParent)
 	}
 
 }
@@ -338,22 +360,17 @@ func TestSubmitNetworkSeen(t *testing.T) {
 
 // transaction submission validation of fields
 func TestSubmitValidation(t *testing.T) {
-	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
-	p2p := p2p.TestP2PLayer("mock p2p")
-	stack.p2p = p2p
-	app := TestAppConfig()
-	txHandler := func(tx dto.Transaction) error { return nil }
+	//	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+	stack, _, _, p2pLayer := initMocks()
 
-	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
-		t.Errorf("Registration failed, err: %s", err)
-		return
-	}
+	p2pLayer.Reset()
+
 	tx := TestTransaction()
 	tx.Anchor().ShardId = nil
 	if err := stack.Submit(tx); err == nil {
 		t.Errorf("Transaction submission did not check for missing shard Id")
 	}
-	if p2p.DidBroadcast {
+	if p2pLayer.DidBroadcast {
 		t.Errorf("Invalid transaction got broadcast to peers")
 	}
 }
@@ -410,6 +427,9 @@ func TestAnchorRegisteredApp(t *testing.T) {
 func TestAnchorUnregisteredApp(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, sharder, endorser, _ := initMocks()
+
+	sharder.Reset()
+	endorser.Reset()
 
 	// unregister app
 	stack.Unregister()
@@ -471,6 +491,9 @@ func TestPeerHandshakeUnregistered(t *testing.T) {
 
 	// make sure no app is registered
 	stack.Unregister()
+
+	sharder.Reset()
+	endorser.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1295,6 +1318,9 @@ func TestAppCallbackTxRejected(t *testing.T) {
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 	}
+
+	// reset p2pLayer, since new registration would have caused broadcast
+	p2pLayer.Reset()
 
 	// start stack's event listener
 	events := make(chan controllerEvent, 10)

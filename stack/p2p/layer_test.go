@@ -129,7 +129,7 @@ func TestDEVp2pBroadcast(t *testing.T) {
 	var broadCastError error
 	p2p, _ = NewDEVp2pLayer(TestConfig(), func(peer Peer) error {
 		// broadcast a message to all peers
-		broadCastError = p2p.Broadcast([64]byte{}, 1, struct{}{})
+		broadCastError = p2p.Broadcast([]byte("test message"), 1, struct{}{})
 		return nil
 	})
 	// invoke runner with a mock p2p peer node and connection

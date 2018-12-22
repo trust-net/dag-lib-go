@@ -33,6 +33,8 @@ const (
 	TxShardChildRequestMsgCode
 	// transaction and its shard DAG descendents response
 	TxShardChildResponseMsgCode
+	// force a shard sync during app registration
+	ForceShardSyncMsgCode
 	// ProtocolLength should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength
@@ -111,7 +113,7 @@ type ShardSyncMsg struct {
 }
 
 func (m *ShardSyncMsg) Id() []byte {
-	return append([]byte("ShardSyncMsg"), m.Anchor.ShardId...)
+	return m.Anchor.Signature
 }
 
 func (m *ShardSyncMsg) Code() uint64 {
@@ -120,6 +122,24 @@ func (m *ShardSyncMsg) Code() uint64 {
 
 func NewShardSyncMsg(anchor *dto.Anchor) *ShardSyncMsg {
 	return &ShardSyncMsg{
+		Anchor: anchor,
+	}
+}
+
+type ForceShardSyncMsg struct {
+	Anchor *dto.Anchor
+}
+
+func (m *ForceShardSyncMsg) Id() []byte {
+	return m.Anchor.Signature
+}
+
+func (m *ForceShardSyncMsg) Code() uint64 {
+	return ForceShardSyncMsgCode
+}
+
+func NewForceShardSyncMsg(anchor *dto.Anchor) *ForceShardSyncMsg {
+	return &ForceShardSyncMsg{
 		Anchor: anchor,
 	}
 }

@@ -60,12 +60,14 @@ func TestP2PLayer(name string) *MockP2P {
 }
 
 type MockP2P struct {
-	IsStarted    bool
-	IsStopped    bool
-	DidBroadcast bool
-	IsAnchored   bool
-	Name         string
-	ID           []byte
+	IsStarted     bool
+	IsStopped     bool
+	DidBroadcast  bool
+	BroadcastCode uint64
+	BroadcastMsg  interface{}
+	IsAnchored    bool
+	Name          string
+	ID            []byte
 }
 
 func (p2p *MockP2P) Anchor(a *dto.Anchor) error {
@@ -103,8 +105,10 @@ func (p2p *MockP2P) Verify(payload, sign, id []byte) bool {
 	return true
 }
 
-func (p2p *MockP2P) Broadcast(msgId [64]byte, msgcode uint64, data interface{}) error {
+func (p2p *MockP2P) Broadcast(msgId []byte, msgcode uint64, data interface{}) error {
 	p2p.DidBroadcast = true
+	p2p.BroadcastCode = msgcode
+	p2p.BroadcastMsg = data
 	return nil
 }
 

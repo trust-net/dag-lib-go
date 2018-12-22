@@ -26,7 +26,7 @@ type Layer interface {
 	Id() []byte
 	Sign(data []byte) ([]byte, error)
 	Verify(data, sign, id []byte) bool
-	Broadcast(msgId [64]byte, msgcode uint64, data interface{}) error
+	Broadcast(msgId []byte, msgcode uint64, data interface{}) error
 }
 
 type Runner func(peer Peer) error
@@ -141,10 +141,10 @@ func (l *layerDEVp2p) Verify(payload, sign, id []byte) bool {
 	return ecdsa.Verify(key, hash[:], s.R, s.S)
 }
 
-func (l *layerDEVp2p) Broadcast(msgId [64]byte, msgcode uint64, data interface{}) error {
+func (l *layerDEVp2p) Broadcast(msgId []byte, msgcode uint64, data interface{}) error {
 	// walk through list of peers and send messages
 	for _, peer := range l.peers {
-		if err := peer.Send(msgId[:], msgcode, data); err != nil {
+		if err := peer.Send(msgId, msgcode, data); err != nil {
 			return err
 		}
 	}

@@ -46,6 +46,7 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx dto.Transa
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.app != nil {
+		d.logger.Error("Attempt to register app on already registered stack")
 		return errors.New("App is already registered")
 	}
 	d.app = &AppConfig{
@@ -61,15 +62,18 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx dto.Transa
 	d.txHandler = txHandler
 
 	// register app with sharder
-	d.sharder.Register(shardId, txHandler)
+	if err := d.sharder.Register(shardId, txHandler); err != nil {
+		d.logger.Error("Failed to register app with shard: %s", err)
+		return err
+	}
 
-	//	// replay endorsement layer transactions to the registered app via sharder
-	//	if err := d.endorser.Replay(d.sharder.Handle); err != nil {
-	//		// unregister upon replay failure
-	//		d.unregister()
-	//		return err
-	//	}
-	// TBD: reply will actually happen at sharder when app registers, it already has transactions
+	// initiate app registration sync protocol
+	if anchor := d.anchor([]byte("ForceShardSync")); anchor != nil {
+		msg := NewForceShardSyncMsg(anchor)
+		d.logger.Debug("Boradcasting ForceShardSync: %x", msg.Id())
+		d.p2p.Broadcast(msg.Id(), msg.Code(), msg)
+	}
+
 	return nil
 }
 
@@ -132,10 +136,17 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 	}
 
 	// finally send it to p2p layer, to broadcase to others
-	return d.p2p.Broadcast(tx.Self().Id(), TransactionMsgCode, tx)
+	id := tx.Id()
+	return d.p2p.Broadcast(id[:], TransactionMsgCode, tx)
 }
 
 func (d *dlt) Anchor(id []byte) *dto.Anchor {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	return d.anchor(id)
+}
+
+func (d *dlt) anchor(id []byte) *dto.Anchor {
 	a := &dto.Anchor{
 		Submitter: id,
 	}
@@ -172,11 +183,8 @@ func (d *dlt) handshake(peer p2p.Peer) error {
 	//   1) ask sharding layer for the current shard's Anchor
 	//   2) ask endorsing layer for the current Anchor's update
 	//   3) send the ShardSyncMsg message to peer
-	a := &dto.Anchor{}
-	if err := d.sharder.Anchor(a); err != nil {
-		d.logger.Debug("Cannot run handshake: %s", err)
-	} else if err = d.endorser.Anchor(a); err != nil {
-		d.logger.Debug("Cannot run handshake: %s", err)
+	if a := d.anchor([]byte("ShardSyncMsg")); a == nil {
+		d.logger.Debug("Cannot run handshake")
 	} else {
 		msg := NewShardSyncMsg(a)
 		return peer.Send(msg.Id(), msg.Code(), msg)
@@ -200,8 +208,8 @@ func (d *dlt) handleTransaction(peer p2p.Peer, tx dto.Transaction) error {
 	// mark sender of the message as seen
 	id := tx.Id()
 	peer.Seen(id[:])
-	d.logger.Debug("Boradcasting transaction: %x", tx.Id())
-	d.p2p.Broadcast(tx.Self().Id(), TransactionMsgCode, tx)
+	d.logger.Debug("Boradcasting transaction: %x", id)
+	d.p2p.Broadcast(id[:], TransactionMsgCode, tx)
 	return nil
 }
 
