@@ -70,7 +70,7 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx dto.Transa
 	// initiate app registration sync protocol
 	if anchor := d.anchor([]byte("ForceShardSync")); anchor != nil {
 		msg := NewForceShardSyncMsg(anchor)
-		d.logger.Debug("Boradcasting ForceShardSync: %x", msg.Id())
+		d.logger.Debug("Broadcasting ForceShardSync: %x", msg.Id())
 		d.p2p.Broadcast(msg.Id(), msg.Code(), msg)
 	}
 
@@ -233,8 +233,9 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			// or if local sharder knows nothing about remot shard (sync anchor will be nil)
 			myAnchor := d.sharder.SyncAnchor(msg.Anchor.ShardId)
 
-			if myAnchor == nil || myAnchor.Weight < msg.Anchor.Weight ||
-				shard.Numeric(myAnchor.ShardParent[:]) < shard.Numeric(msg.Anchor.ShardParent[:]) {
+			if myAnchor == nil || msg.Anchor.Weight > myAnchor.Weight ||
+				(msg.Anchor.Weight == myAnchor.Weight &&
+					shard.Numeric(msg.Anchor.ShardParent[:]) > shard.Numeric(myAnchor.ShardParent[:])) {
 				// local shard's anchor is behind, initiate sync with remote by walking up the DAG
 				req := &ShardAncestorRequestMsg{
 					StartHash:    msg.Anchor.ShardParent,
@@ -424,6 +425,41 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				events <- newControllerEvent(POP_ShardChild, nil)
 			}
 
+		case RECV_ForceShardSyncMsg:
+			msg := e.data.(*ForceShardSyncMsg)
+
+			// compare local anchor with remote anchor,
+			// fetch anchor only for remote peer's shard,
+			// since our local shard maybe different, but we may have more recent data
+			// due to network updates from other nodes,
+			// or if local sharder knows nothing about remot shard (sync anchor will be nil)
+			myAnchor := d.sharder.SyncAnchor(msg.Anchor.ShardId)
+			d.endorser.Anchor(myAnchor)
+			d.p2p.Anchor(myAnchor)
+
+			if myAnchor == nil || msg.Anchor.Weight > myAnchor.Weight ||
+				(msg.Anchor.Weight == myAnchor.Weight &&
+					shard.Numeric(msg.Anchor.ShardParent[:]) > shard.Numeric(myAnchor.ShardParent[:])) {
+				// local shard's anchor is behind, initiate sync with remote by walking up the DAG
+				req := &ShardAncestorRequestMsg{
+					StartHash:    msg.Anchor.ShardParent,
+					MaxAncestors: 10,
+				}
+				d.logger.Debug("Initiating shard sync starting by ancestors request for: %x", msg.Anchor.ShardParent)
+				// save the last hash into peer's state to validate ancestors response
+				peer.SetState(int(RECV_ShardAncestorResponseMsg), req.StartHash)
+				// send the ancestors request to peer
+				peer.Send(req.Id(), req.Code(), req)
+			} else if myAnchor != nil && (myAnchor.Weight > msg.Anchor.Weight ||
+				(myAnchor.Weight == msg.Anchor.Weight && shard.Numeric(myAnchor.ShardParent[:]) > shard.Numeric(msg.Anchor.ShardParent[:]))) {
+				// remote shard's anchor is behind, ask remote to initiate sync
+				msg := NewShardSyncMsg(myAnchor)
+				d.logger.Debug("Inidicating peer to initiate sync: %s", peer.String())
+				peer.Send(msg.Id(), msg.Code(), msg)
+			} else {
+				d.logger.Debug("Shard in sync with peer: %s", peer.String())
+			}
+
 		case SHUTDOWN:
 			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true
@@ -547,6 +583,17 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			} else {
 				// emit a RECV_TxShardChildResponseMsg event
 				events <- newControllerEvent(RECV_TxShardChildResponseMsg, m)
+			}
+
+		case ForceShardSyncMsgCode:
+			// deserialize the shard ancestors request message from payload
+			m := &ForceShardSyncMsg{}
+			if err := msg.Decode(m); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				return err
+			} else {
+				// emit a RECV_TxShardChildResponseMsg event
+				events <- newControllerEvent(RECV_ForceShardSyncMsg, m)
 			}
 
 		// case 1 message type

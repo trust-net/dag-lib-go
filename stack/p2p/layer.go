@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha512"
 	"encoding/binary"
+	"errors"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/trust-net/dag-lib-go/stack/dto"
@@ -53,6 +54,9 @@ func uint64ToBytes(value uint64) []byte {
 }
 
 func (l *layerDEVp2p) Anchor(a *dto.Anchor) error {
+	if a == nil {
+		return errors.New("cannot sign nil anchor")
+	}
 	// update anchor's node ID with this node
 	a.NodeId = l.Id()
 	// sign the anchor and fill in Anchor signature

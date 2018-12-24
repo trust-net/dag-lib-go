@@ -34,6 +34,11 @@ func initMocks() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P) {
 	app := TestAppConfig()
 	stack.Register(app.ShardId, app.Name, func(tx dto.Transaction) error { return nil })
 
+	// reset the mocks to remove any state updated during initialization
+	sharder.Reset()
+	endorser.Reset()
+	mockP2PLayer.Reset()
+
 	return stack, sharder, endorser, mockP2PLayer
 }
 
@@ -70,14 +75,16 @@ func TestRegister(t *testing.T) {
 	endorser.Handle(tx)
 	sharder.Handle(tx)
 
+	// reset mocks to start tracking what we expect
+	sharder.Reset()
+	endorser.Reset()
+	p2pLayer.Reset()
+
 	// unregister default app and register a new app that remembers when replay transaction
 	stack.Unregister()
 	app := TestAppConfig()
 	cbCalled := false
 	txHandler := func(tx dto.Transaction) error { cbCalled = true; return nil }
-	sharder.Reset()
-	endorser.Reset()
-	p2pLayer.Reset()
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed upon replay error: %s", err)
 	}
@@ -111,15 +118,13 @@ func TestRegister(t *testing.T) {
 	}
 
 	// we should have broadcast the ForceShardSyncMsg to all connected peers
-	anchor := stack.Anchor([]byte("test submitter"))
 	if !p2pLayer.DidBroadcast {
 		t.Errorf("stack did not broadcast any message")
 	} else if p2pLayer.BroadcastCode != ForceShardSyncMsgCode {
 		t.Errorf("Incorrect message code send: %d", p2pLayer.BroadcastCode)
-	} else if p2pLayer.BroadcastMsg.(*ForceShardSyncMsg).Anchor.ShardParent != anchor.ShardParent {
-		t.Errorf("Incorrect Anchor hash: %x\nExpected: %x", p2pLayer.BroadcastMsg.(*ForceShardSyncMsg).Anchor.ShardParent, anchor.ShardParent)
+	} else if string(p2pLayer.BroadcastMsg.(*ForceShardSyncMsg).Anchor.ShardId) != string(stack.app.ShardId) {
+		t.Errorf("Incorrect sync for shard: %x\nExpected: %x", p2pLayer.BroadcastMsg.(*ForceShardSyncMsg).Anchor.ShardId, stack.app.ShardId)
 	}
-
 }
 
 // replay failure during register application
@@ -136,7 +141,11 @@ func TestRegisterReplayFailure(t *testing.T) {
 	stack.Unregister()
 	app := TestAppConfig()
 	txHandler := func(tx dto.Transaction) error { return errors.New("forced failure") }
+
+	// reset mocks to start tracking what we expect
 	sharder.Reset()
+	endorser.Reset()
+
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed upon replay error: %s", err)
 	}
@@ -150,7 +159,12 @@ func TestRegisterReplayFailure(t *testing.T) {
 // attempt to register app when already registered
 func TestPreRegistered(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, sharder, _, _ := initMocks()
+	stack, sharder, endorser, p2pLayer := initMocks()
+
+	// reset mocks to start tracking what we expect
+	sharder.Reset()
+	endorser.Reset()
+	p2pLayer.Reset()
 
 	// attempt to register app again
 	sharder.Reset()
@@ -162,6 +176,21 @@ func TestPreRegistered(t *testing.T) {
 	// we should NOT have registered with sharder
 	if sharder.IsRegistered || sharder.TxHandler != nil {
 		t.Errorf("DLT stack controller did duplicate register with sharding layer")
+	}
+
+	// we should not have fetched Anchor from sharder for the app to initiate sync
+	if sharder.AnchorCalled {
+		t.Errorf("failed registration should not fetch Anchor from sharding layer")
+	}
+
+	// we should not have got anchor from endorsing layer (Q: Why? A: To sign it)
+	if endorser.AnchorCalled {
+		t.Errorf("failed registration should not fetch Anchor from endorser layer")
+	}
+
+	// we should not have broadcast the ForceShardSyncMsg to all connected peers
+	if p2pLayer.DidBroadcast {
+		t.Errorf("stack did not broadcast any message for failed registration")
 	}
 }
 
@@ -623,7 +652,7 @@ func TestRECV_ShardSyncMsgEvent_RemoteHeavy(t *testing.T) {
 }
 
 // test stack controller event listener handles RECV_ShardSyncMsg correctly when local shard is heavy
-func TestRECV_ShardSyncMsgEvent_LocalHeavy(t *testing.T) {
+func TestRECV_ShardSyncMsgEvent_LessWeight(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, _, _, _ := initMocks()
 
@@ -666,7 +695,7 @@ func TestRECV_ShardSyncMsgEvent_LocalHeavy(t *testing.T) {
 }
 
 // test stack controller event listener handles RECV_ShardSyncMsg correctly when both weights are same
-func TestRECV_ShardSyncMsgEvent_SameWeight(t *testing.T) {
+func TestRECV_ShardSyncMsgEvent_SameWeight_NumericHeavy(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, _, _, _ := initMocks()
 
@@ -703,6 +732,48 @@ func TestRECV_ShardSyncMsgEvent_SameWeight(t *testing.T) {
 		t.Errorf("did not send any message to peer")
 	} else if peer.SendMsgCode != ShardAncestorRequestMsgCode {
 		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	}
+}
+
+func TestRECV_ShardSyncMsgEvent_LessWeight_NumericHeavy(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+//	log.SetLogLevel(log.DEBUG)
+//	defer log.SetLogLevel(log.NONE)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a shard sync message with less weight but parent hash that is higher numeric value
+	a := stack.Anchor([]byte("test submitter"))
+	a.Weight -= 1
+	for i := 0; i < 64; i++ {
+		a.ShardParent[i] = 0xff
+	}
+	msg := NewShardSyncMsg(a)
+	// now emit RECV_ShardSyncMsg event
+	events <- newControllerEvent(RECV_ShardSyncMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle shard sync
+	// when peer's Anchor is heavier than local shard's Anchor
+
+	// we should not have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
+	if peer.SendCalled {
+		t.Errorf("should not send any message to peer")
 	}
 }
 
@@ -2357,5 +2428,319 @@ func TestRECV_TxShardChildResponseMsg_ExpectedHash(t *testing.T) {
 	// we should have emitted the POP_ShardChild event to process ShardChildrenQ
 	if len(events) != 1 {
 		t.Errorf("did not emit event for next child processing")
+	}
+}
+
+// stack controller listner generates RECV_ForceShardSyncMsg event for ForceShardSyncMsg message
+func TestPeerListnerGeneratesEventForForceShardSyncMsg(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// setup mock connection to send a signed transaction followed by clean shutdown
+	msg := NewForceShardSyncMsg(&dto.Anchor{})
+	mockConn.NextMsg(ForceShardSyncMsgCode, msg)
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	finished := checkForEventCode(RECV_ForceShardSyncMsg, events)
+
+	// now call stack's listener
+	if err := stack.listener(peer, events); err != nil {
+		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// wait for event listener to process
+	result := <-finished
+
+	// check if listener generate correct event
+	if !result.seenMsgEvent {
+		t.Errorf("Event listener did not generate RECV_ForceShardSyncMsg event!!!")
+	}
+}
+
+// test stack controller event listener handles RECV_ForceShardSyncMsg when shard is known and up-to-date
+func TestRECV_ForceShardSyncMsg_KnownShard_InSync(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer := initMocks()
+
+	// submit a transactions to local shard
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+
+	// save app's shard's anchor for later use and then unregister the app
+	anchor := stack.Anchor([]byte("test submitter"))
+
+	// now unregister default app, and register a different app/shard
+	stack.Unregister()
+	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+
+	// reset the mocks to remove any state updated during initialization
+	sharder.Reset()
+	endorser.Reset()
+	p2pLayer.Reset()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a ForceShardSyncMsg request with anchor of previously known (and up-to-date) shard
+	msg := NewForceShardSyncMsg(anchor)
+
+	// now emit RECV_TxShardChildRequestMsg event
+	events <- newControllerEvent(RECV_ForceShardSyncMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle ForceShardSyncMsg request
+	// when shard is known (either currently registered, or have some history for shard)
+
+	// we should have fetched anchor from sharder for requested shard
+	if !sharder.SyncAnchorCalled {
+		t.Errorf("did not fetch sync anchor from sharder")
+	}
+
+	// we should have got anchor updated by endorsing layer
+	if !endorser.AnchorCalled {
+		t.Errorf("did not fetch Anchor from endorser layer")
+	}
+
+	// we should have got anchor signed by endorsing layer
+	if !p2pLayer.IsAnchored {
+		t.Errorf("did not sign Anchor with p2p layer")
+	}
+
+	// we should not have sent any message for in-sync shard
+	if peer.SendCalled {
+		t.Errorf("should not send any message to peer")
+	}
+}
+
+// test stack controller event listener handles RECV_ForceShardSyncMsg when shard is known and local node is ahead
+func TestRECV_ForceShardSyncMsg_KnownShard_LocalAhead(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer := initMocks()
+
+	// save app's shard's anchor for later use and then unregister the app
+	anchor := stack.Anchor([]byte("test submitter"))
+
+	// submit a transactions to local shard to move it ahead of saved anchor
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+
+	// now unregister default app, and register a different app/shard
+	stack.Unregister()
+	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+
+	// reset the mocks to remove any state updated during initialization
+	sharder.Reset()
+	endorser.Reset()
+	p2pLayer.Reset()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a ForceShardSyncMsg request with anchor of previously known shard
+	msg := NewForceShardSyncMsg(anchor)
+
+	// now emit RECV_TxShardChildRequestMsg event
+	events <- newControllerEvent(RECV_ForceShardSyncMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle ForceShardSyncMsg request
+	// when shard is known (either currently registered, or have some history for shard)
+
+	// we should have fetched anchor from sharder for requested shard
+	if !sharder.SyncAnchorCalled {
+		t.Errorf("did not fetch sync anchor from sharder")
+	}
+
+	// we should have got anchor updated by endorsing layer
+	if !endorser.AnchorCalled {
+		t.Errorf("did not fetch Anchor from endorser layer")
+	}
+
+	// we should have got anchor signed by endorsing layer
+	if !p2pLayer.IsAnchored {
+		t.Errorf("did not sign Anchor with p2p layer")
+	}
+
+	// we should have sent the ShardSyncMsg message back for remote peer to start sync
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardSyncMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if peer.SendMsg.(*ShardSyncMsg).Anchor.ShardParent != tx1.Id() {
+		t.Errorf("Incorrect ShardSyncMsg Parent: %x\nExpected: %x", peer.SendMsg.(*ShardSyncMsg).Anchor.ShardParent, tx1.Id())
+	}
+}
+
+// test stack controller event listener handles RECV_ForceShardSyncMsg when shard is known and remote node is ahead
+func TestRECV_ForceShardSyncMsg_KnownShard_RemoteAhead(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer := initMocks()
+
+	// submit a transactions to local shard
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+
+	// save app's shard's anchor for later use and then unregister the app
+	anchor := stack.Anchor([]byte("test submitter"))
+
+	// now unregister default app, and register a different app/shard
+	stack.Unregister()
+	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+
+	// reset the mocks to remove any state updated during initialization
+	sharder.Reset()
+	endorser.Reset()
+	p2pLayer.Reset()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a ForceShardSyncMsg request with anchor of previously known shard with higher weight
+	anchor.Weight += 1
+	msg := NewForceShardSyncMsg(anchor)
+
+	// now emit RECV_TxShardChildRequestMsg event
+	events <- newControllerEvent(RECV_ForceShardSyncMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle ForceShardSyncMsg request
+	// when shard is known (either currently registered, or have some history for shard)
+
+	// we should have fetched anchor from sharder for requested shard
+	if !sharder.SyncAnchorCalled {
+		t.Errorf("did not fetch sync anchor from sharder")
+	}
+
+	// we should have got anchor updated by endorsing layer
+	if !endorser.AnchorCalled {
+		t.Errorf("did not fetch Anchor from endorser layer")
+	}
+
+	// we should have got anchor signed by endorsing layer
+	if !p2pLayer.IsAnchored {
+		t.Errorf("did not sign Anchor with p2p layer")
+	}
+
+	// we should have sent the ShardAncestorRequestMsg message to start sync with peer
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardAncestorRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if peer.SendMsg.(*ShardAncestorRequestMsg).StartHash != anchor.ShardParent {
+		t.Errorf("Incorrect ShardSyncMsg Parent: %x\nExpected: %x", peer.SendMsg.(*ShardAncestorRequestMsg).StartHash, anchor.ShardParent)
+	}
+}
+
+// test stack controller event listener handles RECV_ForceShardSyncMsg when shard is unknown
+func TestRECV_ForceShardSyncMsg_UnknownShard(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer := initMocks()
+
+	// submit a transactions to local shard
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	stack.Submit(tx1)
+
+	// reset the mocks to remove any state updated during initialization
+	sharder.Reset()
+	endorser.Reset()
+	p2pLayer.Reset()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// create another stack instance as peer
+	peerStack, _, _, _ := initMocks()
+
+	// now unregister default app, and register a different app/shard
+	peerStack.Unregister()
+	peerStack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+
+	// build a ForceShardSyncMsg request with anchor of remoteStack using an unknown shard
+	anchor := peerStack.Anchor([]byte("test submitter"))
+	msg := NewForceShardSyncMsg(anchor)
+
+	// now emit RECV_TxShardChildRequestMsg event
+	events <- newControllerEvent(RECV_ForceShardSyncMsg, msg)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle ForceShardSyncMsg request
+	// when shard is known (either currently registered, or have some history for shard)
+
+	// we should have fetched anchor from sharder for requested shard
+	if !sharder.SyncAnchorCalled {
+		t.Errorf("did not fetch sync anchor from sharder")
+	}
+
+	// we should have got anchor updated by endorsing layer
+	if !endorser.AnchorCalled {
+		t.Errorf("did not fetch Anchor from endorser layer")
+	}
+
+	// we should have got anchor signed by endorsing layer
+	if !p2pLayer.IsAnchored {
+		t.Errorf("did not sign Anchor with p2p layer")
+	}
+
+	// we should have sent the ShardAncestorRequestMsg message to start sync with peer
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardAncestorRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if peer.SendMsg.(*ShardAncestorRequestMsg).StartHash != anchor.ShardParent {
+		t.Errorf("Incorrect ShardSyncMsg Parent: %x\nExpected: %x", peer.SendMsg.(*ShardAncestorRequestMsg).StartHash, anchor.ShardParent)
 	}
 }
