@@ -2781,7 +2781,7 @@ func TestRECV_ForceShardSyncMsg_UnknownShard(t *testing.T) {
 // test stack controller event listener handles RECV_NewTxBlockMsg correctly when transaction's parent is unknown
 func TestRECV_NewTxBlockMsg_UnknownTxParent(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, sharder, _, _ := initMocks()
 
 	//	log.SetLogLevel(log.DEBUG)
 	//	defer log.SetLogLevel(log.NONE)
@@ -2811,6 +2811,11 @@ func TestRECV_NewTxBlockMsg_UnknownTxParent(t *testing.T) {
 
 	// check if event listener correctly processed the event to handle new transaction
 	// when transaction's shard parent is unknown to local node
+
+	// we should have fetched anchor from sharder for requested shard
+	if !sharder.SyncAnchorCalled {
+		t.Errorf("did not fetch sync anchor from sharder")
+	}
 
 	// we should set the peer state to expect ancestors response for requested hash
 	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)); state == nil || state.([64]byte) != tx.Anchor().ShardParent {

@@ -226,6 +226,9 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				// parent is known, so process normally
 				d.handleTransaction(peer, tx)
 			} else {
+				// make sure that sharder has genesis for unknown transaction's shard
+				d.sharder.SyncAnchor(tx.Anchor().ShardId)
+
 				// parent is unknown, so initiate sync with peer
 				req := &ShardAncestorRequestMsg{
 					StartHash:    tx.Anchor().ShardParent,
@@ -417,10 +420,9 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 					break
 				}
 
-				// check if transaction was already seen by stack
-				if d.isSeen(tx.Id()) {
-					break
-				}
+				// mark the transaction as seen by stack
+				d.isSeen(tx.Id())
+
 				// handle transaction for each layer
 				if err := d.handleTransaction(peer, tx); err == nil {
 					// walk through each child to check if it's unknown, then add to child queue
