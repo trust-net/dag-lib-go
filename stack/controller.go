@@ -221,7 +221,22 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 		e := <-events
 		switch e.code {
 		case RECV_NewTxBlockMsg:
-			d.handleTransaction(peer, e.data.(dto.Transaction))
+			// check if transaction's parent is known
+			if tx := e.data.(dto.Transaction); d.db.GetTx(tx.Anchor().ShardParent) != nil {
+				// parent is known, so process normally
+				d.handleTransaction(peer, tx)
+			} else {
+				// parent is unknown, so initiate sync with peer
+				req := &ShardAncestorRequestMsg{
+					StartHash:    tx.Anchor().ShardParent,
+					MaxAncestors: 10,
+				}
+				d.logger.Debug("Initiating shard sync for transaction with unknown parent: %x", tx.Anchor().ShardParent)
+				// save the last hash into peer's state to validate ancestors response
+				peer.SetState(int(RECV_ShardAncestorResponseMsg), req.StartHash)
+				// send the ancestors request to peer
+				peer.Send(req.Id(), req.Code(), req)
+			}
 
 		case RECV_ShardSyncMsg:
 			msg := e.data.(*ShardSyncMsg)
@@ -247,6 +262,8 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				// send the ancestors request to peer
 				peer.Send(req.Id(), req.Code(), req)
 			} else {
+				// explicitely set state to NOT expect any ancestor response
+				peer.SetState(int(RECV_ShardAncestorResponseMsg), nil)
 				d.logger.Debug("End of sync with peer: %s", peer.String())
 			}
 

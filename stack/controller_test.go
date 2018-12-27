@@ -688,6 +688,11 @@ func TestRECV_ShardSyncMsgEvent_LessWeight(t *testing.T) {
 	// check if event listener correctly processed the event to handle shard sync
 	// since local Anchor is heavier than remote shard's Anchor, no further sync message should be sent
 
+	// we should set the peer state to NOT expect any ancestors response
+	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)); state != nil {
+		t.Errorf("controller set expected state to incorrect hash:\n%x", state)
+	}
+
 	// we should not have sent the ShardAncestorRequestMsg message
 	if peer.SendCalled {
 		t.Errorf("should not send any message to peer")
@@ -727,6 +732,11 @@ func TestRECV_ShardSyncMsgEvent_SameWeight_NumericHeavy(t *testing.T) {
 	// check if event listener correctly processed the event to handle shard sync
 	// when peer's Anchor is heavier than local shard's Anchor
 
+	// we should set the peer state to expect ancestors response for requested hash
+	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)); state == nil || state.([64]byte) != a.ShardParent {
+		t.Errorf("controller set expected state to incorrect hash:\n%x\nExpected:\n%x", state, a.ShardParent)
+	}
+
 	// we should have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
 	if !peer.SendCalled {
 		t.Errorf("did not send any message to peer")
@@ -739,12 +749,12 @@ func TestRECV_ShardSyncMsgEvent_LessWeight_NumericHeavy(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, _, _, _ := initMocks()
 
-//	log.SetLogLevel(log.DEBUG)
-//	defer log.SetLogLevel(log.NONE)
-
 	// build a mock peer
 	mockConn := p2p.TestConn()
 	peer := NewMockPeer(mockConn)
+
+	// set some random value in peer's state, to validate later
+	peer.SetState(int(RECV_ShardAncestorResponseMsg), dto.RandomHash())
 
 	// start stack's event listener
 	events := make(chan controllerEvent, 10)
@@ -771,6 +781,11 @@ func TestRECV_ShardSyncMsgEvent_LessWeight_NumericHeavy(t *testing.T) {
 	// check if event listener correctly processed the event to handle shard sync
 	// when peer's Anchor is heavier than local shard's Anchor
 
+	// we should set the peer state to NOT expect any ancestors response
+	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)); state != nil {
+		t.Errorf("controller set expected state to incorrect hash:\n%x", state)
+	}
+
 	// we should not have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
 	if peer.SendCalled {
 		t.Errorf("should not send any message to peer")
@@ -791,6 +806,9 @@ func TestRECV_ShardSyncMsgEvent_SameAnchors(t *testing.T) {
 	// build a mock peer
 	mockConn := p2p.TestConn()
 	peer := NewMockPeer(mockConn)
+
+	// set some random value in peer's state, to validate later
+	peer.SetState(int(RECV_ShardAncestorResponseMsg), dto.RandomHash())
 
 	// start stack's event listener
 	events := make(chan controllerEvent, 10)
@@ -818,6 +836,11 @@ func TestRECV_ShardSyncMsgEvent_SameAnchors(t *testing.T) {
 
 	// check if event listener correctly processed the event to handle shard sync
 	// when peer's Anchor is same as local shard's Anchor
+
+	// we should set the peer state to NOT expect any ancestors response
+	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)); state != nil {
+		t.Errorf("controller set expected state to incorrect hash:\n%x", state)
+	}
 
 	// we should not have sent any ShardAncestorRequestMsg message
 	if peer.SendCalled {
@@ -861,6 +884,11 @@ func TestRECV_ShardSyncMsgEvent_NoAppRegistered(t *testing.T) {
 	// check if event listener correctly processed the event to handle shard sync
 	// when peer's is known to us, even though there is no local app registered for that shard currently
 
+	// we should set the peer state to expect ancestors response for requested hash
+	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)); state == nil || state.([64]byte) != a.ShardParent {
+		t.Errorf("controller set expected state to incorrect hash:\n%x\nExpected:\n%x", state, a.ShardParent)
+	}
+
 	// we should have sent the ShardAncestorRequestMsg message from peer Anchor's parent to walk back on DAG
 	if !peer.SendCalled {
 		t.Errorf("did not send any message to peer")
@@ -899,6 +927,11 @@ func TestRECV_ShardSyncMsgEvent_DifferentRemoteShard(t *testing.T) {
 
 	// check if event listener correctly processed the event to handle shard sync
 	// when remote shard is unknown to local sharder
+
+	// we should set the peer state to expect ancestors response for requested hash
+	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)); state == nil || state.([64]byte) != a.ShardParent {
+		t.Errorf("controller set expected state to incorrect hash:\n%x\nExpected:\n%x", state, a.ShardParent)
+	}
 
 	// we should have sent the ShardAncestorRequestMsg message to walk back on remote shard's DAG
 	if !peer.SendCalled {
@@ -2742,5 +2775,54 @@ func TestRECV_ForceShardSyncMsg_UnknownShard(t *testing.T) {
 		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
 	} else if peer.SendMsg.(*ShardAncestorRequestMsg).StartHash != anchor.ShardParent {
 		t.Errorf("Incorrect ShardSyncMsg Parent: %x\nExpected: %x", peer.SendMsg.(*ShardAncestorRequestMsg).StartHash, anchor.ShardParent)
+	}
+}
+
+// test stack controller event listener handles RECV_NewTxBlockMsg correctly when transaction's parent is unknown
+func TestRECV_NewTxBlockMsg_UnknownTxParent(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	//	log.SetLogLevel(log.DEBUG)
+	//	defer log.SetLogLevel(log.NONE)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// build a new transaction message with unknown parent
+	tx := TestSignedTransaction("test payload")
+	tx.Anchor().ShardParent = dto.RandomHash()
+
+	// now emit RECV_NewTxBlockMsg event
+	events <- newControllerEvent(RECV_NewTxBlockMsg, tx)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle new transaction
+	// when transaction's shard parent is unknown to local node
+
+	// we should set the peer state to expect ancestors response for requested hash
+	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)); state == nil || state.([64]byte) != tx.Anchor().ShardParent {
+		t.Errorf("controller set expected state to incorrect hash:\n%x\nExpected:\n%x", state, tx.Anchor().ShardParent)
+	}
+
+	// we should have sent the ShardAncestorRequestMsg message to initiate WalkUpStage on remote peer's shard DAG
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != ShardAncestorRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if peer.SendMsg.(*ShardAncestorRequestMsg).StartHash != tx.Anchor().ShardParent {
+		t.Errorf("Incorrect walk up hash: %x\nExpected: %x", peer.SendMsg.(*ShardAncestorRequestMsg).StartHash, tx.Anchor().ShardParent)
 	}
 }
