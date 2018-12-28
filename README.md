@@ -42,7 +42,7 @@ If application had registered with DLT stack with appropriate callback methods, 
 Once application execution completes (either due to application shutdown, or any other reason), call the `stack.DLT.Stop()` method to disconnect from all connected network peers.
 
 ## Example
-An example test program that implement a distributed network counter using DLT stack library is provided under the `tests/countr/app.go`. It can be used as following:
+An example test program that implements a distributed network counter using DLT stack library is provided under the `tests/countr/app.go`. It can be used as following:
 
 ### Build test application
 
@@ -62,7 +62,7 @@ Start each instance of the test application with its corresponding config file:
 ./tests/countr/countr -config config1.json
 ```
 
-> As per iteration 2, all instances of the nodes need to be started before transactions submission. Nodes don't yet have syncing capability. Also, nodes do not yet persist state across reboot.
+> As per iteration 4, nodes can join/leave/re-join network dynamically while rest of the network is processing transactions. Nodes will perform on-demand sync at shard level during peer handshake, app registration and unknown transaction processing. Also, while nodes do not yet persist state across reboot, they perform full re-sync across reboot. Hence, as long as there is 1 active node on the network, progress will be made.
 
 ### Register application shard
 Use the application's CLI to join a shard as following:
@@ -111,8 +111,22 @@ Use the application's CLI to leave a previosuly registered shard as following:
 <app>: quit
 Shutdown cleanly
 ```
+### Restart application
+Application can be restarted to re-join an existing network:
+
+```
+./tests/countr/countr -config config1.json
+```
+
+When application is restarted, it will perform a sync with peers during handshake for active shards of the peers. Additionally, when application registers a shard locally, it will sync with all connected peers for that shard's history on the network.
+
 ## Release Notes
-## Iteration 3
+### Iteration 4
+* nodes can join the network at any time after transaction processing has started
+* app can shutdown/leave the network and join back dynamically (does not need to be running since the beginning)
+* DLT stack will perform on-demand shard layer sync upon peer handshake, app registration and unknown transaction processing
+
+### Iteration 3
 * app can join and leave shards dynamically (node needs to continue running since beginning, however app's registration to different shards is dynamic)
 * app: will get full sync for shard's transactions upon joining a new shard, or when it leaves then re-joins same shard
 * client: an application's transaction needs to be signed by the client when submitting to DLT stack
