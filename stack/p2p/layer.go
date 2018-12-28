@@ -3,18 +3,23 @@
 package p2p
 
 import (
-//	"fmt"
-	"sync"
-	"math/big"
+	//	"fmt"
 	"crypto/ecdsa"
-    "crypto/sha512"
-    "crypto/rand"
-	"github.com/ethereum/go-ethereum/p2p"
+	"crypto/rand"
+	"crypto/sha512"
+	"encoding/binary"
+	"errors"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/go-trust-net/common"
+	"math/big"
+	"sync"
 )
 
 type Layer interface {
+	// populate a transaction Anchor
+	Anchor(a *dto.Anchor) error
 	Start() error
 	Stop()
 	Disconnect(peer Peer)
@@ -33,13 +38,49 @@ type signature struct {
 }
 
 type layerDEVp2p struct {
-	conf *p2p.Config
-	key *ecdsa.PrivateKey
-	srv *p2p.Server
-	cb Runner
-	id []byte
+	conf  *p2p.Config
+	key   *ecdsa.PrivateKey
+	srv   *p2p.Server
+	cb    Runner
+	id    []byte
 	peers map[string]Peer
-	lock sync.RWMutex
+	lock  sync.RWMutex
+}
+
+func uint64ToBytes(value uint64) []byte {
+	var byte8 [8]byte
+	binary.BigEndian.PutUint64(byte8[:], value)
+	return byte8[:]
+}
+
+func (l *layerDEVp2p) Anchor(a *dto.Anchor) error {
+	if a == nil {
+		return errors.New("cannot sign nil anchor")
+	}
+	// update anchor's node ID with this node
+	a.NodeId = l.Id()
+	// sign the anchor and fill in Anchor signature
+	payload := []byte{}
+	payload = append(payload, a.ShardId...)
+	payload = append(payload, a.NodeId...)
+	payload = append(payload, a.Submitter...)
+	payload = append(payload, a.ShardParent[:]...)
+	for _, uncle := range a.ShardUncles {
+		payload = append(payload, uncle[:]...)
+	}
+	payload = append(payload, uint64ToBytes(a.ShardSeq)...)
+	payload = append(payload, uint64ToBytes(a.Weight)...)
+
+	// sign the test payload using SHA512 hash and ECDSA private key
+	s := signature{}
+	hash := sha512.Sum512(payload)
+	s.R, s.S, _ = ecdsa.Sign(rand.Reader, l.key, hash[:])
+	if sign, err := common.Serialize(s); err != nil {
+		return err
+	} else {
+		a.Signature = sign
+	}
+	return nil
 }
 
 func (l *layerDEVp2p) Start() error {
@@ -56,7 +97,7 @@ func (l *layerDEVp2p) Disconnect(peer Peer) {
 
 func (l *layerDEVp2p) Stop() {
 	// disconnect from all connected peers
-	for _, peer := range(l.peers) {
+	for _, peer := range l.peers {
 		peer.Disconnect()
 	}
 	l.srv.Stop()
@@ -75,7 +116,7 @@ func (l *layerDEVp2p) Sign(data []byte) ([]byte, error) {
 	var err error
 	// sign the payload using SHA512 hash and ECDSA signature
 	hash := sha512.Sum512(data)
-	if s.R,s.S, err = ecdsa.Sign(rand.Reader, l.key, hash[:]); err != nil {
+	if s.R, s.S, err = ecdsa.Sign(rand.Reader, l.key, hash[:]); err != nil {
 		return nil, err
 	}
 	if signature, err := common.Serialize(s); err != nil {
@@ -106,7 +147,7 @@ func (l *layerDEVp2p) Verify(payload, sign, id []byte) bool {
 
 func (l *layerDEVp2p) Broadcast(msgId []byte, msgcode uint64, data interface{}) error {
 	// walk through list of peers and send messages
-	for _, peer := range(l.peers) {
+	for _, peer := range l.peers {
 		if err := peer.Send(msgId, msgcode, data); err != nil {
 			return err
 		}
@@ -123,18 +164,18 @@ func (l *layerDEVp2p) runner(dPeer *p2p.Peer, dRw p2p.MsgReadWriter) error {
 	l.lock.Unlock()
 	defer func() {
 		l.lock.Lock()
-		delete(l.peers,string(peer.ID()))
+		delete(l.peers, string(peer.ID()))
 		l.lock.Unlock()
 	}()
 	return l.cb(peer)
 }
 
 func (l *layerDEVp2p) makeDEVp2pProtocols(conf Config) []p2p.Protocol {
-	proto := p2p.Protocol {
-		Name: conf.ProtocolName,
+	proto := p2p.Protocol{
+		Name:    conf.ProtocolName,
 		Version: conf.ProtocolVersion,
-		Length: conf.ProtocolLength,
-		Run: l.runner,
+		Length:  conf.ProtocolLength,
+		Run:     l.runner,
 	}
 	return []p2p.Protocol{proto}
 }
@@ -145,11 +186,11 @@ func NewDEVp2pLayer(c Config, cb Runner) (*layerDEVp2p, error) {
 	if err != nil {
 		return nil, err
 	}
-	impl := &layerDEVp2p {
-		conf: conf,
-		cb: cb,
-		key: conf.PrivateKey,
-		id: crypto.FromECDSAPub(&conf.PrivateKey.PublicKey),
+	impl := &layerDEVp2p{
+		conf:  conf,
+		cb:    cb,
+		key:   conf.PrivateKey,
+		id:    crypto.FromECDSAPub(&conf.PrivateKey.PublicKey),
 		peers: make(map[string]Peer),
 	}
 	impl.conf.Protocols = impl.makeDEVp2pProtocols(c)

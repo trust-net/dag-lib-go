@@ -16,18 +16,18 @@ type inMemDb struct {
 
 func NewInMemDatabase(name string) *inMemDb {
 	return &inMemDb{
-		mdb: make(map[string][]byte),
+		mdb:  make(map[string][]byte),
 		name: name,
 	}
 }
 
 type inMemDbProvider struct {
-	repos map[string] *inMemDb
+	repos map[string]*inMemDb
 }
 
 func NewInMemDbProvider() *inMemDbProvider {
 	return &inMemDbProvider{
-		repos: make(map[string] *inMemDb),
+		repos: make(map[string]*inMemDb),
 	}
 }
 
