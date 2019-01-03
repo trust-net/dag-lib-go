@@ -1,6 +1,34 @@
 # dag-lib-go
 Go library for DAG protocol
 
+## How to setup workspace
+
+### Clone Repo
+```
+mkdir -p $GOPATH/src/trust-net
+git clone git@github.com:trust-net/dag-lib-go.git
+```
+
+### Install Dependencies
+Project uses Ethereum's `go-ethereum` for low level p2p and crypto libraries from `release/1.7	` branch. Install these dependencies as following:
+
+```
+mkdir -p $GOPATH/src/ethereum
+cd $GOPATH/src/ethereum
+git clone --single-branch --branch release/1.7  https://github.com/ethereum/go-ethereum.git 
+```
+
+After above step, install remaining dependencies using `go get` as following:
+
+```
+cd $GOPATH/src/trust-net/dag-lib-go/stack
+go get
+```
+
+Above will install remaining dependencies into go workspace.
+
+> Note: Ethereum dependency requires gcc/CC installed for compiling and building crypto library. Hence, `go get` may fail if gcc/CC is not found. Install the platform appropriate compiler and then re-run `go get`.
+
 ## How to use DLT stack library
 
 ### Create configuration
