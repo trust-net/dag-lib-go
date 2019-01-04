@@ -1,6 +1,33 @@
 # dag-lib-go
 Go library for DAG protocol
 
+* [How to setup workspace](./#how-to-setup-workspace)
+    * [Clone Repo](./#clone-repo)
+    * [Install Dependencies](./#Install-Dependencies)
+* [Example Application Using DLT Stack Library](./#Example-Application-Using-DLT-Stack-Library)
+    * [Build test application](./#Build-test-application)
+    * [Stage test application](./#Stage-test-application)
+    * [Create sub-directories for each instance of the test application](./#Create-sub-directories-for-each-instance-of-the-test-application)
+    * [Create config file for each instance](./#Create-config-file-for-each-instance)
+    * [Run the test application](./#Run-the-test-application)
+        * [Register application shard](./#Register-application-shard)
+        * [Send counter transaction](./#Send-counter-transaction)
+        * [Leave/Un-register from shard](./#LeaveUn-register-from-shard)
+        * [Shutdown application](./#Shutdown-application)
+        * [Restart application](./#Restart-application)
+* [How to use DLT stack library in your application](./#how-to-use-dlt-stack-library-in-your-application)
+    * [Create configuration](./#Create-configuration)
+    * [Instantiate DLT stack](./#Instantiate-DLT-stack)
+    * [Register application with DLT stack](./#Register-application-with-DLT-stack)
+    * [Start the DLT stack](./#Start-the-DLT-stack)
+    * [Process transactions from network peers](./#Process-transactions-from-network-peers)
+    * [Stop DLT Stack](./#Stop-DLT-Stack)
+* [Release Notes](./#Release Notes)
+    * [Iteration 4](./#Iteration-4)
+    * [Iteration 3](./#Iteration-3)
+    * [Iteration 2](./#Iteration-2)
+    * [Iteration 1](./#Iteration-1)
+
 ## How to setup workspace
 
 ### Clone Repo
@@ -29,65 +56,57 @@ Above will install remaining dependencies into go workspace.
 
 > Note: Ethereum dependency requires gcc/CC installed for compiling and building crypto library. Hence, `go get` may fail if gcc/CC is not found. Install the platform appropriate compiler and then re-run `go get`.
 
-## How to use DLT stack library
 
-### Create configuration
-Create a `p2p.Config` instance. These values can be read from a file, using the field names as specified in the `json` directive against each of them. A sample file is:
-
-```
-{
-	"key_file": "name of file to persist private key for the node",
-	"key_type": "ECDSA_S256",
-	"max_peers": 2,
-	"node_name": "test node 1",
-	"listen_port": "50883",
-	"boot_nodes": ["enode://c3da24ed70538b731b9734e4e0b8206e441089ab4fcd1d0faadb1031e736491b70de0b70e1d581958b28eb43444491b3b9091bd8a81d1767bf7d4ebc3e7bd108@127.0.0.1:50438"]
-}
-```
-
-### Instantiate DLT stack
-Use `stack.NewDltStack(conf p2p.Config, db db.Database)` method to instantiate a DLT stack controller. This takes two arguments:
-* a `p2p.Config` structure with parameters as described above
-* an implementation of `db.Database` implementation, that will be used by DLT stack to save/retrieve/persist data
-
-### Register application with DLT stack
-If running an application on the DLT stack, then register the application with the DLT stack using the `stack.DLT.Register(app stack.AppConfig, peerHandler stack.PeerApprover, txHandler stack.NetworkTxApprover) error` method. This takes following arguments:
-* a `stack.AppConfig` structure with application details (name of aplication, shard ID of the application, version of the application)
-* a `stack.PeerApprover` type function that will be called for confirming if application wants to receive transaction from a peer. This method will be called for each transaction (since we don't know when a peer may get blacklisted)
-* a `stack.NetworkTxApprover` type function that will be called to accept/process a transaction from a peer. If this method returns back a non-nil error, then transaction will not be forwarded to other network peers
-
-> This step is optional because a deployment may choose to run in "headless" mode, in which case it will not process any application transactions and will only participate in the transaction endorsement process, to provide network security.
-
-### Start the DLT stack
-Use `stack.DLT.Start()` method for DLT stack to start discovering other nodes on the network and start listening to messages from connected peers. 
-
-### Process transactions from network peers
-If application had registered with DLT stack with appropriate callback methods, then after DLT stack is started, whenever a new network transaction is received, it is processed as following:
-1. first the application provided `stack.PeerApprover` is called with transaction submitter node's ID, to check if application is willing to accept transactions from the remote application instance running on that node
-2. second (if peer is approved) the application provided `stack.NetworkTxApprover` is called with transaction details, Application is suppose to return back an error if transaction was not accepted
-
-### Stop DLT Stack
-Once application execution completes (either due to application shutdown, or any other reason), call the `stack.DLT.Stop()` method to disconnect from all connected network peers.
-
-## Example
+## Example Application Using DLT Stack Library
 An example test program that implements a distributed network counter using DLT stack library is provided under the `tests/countr/app.go`. It can be used as following:
 
 ### Build test application
 
 ```
+cd $GOPATH/src/trust-net/dag-lib-go/
 (cd tests/countr/; go build)
 ```
 
-### Create config file
-Use the example mentioned above to create config files for each instance that need to be run. Please make sure:
-* port is unique in each copy
-* key file name is unique in each copy
-
-### Run the test application
-Start each instance of the test application with its corresponding config file:
+### Stage test application
+Copy the built binary into a staging area, e.g.:
 
 ```
-./tests/countr/countr -config config1.json
+mkdir -p $USER/tmp/test-trust-node
+cp $GOPATH/src/trust-net/dag-lib-go/tests/countr/countr $USER/tmp/test-trust-node
+```
+
+### Create sub-directories for each instance of the test application
+If planning to run multiple instances of the test application on same machine, create one sub-directory for each instance to host keys and config for that instance, e.g.:
+
+```
+cd $USER/tmp/test-trust-node
+mkdir -p node-1 node-2 node-3 node-4
+```
+
+### Create config file for each instance
+Copy the following example config files into sub-directory for each instance that need to be run:
+
+```
+{
+	"key_file": "node.key",
+	"key_type": "ECDSA_S256",
+	"max_peers": 2,
+	"node_name": "test node 1",
+	"listen_port": "50883",
+	"boot_nodes": ["enode://c3da24ed70538b731b9734e4e0b8206e441089ab4fcd1d0faadb1031e736491b70de0b70e1d581958b28eb43444491b3b9091bd8a81d1767bf7d4ebc3e7bd108@127.0.0.1:50884"]
+}
+```
+
+> Please make sure:
+* `listen_port` is unique in each copy
+* `boot_nodes` has port from some other instance (e.g. node-1 listening on port 50883 will use node-2's listening port 50884)
+
+### Run the test application
+Start each instance of the test application with its corresponding config file (below example assumes config file for each instance is placed under its node-N directory and named as config.json):
+
+```
+cd $USER/tmp/test-trust-node/node-1
+../countr -config config.json
 ```
 
 > As per iteration 4, nodes can join/leave/re-join network dynamically while rest of the network is processing transactions. Nodes will perform on-demand sync at shard level during peer handshake, app registration and unknown transaction processing. Also, while nodes do not yet persist state across reboot, they perform full re-sync across reboot. Hence, as long as there is 1 active node on the network, progress will be made.
@@ -143,10 +162,49 @@ Shutdown cleanly
 Application can be restarted to re-join an existing network:
 
 ```
-./tests/countr/countr -config config1.json
+cd $USER/tmp/test-trust-node/node-1
+../countr -config config.json
 ```
 
 When application is restarted, it will perform a sync with peers during handshake for active shards of the peers. Additionally, when application registers a shard locally, it will sync with all connected peers for that shard's history on the network.
+
+## How to use DLT stack library in your application
+
+### Create configuration
+Create a `p2p.Config` instance. These values can be read from a file, using the field names as specified in the `json` directive against each of them. A sample file is:
+
+```
+{
+	"key_file": "<name of file to persist private key for the node>",
+	"key_type": "ECDSA_S256",
+	"max_peers": <max number of peers to connect>,
+	"node_name": "<name for the node instance>",
+	"listen_port": "<unique port for the node instance>",
+	"boot_nodes": ["<enode full URL of peers to connect with during boot up>"]
+}
+```
+
+### Instantiate DLT stack
+Use `stack.NewDltStack(conf p2p.Config, db db.Database)` method to instantiate a DLT stack controller. This takes two arguments:
+* a `p2p.Config` structure with parameters as described above
+* an implementation of `db.Database` implementation, that will be used by DLT stack to save/retrieve/persist data
+
+### Register application with DLT stack
+If running an application on the DLT stack, then register the application with the DLT stack using the `stack.DLT.Register(shardId []byte, name string, txHandler func(tx dto.Transaction) error) error` method. This takes following arguments:
+* `shardId`: a byte array with unique identifier for the shard of the application
+* `name`: a name of the application
+* `txHandler`: a function that will be called to accept/process a transaction from a peer. If this method returns back a non-nil error, then transaction will not be forwarded to other network peers
+
+> This step is optional because a deployment may choose to run in "headless" mode, in which case it will not process any application transactions and will only participate in the transaction endorsement process, to provide network security.
+
+### Start the DLT stack
+Use `stack.DLT.Start()` method for DLT stack to start discovering other nodes on the network and start listening to messages from connected peers. 
+
+### Process transactions from network peers
+If application had registered with DLT stack with appropriate callback methods, then after DLT stack is started, whenever a new network transaction is received, the application provided "`func(tx dto.Transaction) error) error`" implementation is called with transaction details, Application is suppose to return back an error if transaction was not accepted
+
+### Stop DLT Stack
+Once application execution completes (either due to application shutdown, or any other reason), call the `stack.DLT.Stop()` method to disconnect from all connected network peers.
 
 ## Release Notes
 ### Iteration 4
