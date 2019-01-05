@@ -5,7 +5,7 @@ package dto
 import (
 	"crypto/sha512"
 	//	"encoding/binary"
-	"github.com/trust-net/go-trust-net/common"
+	"github.com/trust-net/dag-lib-go/common"
 )
 
 type Transaction interface {
