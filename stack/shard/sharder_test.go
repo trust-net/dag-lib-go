@@ -771,3 +771,72 @@ func TestWorldStateResourceVisibilityAcrossShards(t *testing.T) {
 		t.Errorf("Found unexpected resource: %s", r)
 	}
 }
+
+func TestWorldStateReadAccessRegisteredApp(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	dbp := db.NewInMemDbProvider()
+	s, _ := NewSharder(testDb, dbp)
+
+	// register an app
+	txHandler := func(tx dto.Transaction, s state.State) error { return nil }
+
+	// send a mock network transaction with shard seq 1 to sharder before app is registered
+	tx, _ := SignedShardTransaction("test data to validate")
+	s.db.AddTx(tx)
+	s.Handle(tx)
+	testShard := tx.Anchor().ShardId
+
+	// set test value in world state for test shard
+	db := dbp.DB("Shard-World-State-" + string(testShard))
+	r := &state.Resource{
+		Key:   []byte("key"),
+		Value: []byte("test data to validate"),
+	}
+	data, _ := r.Serialize()
+	db.Put(r.Key, data)
+
+	// now register the app for the shard
+	s.Register(testShard, txHandler)
+
+	// lookup resource value using read API
+	if read, err := s.GetState([]byte("key")); err != nil {
+		t.Errorf("Failed to get state: %s", err)
+	} else if string(read.Value) != "test data to validate" {
+		t.Errorf("Incorrect data from get state: %s", read.Value)
+	}
+}
+
+func TestWorldStateReadAccessNoApp(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	dbp := db.NewInMemDbProvider()
+	s, _ := NewSharder(testDb, dbp)
+
+	// register an app
+	txHandler := func(tx dto.Transaction, s state.State) error { return nil }
+
+	// send a mock network transaction with shard seq 1 to sharder before app is registered
+	tx, _ := SignedShardTransaction("test data to validate")
+	s.db.AddTx(tx)
+	s.Handle(tx)
+	testShard := tx.Anchor().ShardId
+
+	// set test value in world state for test shard
+	db := dbp.DB("Shard-World-State-" + string(testShard))
+	r := &state.Resource{
+		Key:   []byte("key"),
+		Value: []byte("test data to validate"),
+	}
+	data, _ := r.Serialize()
+	db.Put(r.Key, data)
+
+	// register the app for the shard so that it processed transaction
+	s.Register(testShard, txHandler)
+
+	// now un register the app from the shard
+	s.Unregister()
+
+	// lookup resource value using read API, we should get error since no app registered
+	if _, err := s.GetState([]byte("key")); err == nil {
+		t.Errorf("Should fail to get state for unregistered app")
+	}
+}

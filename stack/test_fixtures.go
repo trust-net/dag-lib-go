@@ -88,6 +88,8 @@ type mockSharder struct {
 	ChildrenCalled   bool
 	ApproverCalled   bool
 	TxHandlerCalled  bool
+	GetStateCalled   bool
+	GetStateKey      []byte
 	TxHandler        func(tx dto.Transaction, state state.State) error
 	orig             shard.Sharder
 }
@@ -133,6 +135,12 @@ func (s *mockSharder) Approve(tx dto.Transaction) error {
 func (s *mockSharder) Handle(tx dto.Transaction) error {
 	s.TxHandlerCalled = true
 	return s.orig.Handle(tx)
+}
+
+func (s *mockSharder) GetState(key []byte) (*state.Resource, error) {
+	s.GetStateCalled = true
+	s.GetStateKey = key
+	return s.orig.GetState(key)
 }
 
 func (s *mockSharder) Reset() {

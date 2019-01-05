@@ -29,6 +29,8 @@ type DLT interface {
 	Start() error
 	// stop the controller
 	Stop()
+	// get value for a resource from current world state for the registered shard
+	GetState(key []byte) (*state.Resource, error)
 }
 
 type dlt struct {
@@ -145,6 +147,11 @@ func (d *dlt) Anchor(id []byte) *dto.Anchor {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	return d.anchor(id)
+}
+
+func (d *dlt) GetState(key []byte) (*state.Resource, error) {
+	// fetch value from sharder
+	return d.sharder.GetState(key)
 }
 
 func (d *dlt) anchor(id []byte) *dto.Anchor {

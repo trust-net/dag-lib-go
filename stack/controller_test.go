@@ -2827,3 +2827,20 @@ func TestRECV_NewTxBlockMsg_UnknownTxParent(t *testing.T) {
 		t.Errorf("Incorrect walk up hash: %x\nExpected: %x", peer.SendMsg.(*ShardAncestorRequestMsg).StartHash, tx.Anchor().ShardParent)
 	}
 }
+
+// get resource value from world state
+func TestGetState(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, _, _ := initMocks()
+
+	// reset mocks to start tracking what we expect
+	sharder.Reset()
+
+	// fetch a resource from world state
+	stack.GetState([]byte("test key"))
+
+	// we should have fetched state value from sharder
+	if !sharder.GetStateCalled {
+		t.Errorf("GetState did not fetch value from sharding layer")
+	}
+}

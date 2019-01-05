@@ -30,6 +30,8 @@ type Sharder interface {
 	Approve(tx dto.Transaction) error
 	// Handle Transaction
 	Handle(tx dto.Transaction) error
+	// get value for a resource from current world state for the registered shard
+	GetState(key []byte) (*state.Resource, error)
 }
 
 type sharder struct {
@@ -331,6 +333,20 @@ func (s *sharder) Handle(tx dto.Transaction) error {
 		}
 	}
 	return nil
+}
+
+func (s *sharder) GetState(key []byte) (*state.Resource, error) {
+	// make sure app is registered
+	if s.shardId == nil {
+		return nil, fmt.Errorf("app not registered")
+	} else {
+		// fetch resource from world state
+		if r, err := s.worldState.Get(key); err != nil {
+			return nil, err
+		} else {
+			return r, nil
+		}
+	}
 }
 
 func NewSharder(db repo.DltDb, dbp db.DbProvider) (*sharder, error) {
