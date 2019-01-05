@@ -7,6 +7,7 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/shard"
+	"github.com/trust-net/dag-lib-go/stack/state"
 	"testing"
 	"time"
 )
@@ -32,7 +33,7 @@ func initMocks() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P) {
 
 	// register app
 	app := TestAppConfig()
-	stack.Register(app.ShardId, app.Name, func(tx dto.Transaction) error { return nil })
+	stack.Register(app.ShardId, app.Name, func(tx dto.Transaction, state state.State) error { return nil })
 
 	// reset the mocks to remove any state updated during initialization
 	sharder.Reset()
@@ -84,7 +85,7 @@ func TestRegister(t *testing.T) {
 	stack.Unregister()
 	app := TestAppConfig()
 	cbCalled := false
-	txHandler := func(tx dto.Transaction) error { cbCalled = true; return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { cbCalled = true; return nil }
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed upon replay error: %s", err)
 	}
@@ -140,19 +141,14 @@ func TestRegisterReplayFailure(t *testing.T) {
 	// unregister default app and register a new app that rejects replay transaction
 	stack.Unregister()
 	app := TestAppConfig()
-	txHandler := func(tx dto.Transaction) error { return errors.New("forced failure") }
+	txHandler := func(tx dto.Transaction, state state.State) error { return errors.New("forced failure") }
 
 	// reset mocks to start tracking what we expect
 	sharder.Reset()
 	endorser.Reset()
 
-	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
-		t.Errorf("Registration failed upon replay error: %s", err)
-	}
-
-	// we should be registered with sharder
-	if !sharder.IsRegistered || sharder.TxHandler == nil {
-		t.Errorf("DLT stack controller did not keep app registration with sharding layer upon replay failure")
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err == nil {
+		t.Errorf("Expected registration to fail upon replay error")
 	}
 }
 
@@ -168,7 +164,7 @@ func TestPreRegistered(t *testing.T) {
 
 	// attempt to register app again
 	sharder.Reset()
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	if err := stack.Register([]byte("another shard"), "another app", txHandler); err == nil {
 		t.Errorf("Registration did not check for already registered")
 	}
@@ -236,7 +232,7 @@ func TestSubmitUnregistered(t *testing.T) {
 func TestSubmitNilValues(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
@@ -273,7 +269,7 @@ func TestSubmitNilValues(t *testing.T) {
 func TestSubmitAppIdNoMatch(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
@@ -1411,7 +1407,7 @@ func TestAppCallbackTxRejected(t *testing.T) {
 
 	// define a new tx handler call back for app to always reject
 	txHandlerCalled := false
-	txHandler := func(tx dto.Transaction) error {
+	txHandler := func(tx dto.Transaction, state state.State) error {
 		// we reject all transactions
 		txHandlerCalled = true
 		return errors.New("trust no one")
@@ -1468,7 +1464,7 @@ func TestStackRunner(t *testing.T) {
 
 	// define a new tx handler call back for app that remembers when called
 	gotCallback := false
-	txHandler := func(tx dto.Transaction) error { gotCallback = true; return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { gotCallback = true; return nil }
 
 	// register app
 	app := TestAppConfig()
@@ -2510,7 +2506,7 @@ func TestRECV_ForceShardSyncMsg_KnownShard_InSync(t *testing.T) {
 
 	// now unregister default app, and register a different app/shard
 	stack.Unregister()
-	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction, state state.State) error { return nil })
 
 	// reset the mocks to remove any state updated during initialization
 	sharder.Reset()
@@ -2577,7 +2573,7 @@ func TestRECV_ForceShardSyncMsg_KnownShard_LocalAhead(t *testing.T) {
 
 	// now unregister default app, and register a different app/shard
 	stack.Unregister()
-	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction, state state.State) error { return nil })
 
 	// reset the mocks to remove any state updated during initialization
 	sharder.Reset()
@@ -2648,7 +2644,7 @@ func TestRECV_ForceShardSyncMsg_KnownShard_RemoteAhead(t *testing.T) {
 
 	// now unregister default app, and register a different app/shard
 	stack.Unregister()
-	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction, state state.State) error { return nil })
 
 	// reset the mocks to remove any state updated during initialization
 	sharder.Reset()
@@ -2737,7 +2733,7 @@ func TestRECV_ForceShardSyncMsg_UnknownShard(t *testing.T) {
 
 	// now unregister default app, and register a different app/shard
 	peerStack.Unregister()
-	peerStack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+	peerStack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction, state state.State) error { return nil })
 
 	// build a ForceShardSyncMsg request with anchor of remoteStack using an unknown shard
 	anchor := peerStack.Anchor([]byte("test submitter"))

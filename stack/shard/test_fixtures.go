@@ -5,7 +5,7 @@ import (
 )
 
 func SignedShardTransaction(payload string) (dto.Transaction, dto.Transaction) {
-	tx := dto.TestSignedTransaction("test payload")
+	tx := dto.TestSignedTransaction(payload)
 	genesis := GenesisShardTx(tx.Anchor().ShardId)
 	tx.Anchor().ShardParent = genesis.Id()
 	return tx, genesis

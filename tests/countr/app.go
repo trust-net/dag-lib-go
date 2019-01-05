@@ -15,6 +15,7 @@ import (
 	"github.com/trust-net/dag-lib-go/stack"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
+	"github.com/trust-net/dag-lib-go/stack/state"
 	"github.com/trust-net/go-trust-net/common"
 	"math/big"
 	"os"
@@ -140,7 +141,7 @@ func applyDelta(name string, delta int) int64 {
 	return last
 }
 
-func txHandler(tx dto.Transaction) error {
+func txHandler(tx dto.Transaction, state state.State) error {
 	fmt.Printf("\n")
 	op := testTx{}
 	if err := common.Deserialize(tx.Self().Payload, &op); err != nil {

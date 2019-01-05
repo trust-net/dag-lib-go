@@ -11,13 +11,14 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/repo"
 	"github.com/trust-net/dag-lib-go/stack/shard"
+	"github.com/trust-net/dag-lib-go/stack/state"
 	"github.com/trust-net/go-trust-net/common"
 	"sync"
 )
 
 type DLT interface {
 	// register application shard with the DLT stack
-	Register(shardId []byte, name string, txHandler func(tx dto.Transaction) error) error
+	Register(shardId []byte, name string, txHandler func(tx dto.Transaction, state state.State) error) error
 	// unregister application shard from DLT stack
 	Unregister() error
 	// submit a transaction to the network
@@ -32,7 +33,7 @@ type DLT interface {
 
 type dlt struct {
 	app       *AppConfig
-	txHandler func(tx dto.Transaction) error
+	txHandler func(tx dto.Transaction, state state.State) error
 	db        repo.DltDb
 	p2p       p2p.Layer
 	sharder   shard.Sharder
@@ -42,7 +43,7 @@ type dlt struct {
 	logger    log.Logger
 }
 
-func (d *dlt) Register(shardId []byte, name string, txHandler func(tx dto.Transaction) error) error {
+func (d *dlt) Register(shardId []byte, name string, txHandler func(tx dto.Transaction, state state.State) error) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.app != nil {
@@ -694,7 +695,7 @@ func NewDltStack(conf p2p.Config, dbp db.DbProvider) (*dlt, error) {
 	} else {
 		return nil, err
 	}
-	if sharder, err := shard.NewSharder(db); err == nil {
+	if sharder, err := shard.NewSharder(db, dbp); err == nil {
 		stack.sharder = sharder
 	} else {
 		return nil, err

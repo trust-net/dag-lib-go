@@ -2,11 +2,13 @@ package stack
 
 import (
 	devp2p "github.com/ethereum/go-ethereum/p2p"
+	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/endorsement"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/repo"
 	"github.com/trust-net/dag-lib-go/stack/shard"
+	"github.com/trust-net/dag-lib-go/stack/state"
 	"net"
 )
 
@@ -86,11 +88,11 @@ type mockSharder struct {
 	ChildrenCalled   bool
 	ApproverCalled   bool
 	TxHandlerCalled  bool
-	TxHandler        func(tx dto.Transaction) error
+	TxHandler        func(tx dto.Transaction, state state.State) error
 	orig             shard.Sharder
 }
 
-func (s *mockSharder) Register(shardId []byte, txHandler func(tx dto.Transaction) error) error {
+func (s *mockSharder) Register(shardId []byte, txHandler func(tx dto.Transaction, state state.State) error) error {
 	s.IsRegistered = true
 	s.ShardId = shardId
 	s.TxHandler = txHandler
@@ -137,9 +139,9 @@ func (s *mockSharder) Reset() {
 	*s = mockSharder{orig: s.orig}
 }
 
-func NewMockSharder(db repo.DltDb) *mockSharder {
+func NewMockSharder(dltDb repo.DltDb) *mockSharder {
 	//	db, _ := repo.NewDltDb(db.NewInMemDbProvider())
-	orig, _ := shard.NewSharder(db)
+	orig, _ := shard.NewSharder(dltDb, db.NewInMemDbProvider())
 	return &mockSharder{orig: orig}
 }
 

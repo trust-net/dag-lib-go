@@ -16,7 +16,10 @@ type State interface {
 
 type worldState struct {
 	stateDb db.Database
-	lock    sync.RWMutex
+	// TBD: following should be redundant, since we are locking at sharding layer before passing this reference
+	// to app for transaction processing -- but then we never know how app is using it. Also, protects during any
+	// reads happening outside of transaction processing
+	lock sync.RWMutex
 }
 
 func (s *worldState) Get(key []byte) (*Resource, error) {

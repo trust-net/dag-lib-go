@@ -2,8 +2,11 @@ package shard
 
 import (
 	"fmt"
+	//	"github.com/trust-net/dag-lib-go/common"
+	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/repo"
+	"github.com/trust-net/dag-lib-go/stack/state"
 	"testing"
 )
 
@@ -11,12 +14,15 @@ func TestInitiatization(t *testing.T) {
 	var s Sharder
 	var err error
 	testDb := repo.NewMockDltDb()
-	s, err = NewSharder(testDb)
+	s, err = NewSharder(testDb, db.NewInMemDbProvider())
 	if s.(*sharder) == nil || err != nil {
 		t.Errorf("Initiatization validation failed: %s, err: %s", s, err)
 	}
 	if s.(*sharder).db != testDb {
 		t.Errorf("Layer does not have correct DB reference expected: %s, actual: %s", testDb, s.(*sharder).db)
+	}
+	if s.(*sharder).worldState != nil {
+		t.Errorf("Sharder should initialize with nil world state, until an app is registered")
 	}
 }
 
@@ -34,10 +40,10 @@ func TestGenesis(t *testing.T) {
 
 func TestRegistration(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// register an app
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 
 	if err := s.Register([]byte("test shard"), txHandler); err != nil {
 		t.Errorf("App registration failed: %s", err)
@@ -51,8 +57,9 @@ func TestRegistration(t *testing.T) {
 		t.Errorf("Sharder did not register transaction call back")
 	}
 
-	// validate that DltDb's GetShardDagNode method was called for genesis node
-	if testDb.GetShardDagNodeCallCount != 1 {
+	// validate that DltDb's GetShardDagNode method was called twice for genesis node
+	// first time to when there was no entry, second time after entry was created
+	if testDb.GetShardDagNodeCallCount != 2 {
 		t.Errorf("Incorrect method call count: %d", testDb.GetShardDagNodeCallCount)
 	}
 
@@ -65,12 +72,17 @@ func TestRegistration(t *testing.T) {
 	if testDb.UpdateShardCount != 1 {
 		t.Errorf("Incorrect method call count: %d", testDb.UpdateShardCount)
 	}
+
+	// make sure that world state reference is initialized correctly
+	if s.worldState == nil {
+		t.Errorf("Sharder did not set world state reference when app is registered")
+	}
 }
 
 // test that app registration gets a replay of existing transactions
 func TestRegistrationReplay(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// send a mock network transaction with shard seq 1 to sharder before app is registered
 	tx, _ := SignedShardTransaction("test payload")
@@ -79,7 +91,7 @@ func TestRegistrationReplay(t *testing.T) {
 
 	// register an app using same shard as network transaction
 	cbCalled := false
-	txHandler := func(tx dto.Transaction) error { cbCalled = true; return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { cbCalled = true; return nil }
 	if err := s.Register(tx.Anchor().ShardId, txHandler); err != nil {
 		t.Errorf("App registration failed: %s", err)
 	}
@@ -105,12 +117,12 @@ func TestRegistrationReplay(t *testing.T) {
 
 func TestRegistrationKnownShard(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// submit a network transaction for a shard
 
 	// register an app
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 
 	if err := s.Register([]byte("test shard"), txHandler); err != nil {
 		t.Errorf("App registration failed: %s", err)
@@ -125,7 +137,7 @@ func TestRegistrationKnownShard(t *testing.T) {
 	}
 
 	// validate that DltDb's GetShardDagNode method was called for genesis node
-	if testDb.GetShardDagNodeCallCount != 1 {
+	if testDb.GetShardDagNodeCallCount != 2 {
 		t.Errorf("Incorrect method call count: %d", testDb.GetShardDagNodeCallCount)
 	}
 
@@ -137,10 +149,10 @@ func TestRegistrationKnownShard(t *testing.T) {
 
 func TestUnregistration(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// register an app
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
 
 	// un-register the app
@@ -155,14 +167,19 @@ func TestUnregistration(t *testing.T) {
 	if s.txHandler != nil {
 		t.Errorf("Sharder did not clear transaction call back")
 	}
+
+	// make sure that world state reference is removed correctly
+	if s.worldState != nil {
+		t.Errorf("Sharder did not remove world state reference when app is unregistered")
+	}
 }
 
 func TestAnchorRegistered(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// register an app
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
 	testDb.Reset()
 
@@ -190,7 +207,7 @@ func TestAnchorRegistered(t *testing.T) {
 
 func TestAnchorUnregistered(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// call sharder's anchor update without app registration
 	a := dto.Anchor{}
@@ -201,10 +218,10 @@ func TestAnchorUnregistered(t *testing.T) {
 
 func TestSyncAnchorRegsiteredKnown(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// register an app
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
 	testDb.Reset()
 
@@ -223,10 +240,10 @@ func TestSyncAnchorRegsiteredKnown(t *testing.T) {
 
 func TestSyncAnchorRegsiteredUnknown(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// register an app
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
 	testDb.Reset()
 
@@ -247,10 +264,10 @@ func TestSyncAnchorRegsiteredUnknown(t *testing.T) {
 
 func TestSyncAnchorUnregsiteredKnown(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// register an app
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
 	testDb.Reset()
 
@@ -272,7 +289,7 @@ func TestSyncAnchorUnregsiteredKnown(t *testing.T) {
 
 func TestSyncAnchorUnregsiteredUnknown(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// call sharder's sync anchor without app registration
 	if a := s.SyncAnchor([]byte("unknown shard")); a != nil {
@@ -292,10 +309,10 @@ func TestSyncAnchorUnregsiteredUnknown(t *testing.T) {
 func TestAnchorMultiTip(t *testing.T) {
 	fmt.Printf("#######################\n")
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// register an app
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	s.Register([]byte("test shard"), txHandler)
 	testDb.Reset()
 
@@ -352,7 +369,7 @@ func TestAnchorMultiTip(t *testing.T) {
 // test behavior for handling 1st transaction of a shard from network
 func TestHandlerUnregisteredFirstSeq(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// send a mock network transaction with shard seq 1 to sharder with no app registered
 	tx, genesis := SignedShardTransaction("test payload")
@@ -382,7 +399,7 @@ func TestHandlerUnregisteredFirstSeq(t *testing.T) {
 // test behavior for handling incorrect 1st transaction of a shard from network
 func TestHandlerIncorrectGenesisFirstSeq(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// send a mock network transaction with shard seq 1 but incorrect parent not matching correct genesis
 	tx, genesis := SignedShardTransaction("test payload")
@@ -410,13 +427,13 @@ func TestHandlerIncorrectGenesisFirstSeq(t *testing.T) {
 
 func TestHandlerRegistered(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	tx, _ := SignedShardTransaction("test payload")
 
 	// register an app for transaction's shard
 	called := false
-	txHandler := func(tx dto.Transaction) error { called = true; return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { called = true; return nil }
 	s.Register(tx.Anchor().ShardId, txHandler)
 
 	// send the mock network transaction to sharder with app registered
@@ -432,13 +449,13 @@ func TestHandlerRegistered(t *testing.T) {
 
 func TestHandlerAppFiltering(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	tx, _ := SignedShardTransaction("test payload")
 
 	// register an app for shard different from network transaction
 	called := false
-	txHandler := func(tx dto.Transaction) error { called = true; return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { called = true; return nil }
 	s.Register([]byte(string(tx.Anchor().ShardId)+"extra"), txHandler)
 
 	// send the mock network transaction to sharder from different shard
@@ -454,13 +471,13 @@ func TestHandlerAppFiltering(t *testing.T) {
 
 func TestHandlerTransactionValidation(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	tx, _ := SignedShardTransaction("test payload")
 
 	// register an app for transaction's shard
 	called := false
-	txHandler := func(tx dto.Transaction) error { called = true; return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { called = true; return nil }
 	s.Register(tx.Anchor().ShardId, txHandler)
 
 	// send the mock transaction to sharder with missing shard ID in transaction
@@ -478,7 +495,7 @@ func TestHandlerTransactionValidation(t *testing.T) {
 // test behavior for approving a transaction when not registered (should not happen)
 func TestApproverUnregisteredFirstSeq(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	// send a network transaction for approval with no app registered
 	tx, _ := SignedShardTransaction("test payload")
@@ -499,13 +516,13 @@ func TestApproverUnregisteredFirstSeq(t *testing.T) {
 
 func TestApproverHappyPath(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	tx, _ := SignedShardTransaction("test payload")
 
 	// register an app for transaction's shard
 	called := false
-	txHandler := func(tx dto.Transaction) error { called = true; return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { called = true; return nil }
 	s.Register(tx.Anchor().ShardId, txHandler)
 	testDb.Reset()
 
@@ -514,9 +531,9 @@ func TestApproverHappyPath(t *testing.T) {
 		t.Errorf("Transaction approval failed: %s", err)
 	}
 
-	// verify that callback did not get called for submitted transaction
-	if called {
-		t.Errorf("Callback not expected for application submitted transaction")
+	// verify that callback did get called for submitted transaction
+	if !called {
+		t.Errorf("Callback not done for application submitted transaction")
 	}
 
 	// verify that DLT DB's shard was updated for submitted transaction
@@ -532,14 +549,14 @@ func TestApproverHappyPath(t *testing.T) {
 
 func TestAncestorsKnownStartHash(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	tx1, genesis := SignedShardTransaction("test payload")
 	tx2 := dto.TestSignedTransaction("test payload")
 	tx2.Anchor().ShardParent = tx1.Id()
 	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
 	// register an app for transaction's shard
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
@@ -565,14 +582,14 @@ func TestAncestorsKnownStartHash(t *testing.T) {
 
 func TestAncestorsUnknownStartHash(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	tx1, _ := SignedShardTransaction("test payload")
 	tx2 := dto.TestSignedTransaction("test payload")
 	tx2.Anchor().ShardParent = tx1.Id()
 	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
 	// register an app for transaction's shard
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
@@ -598,14 +615,14 @@ func TestAncestorsUnknownStartHash(t *testing.T) {
 
 func TestChildrenKnownParent(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	tx1, _ := SignedShardTransaction("test payload")
 	tx2 := dto.TestSignedTransaction("test payload")
 	tx2.Anchor().ShardParent = tx1.Id()
 	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
 	// register an app for transaction's shard
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
@@ -629,14 +646,14 @@ func TestChildrenKnownParent(t *testing.T) {
 
 func TestChildrenUnknownParent(t *testing.T) {
 	testDb := repo.NewMockDltDb()
-	s, _ := NewSharder(testDb)
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
 	tx1, _ := SignedShardTransaction("test payload")
 	tx2 := dto.TestSignedTransaction("test payload")
 	tx2.Anchor().ShardParent = tx1.Id()
 	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
 	// register an app for transaction's shard
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
@@ -657,5 +674,100 @@ func TestChildrenUnknownParent(t *testing.T) {
 	// we should get 0 child
 	if len(children) != 0 {
 		t.Errorf("Incorrect number of children: %d", len(children))
+	}
+}
+
+func TestWorldStateResourceAccess(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	dbp := db.NewInMemDbProvider()
+	s, _ := NewSharder(testDb, dbp)
+
+	// register an app
+	txHandler := func(tx dto.Transaction, s state.State) error {
+		if r, err := s.Get([]byte("key")); err != nil {
+			return err
+		} else if string(r.Value) != string(tx.Self().Payload) {
+			return fmt.Errorf("Unexpected resource value: '%s', expected: %s", r.Value, tx.Self().Payload)
+		}
+		return nil
+	}
+
+	// send a mock network transaction with shard seq 1 to sharder before app is registered
+	tx, _ := SignedShardTransaction("test data to validate")
+	s.db.AddTx(tx)
+	s.Handle(tx)
+	testShard := tx.Anchor().ShardId
+
+	// set test value in world state for test shard
+	db := dbp.DB("Shard-World-State-" + string(testShard))
+	r := &state.Resource{
+		Key:   []byte("key"),
+		Value: []byte("test data to validate"),
+	}
+	data, _ := r.Serialize()
+	db.Put(r.Key, data)
+
+	// now register the app for the shard and it should check for above world state value
+	if err := s.Register(testShard, txHandler); err != nil {
+		t.Errorf("%s", err)
+	}
+}
+
+func TestWorldStateResourceVisibilityAcrossShards(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	dbp := db.NewInMemDbProvider()
+	s, _ := NewSharder(testDb, dbp)
+
+	// register an app
+	var seenResource *state.Resource
+	txHandler := func(tx dto.Transaction, s state.State) error {
+		seenResource, _ = s.Get(tx.Self().Payload)
+		return nil
+	}
+
+	// send a mock network transaction with shard seq 1 to sharder before app is registered
+	tx, _ := SignedShardTransaction("key")
+	s.db.AddTx(tx)
+	s.Handle(tx)
+	testShard := tx.Anchor().ShardId
+
+	// set test value in world state for test shard
+	db := dbp.DB("Shard-World-State-" + string(testShard))
+	r := &state.Resource{
+		Key:   []byte("key"),
+		Value: []byte("test shard 1"),
+	}
+	data, _ := r.Serialize()
+	db.Put(r.Key, data)
+
+	// now register the app for the shard and it should check for above world state value
+	if err := s.Register(testShard, txHandler); err != nil {
+		t.Errorf("%s", err)
+	}
+
+	// validate that resource was found
+	if r == nil || string(r.Value) != "test shard 1" {
+		t.Errorf("Found unexpected resource: %s", r)
+	}
+
+	// unregister app
+	s.Unregister()
+
+	// put a different value for resource in a different shard
+	r2 := &state.Resource{
+		Key:   []byte("key"),
+		Value: []byte("test shard 2"),
+	}
+	data2, _ := r2.Serialize()
+	dbp.DB("Shard-World-State-"+string([]byte("some random shard"))).Put(r2.Key, data2)
+
+	// now register the app again
+	if err := s.Register(testShard, txHandler); err != nil {
+		t.Errorf("%s", err)
+	}
+
+	// validate that resource was not found this time with other shard's value
+	if r == nil || string(r.Value) == "test shard 2" {
+		t.Errorf("Found unexpected resource: %s", r)
 	}
 }
