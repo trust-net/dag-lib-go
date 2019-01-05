@@ -13,6 +13,7 @@ type State interface {
 	Put(r *Resource) error
 	Delete(key []byte) error
 	Persist() error
+	Reset() error
 }
 
 type worldState struct {
