@@ -125,6 +125,10 @@ func (s *sharder) Register(shardId []byte, txHandler func(tx dto.Transaction, st
 			}
 		}
 	}
+	// transaction replay successful, persist world state
+	if err := s.worldState.Persist(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -268,7 +272,9 @@ func (s *sharder) Approve(tx dto.Transaction) error {
 		}
 
 		// application processed transaction successfully, persist
-		// TBD
+		if err := s.worldState.Persist(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -320,7 +326,9 @@ func (s *sharder) Handle(tx dto.Transaction) error {
 		}
 
 		// application processed transaction successfully, persist
-		// TBD
+		if err := s.worldState.Persist(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

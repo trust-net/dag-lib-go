@@ -19,11 +19,49 @@ func TestInitialization(t *testing.T) {
 	}
 }
 
-func TestPut(t *testing.T) {
+func TestPutToCache(t *testing.T) {
 	s := testWorldState()
+	key := []byte("key1")
+	value := "test data"
+	r := &Resource{
+		Key:   key,
+		Owner: []byte("test owner"),
+		Value: []byte(value),
+	}
 
-	if err := s.Put(&Resource{}); err != nil {
-		t.Errorf("Failed to put: %s", err)
+	// put test resource into world state
+	if err := s.Put(r); err != nil {
+		t.Errorf("Failed to put resource: %s", err)
+	}
+
+	// put should not have been made to DB
+	if _, err := s.stateDb.Get(key); err == nil {
+		t.Errorf("did not expect value in DB")
+	}
+}
+
+func TestDeleteToCache(t *testing.T) {
+	s := testWorldState()
+	key := []byte("key1")
+	value := "test data"
+	r := &Resource{
+		Key:   key,
+		Owner: []byte("test owner"),
+		Value: []byte(value),
+	}
+
+	// place the resource into DB
+	data, _ := r.Serialize()
+	s.stateDb.Put(key, data)
+
+	// delte resource from world state
+	if err := s.Delete(key); err != nil {
+		t.Errorf("Failed to delete resource: %s", err)
+	}
+
+	// delete should not have been made to DB
+	if data, err := s.stateDb.Get(key); err != nil || len(data) == 0 {
+		t.Errorf("did not expect delete from DB")
 	}
 }
 
@@ -91,5 +129,84 @@ func TestGetAfterReset(t *testing.T) {
 	}
 	if r, _ := s.Get([]byte("key2")); r != nil {
 		t.Errorf("Did not expect to get key2")
+	}
+}
+
+func TestGetFromCacheHit(t *testing.T) {
+	s := testWorldState()
+	key := []byte("key1")
+	value := "test data"
+	s.cache["key1"] = &Resource{
+		Key:   key,
+		Owner: []byte("test owner"),
+		Value: []byte(value),
+	}
+
+	if _, err := s.Get(key); err != nil {
+		t.Errorf("Failed to get: %s", err)
+	} else if _, err := s.stateDb.Get(key); err == nil {
+		t.Errorf("did not expect value in DB")
+	}
+}
+
+func TestGetFromCacheMiss(t *testing.T) {
+	s := testWorldState()
+	key := []byte("key1")
+	value := "test data"
+	// place a resource in DB (and not in cache)
+	r := &Resource{
+		Key:   key,
+		Owner: []byte("test owner"),
+		Value: []byte(value),
+	}
+	data, _ := r.Serialize()
+	s.stateDb.Put(key, data)
+
+	// get should be able fetch resource from DB, and update cache
+	if _, err := s.Get(key); err != nil {
+		t.Errorf("Failed to get: %s", err)
+	} else if _, found := s.cache[string(key)]; !found {
+		t.Errorf("did not find value in cache after get")
+	}
+}
+
+func TestPersistToDb(t *testing.T) {
+	s := testWorldState()
+	// add a resource directly into cache
+	s.cache["key1"] = &Resource{
+		Key:   []byte("key1"),
+		Owner: []byte("test owner 1"),
+		Value: []byte("test data 1"),
+	}
+	// add another resource via put
+	s.Put(&Resource{
+		Key:   []byte("key2"),
+		Owner: []byte("test owner 2"),
+		Value: []byte("test data 2"),
+	})
+	// do a delete on third resource placed in DB
+	r := &Resource{
+		Key:   []byte("key3"),
+		Owner: []byte("test owner 3"),
+		Value: []byte("test data 3"),
+	}
+	data, _ := r.Serialize()
+	s.stateDb.Put(r.Key, data)
+	s.Delete([]byte("key3"))
+
+	// now persist
+	if err := s.Persist(); err != nil {
+		t.Errorf("Failed to persist: %s", err)
+	} else {
+		// validate updates to DB
+		if _, err := s.stateDb.Get([]byte("key1")); err != nil {
+			t.Errorf("Did not find directly placed key1 in DB")
+		}
+		if _, err := s.stateDb.Get([]byte("key2")); err != nil {
+			t.Errorf("Did not find updated key2 in DB")
+		}
+		if _, err := s.stateDb.Get([]byte("key3")); err == nil {
+			t.Errorf("Should not find deleted key3 in DB")
+		}
 	}
 }
