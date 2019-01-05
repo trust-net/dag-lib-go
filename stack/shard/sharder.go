@@ -138,6 +138,11 @@ func (s *sharder) Unregister() error {
 	s.shardId = nil
 	s.txHandler = nil
 	s.genesisTx = nil
+	///////////////////////////////////////////////////////
+	// TBD: remove below when we start persisting last processed transaction during unregister,
+	// and do not replay previosuly processed transactions during register
+	s.worldState.Reset()
+	///////////////////////////////////////////////////////
 	s.worldState = nil
 	return nil
 }

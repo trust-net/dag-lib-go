@@ -31,8 +31,6 @@ var key *ecdsa.PrivateKey
 
 var submitter []byte
 
-var myDb = db.NewInMemDatabase("countr_app")
-
 type testTx struct {
 	Op     string
 	Target string
@@ -57,7 +55,6 @@ func incrementTx(a *dto.Anchor, name string, delta int) dto.Transaction {
 	if a == nil {
 		return nil
 	}
-	applyDelta(name, delta)
 	op := testTx{
 		Op:     "incr",
 		Target: name,
@@ -71,7 +68,6 @@ func decrementTx(a *dto.Anchor, name string, delta int) dto.Transaction {
 	if a == nil {
 		return nil
 	}
-	applyDelta(name, -delta)
 	op := testTx{
 		Op:     "decr",
 		Target: name,
@@ -130,14 +126,18 @@ func scanOps(scanner *bufio.Scanner) (ops []op) {
 	}
 }
 
-func applyDelta(name string, delta int) int64 {
+func applyDelta(name string, delta int, s state.State) int64 {
 	last := int64(0)
-	if val, err := myDb.Get([]byte(name)); err == nil {
-		common.Deserialize(val, &last)
+	// fetch resource from world state
+	r := &state.Resource{
+		Key: []byte(name),
+	}
+	if read, err := s.Get(r.Key); err == nil {
+		common.Deserialize(read.Value, &last)
 	}
 	last += int64(delta)
-	newVal, _ := common.Serialize(last)
-	myDb.Put([]byte(name), newVal)
+	r.Value, _ = common.Serialize(last)
+	s.Put(r)
 	return last
 }
 
@@ -156,7 +156,7 @@ func txHandler(tx dto.Transaction, state state.State) error {
 	case "decr":
 		delta = int(-op.Delta)
 	}
-	fmt.Printf("%s --> %d\n%s", op.Target, applyDelta(op.Target, delta), cmdPrompt)
+	fmt.Printf("%s --> %d\n%s", op.Target, applyDelta(op.Target, delta, state), cmdPrompt)
 	return nil
 }
 
@@ -192,13 +192,13 @@ func cli(dlt stack.DLT) error {
 								} else {
 									oneDone = true
 								}
-								// get current network counter value
-								if val, err := myDb.Get([]byte(name)); err == nil {
+								// get current network counter value from world state
+								if r, err := dlt.GetState([]byte(name)); err == nil {
 									var last int64
-									common.Deserialize(val, &last)
+									common.Deserialize(r.Value, &last)
 									fmt.Printf("% 10s: %d", name, last)
 								} else {
-									fmt.Printf("% 10s: not found", name)
+									fmt.Printf("% 10s: %s", name, err)
 								}
 							}
 							hasNext = wordScanner.Scan()
@@ -264,7 +264,6 @@ func cli(dlt stack.DLT) error {
 						if err := dlt.Unregister(); err != nil {
 							fmt.Printf("Error during un-registering app: %s\n", err)
 						}
-						myDb.Flush()
 						cmdPrompt = "<headless>: "
 					default:
 						fmt.Printf("Unknown Command: %s", cmd)
