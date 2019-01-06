@@ -20,6 +20,10 @@ type Anchor struct {
 	ShardUncles [][64]byte
 	// transaction submitter's public ID
 	Submitter []byte
+	// submitter's last transaction ID
+	SubmitterLastTx [64]byte
+	// submitter's transaction sequence number
+	SubmitterSeq uint64
 	// anchor signature from DLT stack
 	Signature []byte
 }

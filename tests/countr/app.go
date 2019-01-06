@@ -213,7 +213,7 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: incr %s %d\n", op.name, op.delta)
-								if err := dlt.Submit(incrementTx(dlt.Anchor(submitter), op.name, op.delta)); err != nil {
+								if err := dlt.Submit(incrementTx(dlt.Anchor(submitter, 0x00, [64]byte{}), op.name, op.delta)); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
 								}
 							}
@@ -225,7 +225,7 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: decr %s %d\n", op.name, op.delta)
-								if err := dlt.Submit(decrementTx(dlt.Anchor(submitter), op.name, op.delta)); err != nil {
+								if err := dlt.Submit(decrementTx(dlt.Anchor(submitter, 0x00, [64]byte{}), op.name, op.delta)); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
 								}
 							}
@@ -234,7 +234,7 @@ func cli(dlt stack.DLT) error {
 						for wordScanner.Scan() {
 							continue
 						}
-						if a := dlt.Anchor(submitter); a == nil {
+						if a := dlt.Anchor(submitter, 0x00, [64]byte{}); a == nil {
 							fmt.Printf("failed to get any info...\n")
 						} else {
 							fmt.Printf("ShardId: %s\n", a.ShardId)

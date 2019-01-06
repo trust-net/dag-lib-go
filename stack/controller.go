@@ -24,7 +24,7 @@ type DLT interface {
 	// submit a transaction to the network
 	Submit(tx dto.Transaction) error
 	// get a transaction Anchor for specified submitter id
-	Anchor(id []byte) *dto.Anchor
+	Anchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor
 	// start the controller
 	Start() error
 	// stop the controller
@@ -71,7 +71,7 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx dto.Transa
 	}
 
 	// initiate app registration sync protocol
-	if anchor := d.anchor([]byte("ForceShardSync")); anchor != nil {
+	if anchor := d.anchor([]byte("ForceShardSync"), 0x00, [64]byte{}); anchor != nil {
 		msg := NewForceShardSyncMsg(anchor)
 		d.logger.Debug("Broadcasting ForceShardSync: %x", msg.Id())
 		d.p2p.Broadcast(msg.Id(), msg.Code(), msg)
@@ -143,10 +143,10 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 	return d.p2p.Broadcast(id[:], TransactionMsgCode, tx)
 }
 
-func (d *dlt) Anchor(id []byte) *dto.Anchor {
+func (d *dlt) Anchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	return d.anchor(id)
+	return d.anchor(id, seq, lastTx)
 }
 
 func (d *dlt) GetState(key []byte) (*state.Resource, error) {
@@ -154,9 +154,11 @@ func (d *dlt) GetState(key []byte) (*state.Resource, error) {
 	return d.sharder.GetState(key)
 }
 
-func (d *dlt) anchor(id []byte) *dto.Anchor {
+func (d *dlt) anchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
 	a := &dto.Anchor{
-		Submitter: id,
+		Submitter:       id,
+		SubmitterLastTx: lastTx,
+		SubmitterSeq:    seq,
 	}
 	if err := d.sharder.Anchor(a); err != nil {
 		d.logger.Debug("Failed to get sharder's anchor: %s", err)
@@ -191,7 +193,7 @@ func (d *dlt) handshake(peer p2p.Peer) error {
 	//   1) ask sharding layer for the current shard's Anchor
 	//   2) ask endorsing layer for the current Anchor's update
 	//   3) send the ShardSyncMsg message to peer
-	if a := d.anchor([]byte("ShardSyncMsg")); a == nil {
+	if a := d.anchor([]byte("ShardSyncMsg"), 0x00, [64]byte{}); a == nil {
 		d.logger.Debug("Cannot run handshake")
 	} else {
 		msg := NewShardSyncMsg(a)

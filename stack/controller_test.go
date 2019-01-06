@@ -282,7 +282,7 @@ func TestSubmit(t *testing.T) {
 	stack, sharder, endorser, p2p := initMocks()
 
 	// get an anchor
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	if a == nil {
 		t.Errorf("Failed to get anchor")
 	}
@@ -325,7 +325,7 @@ func TestReSubmitSeen(t *testing.T) {
 	stack, sharder, endorser, _ := initMocks()
 
 	// get an anchor
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	if a == nil {
 		t.Errorf("Failed to get anchor")
 	}
@@ -359,7 +359,7 @@ func TestSubmitNetworkSeen(t *testing.T) {
 	stack, sharder, endorser, _ := initMocks()
 
 	// get an anchor
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	if a == nil {
 		t.Errorf("Failed to get anchor")
 	}
@@ -430,9 +430,16 @@ func TestAnchorRegisteredApp(t *testing.T) {
 	stack, sharder, endorser, p2p := initMocks()
 
 	// get an anchor
-	a := stack.Anchor([]byte("test submitter"))
+	lastTx := dto.RandomHash()
+	a := stack.Anchor([]byte("test submitter"), 0x01, lastTx)
 	if a == nil {
 		t.Errorf("Failed to get anchor")
+	}
+	if a.SubmitterLastTx != lastTx {
+		t.Errorf("Incorrect submitter's last transaction: %x", a.SubmitterLastTx)
+	}
+	if a.SubmitterSeq != 0x01 {
+		t.Errorf("Incorrect submitter's sequence: %x", a.SubmitterSeq)
 	}
 
 	if !sharder.AnchorCalled {
@@ -460,7 +467,7 @@ func TestAnchorUnregisteredApp(t *testing.T) {
 	stack.Unregister()
 
 	// get an anchor
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	if a != nil {
 		t.Errorf("should not get anchor when app is not registered")
 	}
@@ -612,7 +619,7 @@ func TestRECV_ShardSyncMsgEvent_RemoteHeavy(t *testing.T) {
 	}()
 
 	// build a shard sync message with heavier Anchor
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	a.Weight += 10
 	msg := NewShardSyncMsg(a)
 	// now emit RECV_ShardSyncMsg event
@@ -653,7 +660,7 @@ func TestRECV_ShardSyncMsgEvent_LessWeight(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// submit a transaction to add weight to local shard's Anchor
-	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload")
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload")
 	if err := stack.Submit(tx); err != nil {
 		t.Errorf("Transaction submission failed, err: %s", err)
 	}
@@ -672,7 +679,7 @@ func TestRECV_ShardSyncMsgEvent_LessWeight(t *testing.T) {
 
 	// build a shard sync message with default Anchor but same shard as local
 	a := dto.TestAnchor()
-	a.ShardId = stack.Anchor([]byte("test")).ShardId
+	a.ShardId = stack.Anchor([]byte("test"), 0x01, dto.RandomHash()).ShardId
 	msg := NewShardSyncMsg(a)
 	// now emit RECV_ShardSyncMsg event
 	events <- newControllerEvent(RECV_ShardSyncMsg, msg)
@@ -713,7 +720,7 @@ func TestRECV_ShardSyncMsgEvent_SameWeight_NumericHeavy(t *testing.T) {
 	}()
 
 	// build a shard sync message with same weight but parent hash that is higher numeric value
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	for i := 0; i < 64; i++ {
 		a.ShardParent[i] = 0xff
 	}
@@ -761,7 +768,7 @@ func TestRECV_ShardSyncMsgEvent_LessWeight_NumericHeavy(t *testing.T) {
 	}()
 
 	// build a shard sync message with less weight but parent hash that is higher numeric value
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	a.Weight -= 1
 	for i := 0; i < 64; i++ {
 		a.ShardParent[i] = 0xff
@@ -794,7 +801,7 @@ func TestRECV_ShardSyncMsgEvent_SameAnchors(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// submit a transaction to add weight to local shard's Anchor
-	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload")
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload")
 	if err := stack.Submit(tx); err != nil {
 		t.Errorf("Transaction submission failed, err: %s", err)
 	}
@@ -815,7 +822,7 @@ func TestRECV_ShardSyncMsgEvent_SameAnchors(t *testing.T) {
 	}()
 
 	// build a shard sync message with same anchor as local
-	local := stack.Anchor([]byte("test submitter"))
+	local := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	remote := &dto.Anchor{
 		ShardId:     local.ShardId,
 		Weight:      local.Weight,
@@ -850,7 +857,7 @@ func TestRECV_ShardSyncMsgEvent_NoAppRegistered(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// save app's shard for later use and then unregister the app
-	ShardId := stack.Anchor([]byte("test submitter")).ShardId
+	ShardId := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()).ShardId
 	stack.Unregister()
 
 	// build a mock peer
@@ -1088,13 +1095,13 @@ func TestRECV_ShardAncestorRequestMsgCode_KnownStartHash(t *testing.T) {
 	stack, sharder, _, _ := initMocks()
 
 	// save the genesis hash
-	gen := stack.Anchor([]byte("test submitter")).ShardParent
+	gen := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()).ShardParent
 
 	// submit 2 transactions to add ancestors to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 	// the second transaction would be Anchor's parent, and hence will be the starting hash
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload2")
 	stack.Submit(tx2)
 
 	// build a mock peer
@@ -1110,7 +1117,7 @@ func TestRECV_ShardAncestorRequestMsgCode_KnownStartHash(t *testing.T) {
 	}()
 
 	// build an ancestor request message for stack's shard
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	msg := &ShardAncestorRequestMsg{
 		StartHash:    a.ShardParent,
 		MaxAncestors: 10,
@@ -1197,7 +1204,7 @@ func TestRECV_ShardAncestorResponseMsg_AllUnknown(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx)
 
 	// build a mock peer
@@ -1264,7 +1271,7 @@ func TestRECV_ShardAncestorResponseMsg_IncorrectState(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx)
 
 	// build a mock peer
@@ -1323,7 +1330,7 @@ func TestRECV_ShardAncestorResponseMsg_KnownAncestor(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx)
 
 	// build a mock peer
@@ -1548,10 +1555,10 @@ func TestRECV_ShardChildrenRequestMsg_KnownHash(t *testing.T) {
 	stack, sharder, _, _ := initMocks()
 
 	// submit 2 transactions to add ancestors to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 	// the second transaction would be Anchor's parent, and hence will be the starting hash
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload2")
 	stack.Submit(tx2)
 
 	// build a mock peer
@@ -1605,10 +1612,10 @@ func TestRECV_ShardChildrenRequestMsg_UnknownHash(t *testing.T) {
 	stack, sharder, _, _ := initMocks()
 
 	// submit 2 transactions to add ancestors to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 	// the second transaction would be Anchor's parent, and hence will be the starting hash
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload2")
 	stack.Submit(tx2)
 
 	// build a mock peer
@@ -1713,7 +1720,7 @@ func TestRECV_ShardChildrenResponseMsg_UnexpectedHash(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 
 	// build a mock peer
@@ -1777,7 +1784,7 @@ func TestRECV_ShardChildrenResponseMsg_ExpectedHash(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 
 	// build a mock peer
@@ -1846,11 +1853,11 @@ func TestRECV_ShardChildrenResponseMsg_KnownChild(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 
 	// submit another transactions to add child to local shard's Anchor
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload2")
 	stack.Submit(tx2)
 
 	// build a mock peer
@@ -2060,10 +2067,10 @@ func TestRECV_TxShardChildRequestMsg_KnownHash(t *testing.T) {
 	stack, sharder, _, _ := initMocks()
 
 	// submit 2 transactions to add a tx and its child to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 	// the second transaction would be Anchor's parent, and hence will be the starting hash
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload2")
 	stack.Submit(tx2)
 
 	// build a mock peer
@@ -2117,10 +2124,10 @@ func TestRECV_TxShardChildRequestMsg_UnknownHash(t *testing.T) {
 	stack, sharder, _, _ := initMocks()
 
 	// submit 2 transactions to add a tx and its child to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 	// the second transaction would be Anchor's parent, and hence will be the starting hash
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload2")
 	stack.Submit(tx2)
 
 	// build a mock peer
@@ -2202,14 +2209,14 @@ func TestRECV_TxShardChildResponseMsg_UnexpectedHash(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
 
 	// build another transaction as child of above transaction to send in response
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -2289,14 +2296,14 @@ func TestRECV_TxShardChildResponseMsg_UnserializableTx(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
 
 	// build another transaction as child of above transaction to send in response
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -2379,14 +2386,14 @@ func TestRECV_TxShardChildResponseMsg_ExpectedHash(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
 
 	// build another transaction as child of above transaction to send in response
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -2498,11 +2505,11 @@ func TestRECV_ForceShardSyncMsg_KnownShard_InSync(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to local shard
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 
 	// save app's shard's anchor for later use and then unregister the app
-	anchor := stack.Anchor([]byte("test submitter"))
+	anchor := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 
 	// now unregister default app, and register a different app/shard
 	stack.Unregister()
@@ -2565,10 +2572,10 @@ func TestRECV_ForceShardSyncMsg_KnownShard_LocalAhead(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// save app's shard's anchor for later use and then unregister the app
-	anchor := stack.Anchor([]byte("test submitter"))
+	anchor := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 
 	// submit a transactions to local shard to move it ahead of saved anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 
 	// now unregister default app, and register a different app/shard
@@ -2636,11 +2643,11 @@ func TestRECV_ForceShardSyncMsg_KnownShard_RemoteAhead(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to local shard
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 
 	// save app's shard's anchor for later use and then unregister the app
-	anchor := stack.Anchor([]byte("test submitter"))
+	anchor := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 
 	// now unregister default app, and register a different app/shard
 	stack.Unregister()
@@ -2708,7 +2715,7 @@ func TestRECV_ForceShardSyncMsg_UnknownShard(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to local shard
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 
 	// reset the mocks to remove any state updated during initialization
@@ -2736,7 +2743,7 @@ func TestRECV_ForceShardSyncMsg_UnknownShard(t *testing.T) {
 	peerStack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction, state state.State) error { return nil })
 
 	// build a ForceShardSyncMsg request with anchor of remoteStack using an unknown shard
-	anchor := peerStack.Anchor([]byte("test submitter"))
+	anchor := peerStack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	msg := NewForceShardSyncMsg(anchor)
 
 	// now emit RECV_TxShardChildRequestMsg event
