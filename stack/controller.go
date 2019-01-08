@@ -140,6 +140,7 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 
 	// finally send it to p2p layer, to broadcase to others
 	id := tx.Id()
+	d.logger.Debug("Submitted transaction accepted, broadcasting: %x", id)
 	return d.p2p.Broadcast(id[:], TransactionMsgCode, tx)
 }
 
@@ -218,7 +219,7 @@ func (d *dlt) handleTransaction(peer p2p.Peer, tx dto.Transaction) error {
 	// mark sender of the message as seen
 	id := tx.Id()
 	peer.Seen(id[:])
-	d.logger.Debug("Boradcasting transaction: %x", id)
+	d.logger.Debug("Network transaction accepted, broadcasting: %x", id)
 	d.p2p.Broadcast(id[:], TransactionMsgCode, tx)
 	return nil
 }
