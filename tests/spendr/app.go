@@ -7,17 +7,16 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha512"
-	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/state"
-	"github.com/trust-net/go-trust-net/common"
 	"math/big"
 	"os"
 	"strconv"
@@ -92,30 +91,6 @@ func makeTransaction(a *dto.Anchor, opCode uint64, arg interface{}) dto.Transact
 	return sign(dto.NewTransaction(a), txPayload)
 }
 
-//func createTx(a *dto.Anchor, arg ArgsCreate) dto.Transaction {
-//	if a == nil {
-//		return nil
-//	}
-//	op := Ops{
-//		Code:    OpCodeCreate,
-//	}
-//	op.Args, _ := common.Serialize(arg)
-//	txPayload, _ := common.Serialize(op)
-//	return sign(dto.NewTransaction(a), txPayload)
-//}
-
-//func xferValueTx(a *dto.Anchor, arg ArgsXferValue) dto.Transaction {
-//	if a == nil {
-//		return nil
-//	}
-//	op := Ops{
-//		Code:    OpCodeXferValue,
-//	}
-//	op.Args, _ := common.Serialize(arg)
-//	txPayload, _ := common.Serialize(op)
-//	return sign(dto.NewTransaction(a), txPayload)
-//}
-
 func scanCreateArgs(scanner *bufio.Scanner) (args []ArgsCreate) {
 	nextToken := func() (*string, int, bool) {
 		if !scanner.Scan() {
@@ -176,9 +151,8 @@ func handleOpCodeCreate(tx dto.Transaction, ws state.State, op Ops) error {
 	r := state.Resource{
 		Key:   []byte(arg.Name),
 		Owner: tx.Anchor().Submitter,
-		Value: make([]byte, 8, 8),
+		Value: common.Uint64ToBytes(uint64(arg.Value)),
 	}
-	binary.BigEndian.PutUint64(r.Value, uint64(arg.Value))
 	// create resource in world state
 	return ws.Put(&r)
 }
@@ -209,7 +183,7 @@ func handleOpCodeXferValue(tx dto.Transaction, ws state.State, op Ops) error {
 		return fmt.Errorf("Resource not owned")
 	}
 	// validate: xfer value should not be more than source resource's value
-	fromValue := int64(binary.BigEndian.Uint64(from.Value))
+	fromValue := int64(common.BytesToUint64(from.Value))
 	if fromValue < arg.Value {
 		fmt.Printf("ERROR: attempt to xfer excess value: %d\nResource value: %d\nSubmitter: %x\n", arg.Value, fromValue, tx.Anchor().Submitter)
 		return fmt.Errorf("Resource insufficient")
@@ -220,10 +194,10 @@ func handleOpCodeXferValue(tx dto.Transaction, ws state.State, op Ops) error {
 		return fmt.Errorf("Negative transaction")
 	}
 	// make the transaction
-	toValue := int64(binary.BigEndian.Uint64(to.Value))
+	toValue := int64(common.BytesToUint64(to.Value))
 	fromValue, toValue = fromValue-arg.Value, toValue+arg.Value
-	binary.BigEndian.PutUint64(from.Value, uint64(fromValue))
-	binary.BigEndian.PutUint64(to.Value, uint64(toValue))
+	from.Value = common.Uint64ToBytes(uint64(fromValue))
+	to.Value = common.Uint64ToBytes(uint64(toValue))
 	// update resources in world state
 	if err := ws.Put(from); err != nil {
 		fmt.Printf("Error in updating '%s' with world state: %s\n", from.Key, err)
@@ -295,7 +269,7 @@ func cli(dlt stack.DLT) error {
 								}
 								// get current network counter value from world state
 								if r, err := dlt.GetState([]byte(name)); err == nil {
-									value := int64(binary.BigEndian.Uint64(r.Value))
+									value := int64(common.BytesToUint64(r.Value))
 									common.Deserialize(r.Value, &value)
 									fmt.Printf("% 10s: %d", name, value)
 								} else {

@@ -400,6 +400,47 @@ func TestSubmitValidation(t *testing.T) {
 	}
 }
 
+func TestSubmitValidation_AnchorSignature(t *testing.T) {
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+	// register app
+	app := TestAppConfig()
+	stack.Register(app.ShardId, app.Name, func(tx dto.Transaction, state state.State) error { return nil })
+
+	// get a valid and signed anchor from stack
+	a := stack.Anchor([]byte("test submitter"), 0x23, dto.RandomHash())
+	// now change the submitter sequence, to simulate cheating
+	a.SubmitterSeq = 0x22
+	// create a transaction with this modified anchor
+	tx := TestAnchoredTransaction(a, "test payload")
+
+	// submit transaction, it should fail signature validation
+	if err := stack.Submit(tx); err == nil {
+		t.Errorf("Transaction submission did not check for anchor signature")
+	}
+}
+
+func TestSubmitValidation_PayloadSignature(t *testing.T) {
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+	// register app
+	app := TestAppConfig()
+	stack.Register(app.ShardId, app.Name, func(tx dto.Transaction, state state.State) error { return nil })
+
+	// get a valid and signed anchor from stack
+	a := stack.Anchor([]byte("test submitter"), 0x23, dto.RandomHash())
+	// create a signed transaction
+	tx := TestAnchoredTransaction(a, "test payload")
+	// now modify payload of transaction to simulate cheating
+	tx.Self().Payload = []byte("i changed my mind")
+
+	//	log.SetLogLevel(log.DEBUG)
+	//	defer log.SetLogLevel(log.NONE)
+
+	// submit transaction, it should fail signature validation
+	if err := stack.Submit(tx); err == nil {
+		t.Errorf("Transaction submission did not check for anchor signature")
+	}
+}
+
 // start of controller, happy path
 func TestStart(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
@@ -2785,9 +2826,6 @@ func TestRECV_ForceShardSyncMsg_UnknownShard(t *testing.T) {
 func TestRECV_NewTxBlockMsg_UnknownTxParent(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, sharder, _, _ := initMocks()
-
-	//	log.SetLogLevel(log.DEBUG)
-	//	defer log.SetLogLevel(log.NONE)
 
 	// build a mock peer
 	mockConn := p2p.TestConn()

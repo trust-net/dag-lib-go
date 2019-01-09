@@ -27,18 +27,6 @@ type transaction struct {
 	Signature []byte
 	// transaction anchor from DLT stack
 	TxAnchor *Anchor
-	//	// transaction approver application instance node ID
-	//	NodeId []byte
-	//	// transaction approver application's shard ID
-	//	ShardId []byte
-	//	// sequence of this transaction within the shard
-	//	ShardSeq uint64
-	//	// parent transaction within the shard
-	//	ShardParent [64]byte
-	//	// uncle transactions withing the shard
-	//	ShardUncles [][64]byte
-	//	// transaction submitter's public ID
-	//	Submitter []byte
 }
 
 // compute SHA512 hash or return from cache
@@ -51,12 +39,6 @@ func (tx *transaction) Id() [64]byte {
 	data = append(data, tx.Signature...)
 	// append anchor's signature
 	data = append(data, tx.TxAnchor.Signature...)
-	//	// append shard ID etc
-	//	data = append(data, tx.ShardId...)
-	//	seq := [8]byte{}
-	//	binary.BigEndian.PutUint64(seq[:], tx.ShardSeq)
-	//	data = append(data, seq[:]...)
-	//	data = append(data, tx.ShardParent[:]...)
 	tx.id = sha512.Sum512(data)
 	tx.idDone = true
 	return tx.id

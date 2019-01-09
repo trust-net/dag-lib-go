@@ -92,6 +92,19 @@ func (d *dlt) unregister() error {
 	return d.sharder.Unregister()
 }
 
+func (d *dlt) validateSignatures(tx dto.Transaction) error {
+	// validate transaction Anchor signature using transaction approver's ID
+	if !d.p2p.Verify(tx.Anchor().Bytes(), tx.Anchor().Signature, tx.Anchor().NodeId) {
+		return errors.New("Anchor signature invalid")
+	}
+
+	// validate transaction paylaoad signature using transaction submitter's ID
+	if !d.p2p.Verify(tx.Self().Payload, tx.Self().Signature, tx.Anchor().Submitter) {
+		return errors.New("Payload signature invalid")
+	}
+	return nil
+}
+
 func (d *dlt) Submit(tx dto.Transaction) error {
 	if d.app == nil {
 		return errors.New("app not registered")
@@ -117,6 +130,12 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 		return errors.New("nil transaction signature")
 	case tx.Anchor().Submitter == nil:
 		return errors.New("nil transaction submitter ID")
+	}
+
+	// validate signatures
+	if err := d.validateSignatures(tx); err != nil {
+		d.logger.Debug("Submitted transaction failed signature verification: %s", err)
+		return err
 	}
 
 	// check if message was already seen by stack
@@ -525,9 +544,10 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 				return err
 			}
 
-			// validate transaction signature using transaction submitter's ID
-			if !d.p2p.Verify(tx.Self().Payload, tx.Self().Signature, tx.Anchor().Submitter) {
-				return errors.New("Transaction signature invalid")
+			// validate signatures
+			if err := d.validateSignatures(tx); err != nil {
+				d.logger.Debug("Submitted transaction failed signature verification: %s", err)
+				return err
 			}
 
 			// check if message was already seen by stack

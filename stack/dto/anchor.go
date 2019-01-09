@@ -1,7 +1,7 @@
 package dto
 
 import (
-	"github.com/trust-net/go-trust-net/common"
+	"github.com/trust-net/dag-lib-go/common"
 )
 
 // transaction message
@@ -37,4 +37,21 @@ func (a *Anchor) DeSerialize(data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// we want to make sure we always create byte array for signature in a well known order
+func (a *Anchor) Bytes() []byte {
+	payload := make([]byte, 0, 1024)
+	payload = append(payload, a.ShardId...)
+	payload = append(payload, a.NodeId...)
+	payload = append(payload, a.Submitter...)
+	payload = append(payload, a.ShardParent[:]...)
+	for _, uncle := range a.ShardUncles {
+		payload = append(payload, uncle[:]...)
+	}
+	payload = append(payload, common.Uint64ToBytes(a.ShardSeq)...)
+	payload = append(payload, common.Uint64ToBytes(a.Weight)...)
+	payload = append(payload, a.SubmitterLastTx[:]...)
+	payload = append(payload, common.Uint64ToBytes(a.SubmitterSeq)...)
+	return payload
 }

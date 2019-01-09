@@ -260,6 +260,15 @@ func (s *sharder) Approve(tx dto.Transaction) error {
 	if parent := s.db.GetShardDagNode(tx.Anchor().ShardParent); parent == nil {
 		return fmt.Errorf("parent transaction unknown for shard")
 	} else {
+		// lock the world state so that no other transaction can process in parallel
+		s.useWorldState.Lock()
+		defer s.useWorldState.Unlock()
+
+		// process transaction via application's callback
+		if err := s.txHandler(tx, s.worldState); err != nil {
+			return err
+		}
+
 		// should we add transaction here, or should we expect that transaction will be added by lower layer?
 		// for submissions, we'll add transaction here
 		if err := s.db.AddTx(tx); err != nil {
@@ -267,14 +276,6 @@ func (s *sharder) Approve(tx dto.Transaction) error {
 		}
 		// update the shard's DAG and Tips
 		if err := s.db.UpdateShard(tx); err != nil {
-			return err
-		}
-
-		// process transaction via application's callback
-		// lock the world state so that no other transaction can process in parallel
-		s.useWorldState.Lock()
-		defer s.useWorldState.Unlock()
-		if err := s.txHandler(tx, s.worldState); err != nil {
 			return err
 		}
 

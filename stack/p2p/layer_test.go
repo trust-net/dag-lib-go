@@ -6,8 +6,8 @@ import (
 	"crypto/sha512"
 	"fmt"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/stack/dto"
-	"github.com/trust-net/go-trust-net/common"
 	"testing"
 )
 
@@ -154,12 +154,14 @@ func TestAnchor(t *testing.T) {
 	parent := dto.RandomHash()
 	uncles := [][64]byte{dto.RandomHash(), dto.RandomHash()}
 	a := &dto.Anchor{
-		Submitter:   []byte("test submitter"),
-		ShardId:     []byte("test shard"),
-		ShardSeq:    0x21,
-		Weight:      0xf1,
-		ShardParent: parent,
-		ShardUncles: uncles,
+		Submitter:       []byte("test submitter"),
+		ShardId:         []byte("test shard"),
+		ShardSeq:        0x21,
+		Weight:          0xf1,
+		ShardParent:     parent,
+		ShardUncles:     uncles,
+		SubmitterLastTx: dto.RandomHash(),
+		SubmitterSeq:    0x9f,
 	}
 
 	// send anchor for processing
@@ -181,8 +183,10 @@ func TestAnchor(t *testing.T) {
 	for _, uncle := range a.ShardUncles {
 		payload = append(payload, uncle[:]...)
 	}
-	payload = append(payload, uint64ToBytes(a.ShardSeq)...)
-	payload = append(payload, uint64ToBytes(a.Weight)...)
+	payload = append(payload, common.Uint64ToBytes(a.ShardSeq)...)
+	payload = append(payload, common.Uint64ToBytes(a.Weight)...)
+	payload = append(payload, a.SubmitterLastTx[:]...)
+	payload = append(payload, common.Uint64ToBytes(a.SubmitterSeq)...)
 	// regenerate signature parameters
 	s := signature{}
 	if err := common.Deserialize(a.Signature, &s); err != nil {
