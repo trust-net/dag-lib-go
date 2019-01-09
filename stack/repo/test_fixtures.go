@@ -9,10 +9,12 @@ type mockDb struct {
 	GetTxCallCount               int
 	AddTxCallCount               int
 	UpdateShardCount             int
+	UpdateSubmitterCount         int
 	DeleteTxCallCount            int
 	GetDagNodeCallCount          int
 	GetShardDagNodeCallCount     int
 	GetSubmitterDagNodeCallCount int
+	GetSubmitterHistoryCount     int
 	GetShardsCallCount           int
 	GetSubmittersCallCount       int
 	ShardTipsCallCount           int
@@ -35,6 +37,11 @@ func (d *mockDb) UpdateShard(tx dto.Transaction) error {
 	return d.db.UpdateShard(tx)
 }
 
+func (d *mockDb) UpdateSubmitter(tx dto.Transaction) error {
+	d.UpdateSubmitterCount += 1
+	return d.db.UpdateSubmitter(tx)
+}
+
 func (d *mockDb) DeleteTx(id [64]byte) error {
 	d.DeleteTxCallCount += 1
 	return d.db.DeleteTx(id)
@@ -48,6 +55,11 @@ func (d *mockDb) GetShardDagNode(id [64]byte) *DagNode {
 func (d *mockDb) GetSubmitterDagNode(id [64]byte) *DagNode {
 	d.GetSubmitterDagNodeCallCount += 1
 	return d.db.GetSubmitterDagNode(id)
+}
+
+func (d *mockDb) GetSubmitterHistory(id []byte, seq uint64) *DagNode {
+	d.GetSubmitterHistoryCount += 1
+	return d.db.GetSubmitterHistory(id, seq)
 }
 
 func (d *mockDb) GetShards() []byte {

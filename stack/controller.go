@@ -71,7 +71,7 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx dto.Transa
 	}
 
 	// initiate app registration sync protocol
-	if anchor := d.anchor([]byte("ForceShardSync"), 0x00, [64]byte{}); anchor != nil {
+	if anchor := d.anchor(append([]byte("ForceShardSync"), shardId...), 0x00, [64]byte{}); anchor != nil {
 		msg := NewForceShardSyncMsg(anchor)
 		d.logger.Debug("Broadcasting ForceShardSync: %x", msg.Id())
 		d.p2p.Broadcast(msg.Id(), msg.Code(), msg)
@@ -164,6 +164,12 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 }
 
 func (d *dlt) Anchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
+	// submitter sequence should be 1 or higher
+	if seq < 1 {
+		d.logger.Error("Incorrect submitter sequence: %d", seq)
+		return nil
+	}
+
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	return d.anchor(id, seq, lastTx)

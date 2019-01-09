@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"testing"
@@ -298,4 +299,88 @@ func TestGetShardDagNode(t *testing.T) {
 	if dagNode := repo.GetShardDagNode(tx.Id()); dagNode == nil {
 		t.Errorf("Cannot get DAG node in shard DB")
 	}
+}
+
+// test update to submitter DAG
+func TestUpdateSubmitter(t *testing.T) {
+	repo, _ := NewDltDb(db.NewInMemDbProvider())
+	tx := dto.TestSignedTransaction("test data")
+	txId := tx.Id()
+
+	// update submitter with new transaction
+	if err := repo.UpdateSubmitter(tx); err != nil {
+		t.Errorf("Failed to add transaction: %s", err)
+	}
+
+	// validate that submitter DAG node was added for the transaction correctly
+	if dagNode, _ := repo.submitterDAGsDb.Get(txId[:]); dagNode == nil {
+		t.Errorf("Did not save DAG node in shard DB")
+	}
+	// validate that submitter history was updated for the transaction correctly
+	key := []byte{}
+	key = append(key, tx.Anchor().Submitter...)
+	key = append(key, ':')
+	key = append(key, common.Uint64ToBytes(tx.Anchor().SubmitterSeq)...)
+	if data, err := repo.submitterHistoryDb.Get(key); err != nil || string(data) != string(txId[:]) {
+		t.Errorf("Did not update submitter history in shard DB")
+	}
+}
+
+// test updating sequential transactions
+func TestUpdateSubmitterInSequence(t *testing.T) {
+	repo, _ := NewDltDb(db.NewInMemDbProvider())
+	tx1 := dto.TestSignedTransaction("test data")
+	tx2 := dto.TestSignedTransaction("test data")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterLastTx = tx1.Id()
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq + 1
+
+	// update submitter with transaction sequence
+	if err := repo.UpdateSubmitter(tx1); err != nil {
+		t.Errorf("Failed to add 1st transaction: %s", err)
+	}
+	if err := repo.UpdateSubmitter(tx2); err != nil {
+		t.Errorf("Failed to add 2nd transaction: %s", err)
+	}
+
+	// validate that submitter DAG node was added for 1st transaction correctly
+	if node := repo.GetSubmitterDagNode(tx1.Id()); node == nil {
+		t.Errorf("Did not save DAG node in shard DB for 1st transaction")
+	} else if node.TxId != tx1.Id() {
+		t.Errorf("Did not update node's TxId for 1st transaction")
+	} else if node.Parent != tx1.Anchor().SubmitterLastTx {
+		t.Errorf("Did not update node's parent for 1st transaction")
+	} else if len(node.Children) == 0 {
+		t.Errorf("Did not update parent node's children list")
+	} else if node.Children[0] != tx2.Id() {
+		t.Errorf("Did add child node to parent node's children list")
+	}
+
+	// validate that shard DAG node was added for 2nd transaction correctly
+	if node := repo.GetSubmitterDagNode(tx2.Id()); node == nil {
+		t.Errorf("Did not save DAG node in shard DB for 2nd transaction")
+	} else if node.TxId != tx2.Id() {
+		t.Errorf("Did not update node's TxId for 2nd transaction")
+	} else if node.Parent != tx1.Id() {
+		t.Errorf("Did not update node's parent for 2nd transaction")
+	}
+}
+
+// test submitter history when present
+func TestGetSubmitterHistory_Present(t *testing.T) {
+	repo, _ := NewDltDb(db.NewInMemDbProvider())
+	tx := dto.TestSignedTransaction("test data")
+
+	// update submitter with new transaction
+	if err := repo.UpdateSubmitter(tx); err != nil {
+		t.Errorf("Failed to add transaction: %s", err)
+	}
+
+	// fetch submitter history for the added transaction's submitter and sequence
+	if node := repo.GetSubmitterHistory(tx.Anchor().Submitter, tx.Anchor().SubmitterSeq); node == nil {
+		t.Errorf("Failed to fetch submitter history")
+	} else if node.TxId != tx.Id() {
+		t.Errorf("fetched incorrect submitter history")
+	}
+
 }

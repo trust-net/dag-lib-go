@@ -24,11 +24,13 @@ func TestTransaction() *transaction {
 
 func TestAnchor() *Anchor {
 	return &Anchor{
-		NodeId:    []byte("test node ID"),
-		ShardId:   []byte("test shard"),
-		Submitter: []byte("test submitter"),
-		ShardSeq:  0x01,
-		Weight:    0x01,
+		NodeId:          []byte("test node ID"),
+		ShardId:         []byte("test shard"),
+		Submitter:       []byte("test submitter"),
+		ShardSeq:        0x01,
+		Weight:          0x01,
+		SubmitterSeq:    0x01,
+		SubmitterLastTx: [64]byte{},
 	}
 }
 

@@ -33,6 +33,10 @@ var key *ecdsa.PrivateKey
 
 var submitter []byte
 
+var lastTx = [64]byte{}
+var lastSeq = uint64(0)
+var dltStack stack.DLT
+
 // Transaction Ops
 type Ops struct {
 	// op code
@@ -79,7 +83,26 @@ func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
 	return tx
 }
 
-func makeTransaction(a *dto.Anchor, opCode uint64, arg interface{}) dto.Transaction {
+func makeTransaction(a *dto.Anchor, opCode uint64, arg interface{}) {
+	if a == nil {
+		fmt.Printf("Error submitting transaction: no anchor!!!\n")
+		return
+	}
+	op := Ops{
+		Code: opCode,
+	}
+	op.Args, _ = common.Serialize(arg)
+	txPayload, _ := common.Serialize(op)
+	tx := sign(dto.NewTransaction(a), txPayload)
+	if err := dltStack.Submit(tx); err != nil {
+		fmt.Printf("Error submitting transaction: %s\n", err)
+	} else {
+		lastTx = tx.Id()
+		lastSeq += 1
+	}
+}
+
+func submitTransaction(a *dto.Anchor, opCode uint64, arg interface{}) dto.Transaction {
 	if a == nil {
 		return nil
 	}
@@ -231,6 +254,7 @@ func txHandler(tx dto.Transaction, state state.State) error {
 
 // main CLI loop
 func cli(dlt stack.DLT) error {
+	dltStack = dlt
 	if err := dlt.Start(); err != nil {
 		return err
 	} else if err := dlt.Register(AppShard, AppName, txHandler); err != nil {
@@ -290,16 +314,14 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, arg := range args {
 								fmt.Printf("adding transaction: create %s %d\n", arg.Name, arg.Value)
-								if err := dlt.Submit(makeTransaction(dlt.Anchor(submitter, 0x00, [64]byte{}), OpCodeCreate, arg)); err != nil {
-									fmt.Printf("Error submitting transaction: %s\n", err)
-								}
+								makeTransaction(dlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeCreate, arg)
 							}
 						}
 					case "info":
 						for wordScanner.Scan() {
 							continue
 						}
-						if a := dlt.Anchor(submitter, 0x00, [64]byte{}); a == nil {
+						if a := dlt.Anchor(submitter, lastSeq+1, lastTx); a == nil {
 							fmt.Printf("failed to get any info...\n")
 						} else {
 							fmt.Printf("ShardId: %s\n", a.ShardId)
@@ -321,9 +343,7 @@ func cli(dlt stack.DLT) error {
 						}
 						if len(arg.Source) != 0 && len(arg.Destination) != 0 && arg.Value > 0 {
 							fmt.Printf("adding transaction: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							if err := dlt.Submit(makeTransaction(dlt.Anchor(submitter, 0x00, [64]byte{}), OpCodeXferValue, arg)); err != nil {
-								fmt.Printf("Error submitting transaction: %s\n", err)
-							}
+							makeTransaction(dlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeXferValue, arg)
 						} else {
 							fmt.Printf("usage: xfer <owned resource name> <xfer value> <recipient resource name>\n")
 						}
@@ -345,17 +365,13 @@ func cli(dlt stack.DLT) error {
 						}
 						if len(arg.Source) != 0 && len(dest1) != 0 && len(dest2) != 0 && arg.Value > 0 {
 							arg.Destination = dest1
-							anchor1 := dlt.Anchor(submitter, 0x00, [64]byte{})
-							anchor2 := dlt.Anchor(submitter, 0x00, [64]byte{})
+							anchor1 := dlt.Anchor(submitter, lastSeq+1, lastTx)
+							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							if err := dlt.Submit(makeTransaction(anchor1, OpCodeXferValue, arg)); err != nil {
-								fmt.Printf("Error submitting transaction: %s\n", err)
-							}
+							makeTransaction(anchor1, OpCodeXferValue, arg)
 							arg.Destination = dest2
 							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							if err := dlt.Submit(makeTransaction(anchor2, OpCodeXferValue, arg)); err != nil {
-								fmt.Printf("Error submitting transaction: %s\n", err)
-							}
+							makeTransaction(anchor2, OpCodeXferValue, arg)
 						} else {
 							fmt.Printf("usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
 						}
@@ -377,17 +393,13 @@ func cli(dlt stack.DLT) error {
 						}
 						if len(arg.Source) != 0 && len(dest1) != 0 && len(dest2) != 0 && arg.Value > 0 {
 							arg.Destination = dest1
-							anchor1 := dlt.Anchor(submitter, 0x00, [64]byte{})
+							anchor1 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							if err := dlt.Submit(makeTransaction(anchor1, OpCodeXferValue, arg)); err != nil {
-								fmt.Printf("Error submitting transaction: %s\n", err)
-							}
+							makeTransaction(anchor1, OpCodeXferValue, arg)
 							arg.Destination = dest2
-							anchor2 := dlt.Anchor(submitter, 0x00, [64]byte{})
+							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							if err := dlt.Submit(makeTransaction(anchor2, OpCodeXferValue, arg)); err != nil {
-								fmt.Printf("Error submitting transaction: %s\n", err)
-							}
+							makeTransaction(anchor2, OpCodeXferValue, arg)
 						} else {
 							fmt.Printf("usage: double <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
 						}
@@ -403,6 +415,7 @@ func cli(dlt stack.DLT) error {
 			fmt.Printf("\n%s", cmdPrompt)
 		}
 	}
+	dltStack = nil
 	return nil
 }
 
