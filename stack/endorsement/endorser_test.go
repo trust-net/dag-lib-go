@@ -24,7 +24,7 @@ func TestTxHandler(t *testing.T) {
 	e, _ := NewEndorser(testDb)
 
 	// send a mock transaction to endorser
-	if err := e.Handle(dto.TestTransaction()); err != nil {
+	if res, err := e.Handle(dto.TestTransaction()); err != nil || res != SUCCESS {
 		t.Errorf("Transacton handling failed: %s", err)
 	}
 
@@ -82,8 +82,13 @@ func TestTxApprover_DoubleSpending(t *testing.T) {
 		t.Errorf("Transacton approval did not fail for double spending")
 	}
 
-	// validate the DLT DB's submitter update was called twice
-	if testDb.UpdateSubmitterCount != 2 {
+	// validate the DLT DB's submitter history was checked twice
+	if testDb.GetSubmitterHistoryCount != 2 {
+		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
+	}
+
+	// validate the DLT DB's submitter update was called only once
+	if testDb.UpdateSubmitterCount != 1 {
 		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
 	}
 }
@@ -136,15 +141,15 @@ func TestTxHandlerBadTransaction(t *testing.T) {
 	e, _ := NewEndorser(testDb)
 
 	// send a nil transaction to endorser
-	if err := e.Handle(nil); err == nil {
+	if res, err := e.Handle(nil); err == nil || res != ERR_INVALID {
 		t.Errorf("Transacton handling did not check for nil transaction")
 	}
 
 	// send a duplicate transaction to endorser
 	tx1 := dto.TestSignedTransaction("test payload")
 	e.Handle(tx1)
-	if err := e.Handle(tx1); err == nil {
-		t.Errorf("Transacton handling did not check for duplicate transaction")
+	if res, err := e.Handle(tx1); err == nil || res != ERR_DUPLICATE {
+		t.Errorf("Transacton handling did not check for duplicate transaction: %d == %s", res, err)
 	}
 
 	// validate that DltDb's AddTx method was called two times
@@ -172,22 +177,27 @@ func TestTxHandler_DoubleSpending(t *testing.T) {
 	tx2.Anchor().ShardId = tx1.Anchor().ShardId
 
 	// send first transaction to endorser
-	if err := e.Handle(tx1); err != nil {
+	if _, err := e.Handle(tx1); err != nil {
 		t.Errorf("Transacton handler failed: %s", err)
 	}
 
 	// send second transaction to endorser
-	if err := e.Handle(tx2); err == nil {
+	if res, err := e.Handle(tx2); err == nil || res != ERR_DOUBLE_SPEND {
 		t.Errorf("Transacton handler did not fail for double spending")
 	}
 
-	// validate that DltDb's AddTx method was called two times
-	if testDb.AddTxCallCount != 2 {
+	// validate the DLT DB's submitter history was checked twice
+	if testDb.GetSubmitterHistoryCount != 2 {
+		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
+	}
+
+	// validate that DltDb's AddTx method was called one times
+	if testDb.AddTxCallCount != 1 {
 		t.Errorf("Incorrect method call count: %d", testDb.AddTxCallCount)
 	}
 
-	// validate the DLT DB's submitter update was called twice
-	if testDb.UpdateSubmitterCount != 2 {
+	// validate the DLT DB's submitter update was called once
+	if testDb.UpdateSubmitterCount != 1 {
 		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
 	}
 }
@@ -206,12 +216,12 @@ func TestTxHandler_RelaxedSequenceRequirements(t *testing.T) {
 	tx2.Anchor().ShardId = []byte("a different shard")
 
 	// send first transaction to endorser
-	if err := e.Handle(tx1); err != nil {
+	if _, err := e.Handle(tx1); err != nil {
 		t.Errorf("Transacton approval failed: %s", err)
 	}
 
 	// send second transaction to endorser
-	if err := e.Handle(tx2); err != nil {
+	if _, err := e.Handle(tx2); err != nil {
 		t.Errorf("Transacton approval failed: %s", err)
 	}
 

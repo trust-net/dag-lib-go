@@ -56,12 +56,12 @@ func (e *mockEndorser) Approve(tx dto.Transaction) error {
 	return e.orig.Approve(tx)
 }
 
-func (e *mockEndorser) Handle(tx dto.Transaction) error {
+func (e *mockEndorser) Handle(tx dto.Transaction) (int, error) {
 	e.TxHandlerCalled = true
 	e.TxId = tx.Id()
 	e.Tx = tx
 	if e.HandlerReturn != nil {
-		return e.HandlerReturn
+		return endorsement.ERR_INVALID, e.HandlerReturn
 	} else {
 		return e.orig.Handle(tx)
 	}

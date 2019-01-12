@@ -8,11 +8,19 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/repo"
 )
 
+const (
+	SUCCESS int = iota
+	ERR_DUPLICATE
+	ERR_DOUBLE_SPEND
+	ERR_ORPHAN
+	ERR_INVALID
+)
+
 type Endorser interface {
 	// populate a transaction Anchor
 	Anchor(*dto.Anchor) error
 	// Handle network transaction
-	Handle(tx dto.Transaction) error
+	Handle(tx dto.Transaction) (int, error)
 	// Approve submitted transaction
 	Approve(tx dto.Transaction) error
 }
@@ -30,20 +38,12 @@ func GenesisSubmitterTx(submitterId []byte) dto.Transaction {
 	return tx
 }
 
-// validate submitter's anchor request details
-func (e *endorser) Anchor(a *dto.Anchor) error {
-	// TBD: lock and unlock
-
-	// submitter sequence should be 1 or higher
-	if a == nil || a.SubmitterSeq < 1 {
-		// this must be special anchor for sync
-		return nil
-	}
-
+// validate an anchor against submitter history
+func (e *endorser) isValid(a *dto.Anchor, tx dto.Transaction) (int, error) {
 	// fetch submitter history for submitter's parent
 	if a.SubmitterSeq > 1 {
 		if parent := e.db.GetSubmitterHistory(a.Submitter, a.SubmitterSeq-1); parent == nil {
-			return fmt.Errorf("Unexpected submitter sequence: %d", a.SubmitterSeq)
+			return ERR_ORPHAN, fmt.Errorf("Unexpected submitter sequence: %d", a.SubmitterSeq)
 		} else {
 			// walk through known shard/tx pairs to check if parent is there
 			found := false
@@ -54,7 +54,7 @@ func (e *endorser) Anchor(a *dto.Anchor) error {
 				}
 			}
 			if !found {
-				return fmt.Errorf("Incorrect submitter parent: %x", a.SubmitterLastTx)
+				return ERR_ORPHAN, fmt.Errorf("Incorrect submitter parent: %x", a.SubmitterLastTx)
 			}
 		}
 	}
@@ -64,41 +64,70 @@ func (e *endorser) Anchor(a *dto.Anchor) error {
 		// walk through known shard/tx pairs to check for double spending
 		for _, pair := range current.ShardTxPairs {
 			if string(pair.ShardId) == string(a.ShardId) {
-				return fmt.Errorf("Double spending attempt for seq: %d, shardId: %x", a.SubmitterSeq, a.ShardId)
+				if tx == nil || tx.Id() != pair.TxId {
+					return ERR_DOUBLE_SPEND, fmt.Errorf("Double spending attempt for seq: %d, shardId: %x", a.SubmitterSeq, a.ShardId)
+				}
 			}
 		}
 	}
 
 	// anchor parameter's look good for submitter
-	return nil
+	return SUCCESS, nil
 }
 
-func (e *endorser) Handle(tx dto.Transaction) error {
+// validate submitter's anchor request details
+func (e *endorser) Anchor(a *dto.Anchor) error {
+	// TBD: lock and unlock
+
+	// submitter sequence should be 1 or higher
+	if a == nil || a.SubmitterSeq < 1 {
+		// this must be special anchor for sync
+		return nil
+	} else if _, err := e.isValid(a, nil); err != nil {
+		return err
+	} else {
+		return nil
+	}
+
+}
+
+func (e *endorser) Handle(tx dto.Transaction) (int, error) {
 	// validate transaction
 	// TBD
 	if tx == nil {
-		return fmt.Errorf("invalid transaction")
+		return ERR_INVALID, fmt.Errorf("invalid transaction")
 	}
 
+	// check transaction against submitter history
+	if res, err := e.isValid(tx.Anchor(), tx); err != nil {
+		return res, err
+	}
+
+	// save the transaction
 	if err := e.db.AddTx(tx); err != nil {
-		return err
+		return ERR_DUPLICATE, err
 	}
 
 	// update submitter's DAG
 	if err := e.db.UpdateSubmitter(tx); err != nil {
-		return err
+		return ERR_DOUBLE_SPEND, err
 	}
 
 	// broadcast transaction
 	// ^^^ this will be done by the controller if there is no error
 
-	return nil
+	return SUCCESS, nil
 }
 
 func (e *endorser) Approve(tx dto.Transaction) error {
 	// validate transaction
 	if tx == nil {
 		return fmt.Errorf("invalid transaction")
+	}
+
+	// check transaction against submitter history
+	if _, err := e.isValid(tx.Anchor(), tx); err != nil {
+		return err
 	}
 
 	// update submitter's history (fails if this is double spending transaction)

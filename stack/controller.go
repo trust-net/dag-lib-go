@@ -230,9 +230,16 @@ func (d *dlt) handshake(peer p2p.Peer) error {
 
 func (d *dlt) handleTransaction(peer p2p.Peer, tx dto.Transaction) error {
 	// send transaction to endorsing layer for handling
-	if err := d.endorser.Handle(tx); err != nil {
+	if res, err := d.endorser.Handle(tx); err != nil {
 		d.logger.Error("Failed to endorse transaction: %s", err)
-		return err
+		// check for failure reason
+		switch res {
+		case endorsement.ERR_DOUBLE_SPEND:
+		// trigger double spending resolution
+		// TBD
+		default:
+			return err
+		}
 	}
 
 	// let sharding layer process transaction
