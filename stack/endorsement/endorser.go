@@ -54,7 +54,7 @@ func (e *endorser) isValid(a *dto.Anchor, tx dto.Transaction) (int, error) {
 				}
 			}
 			if !found {
-				return ERR_ORPHAN, fmt.Errorf("Incorrect submitter parent: %x", a.SubmitterLastTx)
+				return ERR_ORPHAN, fmt.Errorf("Unknown submitter parent: %x", a.SubmitterLastTx)
 			}
 		}
 	}

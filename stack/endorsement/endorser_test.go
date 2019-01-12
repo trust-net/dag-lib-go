@@ -236,6 +236,48 @@ func TestTxHandler_RelaxedSequenceRequirements(t *testing.T) {
 	}
 }
 
+// test that tx handler checks for orphan transaction
+func TestTxHandler_OrphanTx(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	e, _ := NewEndorser(testDb)
+
+	// save a transaction first
+	tx1 := dto.TestSignedTransaction("test data")
+	if _, err := e.Handle(tx1); err != nil {
+		t.Errorf("Transacton handler failed: %s", err)
+	}
+	// reset all counters from saving above transaction
+	testDb.Reset()
+
+	// now create a new transaction with next sequence, but change last tx refer to unknown
+	tx2 := dto.TestSignedTransaction("test data")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq + 1
+	tx2.Anchor().ShardId = tx1.Anchor().ShardId
+	// force last tx reference to something not in DB
+	tx2.Anchor().SubmitterLastTx = dto.RandomHash()
+
+	// send second transaction to endorser
+	if res, err := e.Handle(tx2); err == nil || res != ERR_ORPHAN {
+		t.Errorf("Transacton handler did not fail for orphan")
+	}
+
+	// validate the DLT DB's submitter history was checked only once (to lookup parent)
+	if testDb.GetSubmitterHistoryCount != 1 {
+		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
+	}
+
+	// validate that DltDb's AddTx method was not called at all
+	if testDb.AddTxCallCount != 0 {
+		t.Errorf("Incorrect method call count: %d", testDb.AddTxCallCount)
+	}
+
+	// validate the DLT DB's submitter update was not called at all
+	if testDb.UpdateSubmitterCount != 0 {
+		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
+	}
+}
+
 // anchor method validates that submitter is using correct sequence and parent transaction in anchor request
 func TestAnchor_ValidSubmitterRequest(t *testing.T) {
 	testDb := repo.NewMockDltDb()

@@ -237,6 +237,9 @@ func (d *dlt) handleTransaction(peer p2p.Peer, tx dto.Transaction) error {
 		case endorsement.ERR_DOUBLE_SPEND:
 		// trigger double spending resolution
 		// TBD
+		case endorsement.ERR_ORPHAN:
+		// trigger submitter sync
+		// TBD
 		default:
 			return err
 		}
