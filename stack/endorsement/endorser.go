@@ -88,13 +88,12 @@ func (e *endorser) Anchor(a *dto.Anchor) error {
 	} else {
 		return nil
 	}
-
 }
 
 func (e *endorser) Handle(tx dto.Transaction) (int, error) {
 	// validate transaction
 	// TBD
-	if tx == nil {
+	if tx == nil || tx.Anchor() == nil || tx.Anchor().SubmitterSeq < 1 {
 		return ERR_INVALID, fmt.Errorf("invalid transaction")
 	}
 
@@ -121,7 +120,7 @@ func (e *endorser) Handle(tx dto.Transaction) (int, error) {
 
 func (e *endorser) Approve(tx dto.Transaction) error {
 	// validate transaction
-	if tx == nil {
+	if tx == nil || tx.Anchor() == nil || tx.Anchor().SubmitterSeq < 1 {
 		return fmt.Errorf("invalid transaction")
 	}
 

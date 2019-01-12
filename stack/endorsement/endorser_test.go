@@ -24,8 +24,13 @@ func TestTxHandler(t *testing.T) {
 	e, _ := NewEndorser(testDb)
 
 	// send a mock transaction to endorser
-	if res, err := e.Handle(dto.TestTransaction()); err != nil || res != SUCCESS {
+	if res, err := e.Handle(dto.TestSignedTransaction("test data")); err != nil || res != SUCCESS {
 		t.Errorf("Transacton handling failed: %s", err)
+	}
+
+	// validate the DLT DB's submitter history was checked
+	if testDb.GetSubmitterHistoryCount != 1 {
+		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
 	}
 
 	// validate that DltDb's AddTx method was called
@@ -44,8 +49,13 @@ func TestTxApprover(t *testing.T) {
 	e, _ := NewEndorser(testDb)
 
 	// send a mock transaction to endorser
-	if err := e.Approve(dto.TestTransaction()); err != nil {
+	if err := e.Approve(dto.TestSignedTransaction("test data")); err != nil {
 		t.Errorf("Transacton approval failed: %s", err)
+	}
+
+	// validate the DLT DB's submitter history was checked
+	if testDb.GetSubmitterHistoryCount != 1 {
+		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
 	}
 
 	// validate the DLT DB's submitter was updated
