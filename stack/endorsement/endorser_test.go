@@ -59,6 +59,64 @@ func TestTxApprover(t *testing.T) {
 	}
 }
 
+// test that tx approver checks for double spending transaction
+func TestTxApprover_DoubleSpending(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	e, _ := NewEndorser(testDb)
+
+	// create 2 double spending transactions using same submitter/seq/shard
+	tx1 := dto.TestSignedTransaction("test data")
+	tx2 := dto.TestSignedTransaction("test data")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	// make sure shard ID is same, for double spending
+	tx2.Anchor().ShardId = tx1.Anchor().ShardId
+
+	// send first transaction to endorser
+	if err := e.Approve(tx1); err != nil {
+		t.Errorf("Transacton approval failed: %s", err)
+	}
+
+	// send second transaction to endorser
+	if err := e.Approve(tx2); err == nil {
+		t.Errorf("Transacton approval did not fail for double spending")
+	}
+
+	// validate the DLT DB's submitter update was called twice
+	if testDb.UpdateSubmitterCount != 2 {
+		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
+	}
+}
+
+// test that tx approver allows for relaxed sequence requirements
+func TestTxApprover_RelaxedSequenceRequirements(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	e, _ := NewEndorser(testDb)
+
+	// create 2 double spending transactions using same submitter/seq, but different shard
+	tx1 := dto.TestSignedTransaction("test data")
+	tx2 := dto.TestSignedTransaction("test data")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	// make sure shard ID is different, for relaxed sequence requirement
+	tx2.Anchor().ShardId = []byte("a different shard")
+
+	// send first transaction to endorser
+	if err := e.Approve(tx1); err != nil {
+		t.Errorf("Transacton approval failed: %s", err)
+	}
+
+	// send second transaction to endorser
+	if err := e.Approve(tx2); err != nil {
+		t.Errorf("Transacton approval failed: %s", err)
+	}
+
+	// validate the DLT DB's submitter update was called twice
+	if testDb.UpdateSubmitterCount != 2 {
+		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
+	}
+}
+
 func TestTxHandlerSavesTransaction(t *testing.T) {
 	testDb := repo.NewMockDltDb()
 	e, _ := NewEndorser(testDb)
@@ -92,6 +150,79 @@ func TestTxHandlerBadTransaction(t *testing.T) {
 	// validate that DltDb's AddTx method was called two times
 	if testDb.AddTxCallCount != 2 {
 		t.Errorf("Incorrect method call count: %d", testDb.AddTxCallCount)
+	}
+
+	// validate the DLT DB's submitter update was called only once
+	if testDb.UpdateSubmitterCount != 1 {
+		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
+	}
+}
+
+// test that tx handler checks for double spending transaction
+func TestTxHandler_DoubleSpending(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	e, _ := NewEndorser(testDb)
+
+	// create 2 double spending transactions using same submitter/seq/shard
+	tx1 := dto.TestSignedTransaction("test data")
+	tx2 := dto.TestSignedTransaction("test data")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	// make sure shard ID is same, for double spending
+	tx2.Anchor().ShardId = tx1.Anchor().ShardId
+
+	// send first transaction to endorser
+	if err := e.Handle(tx1); err != nil {
+		t.Errorf("Transacton handler failed: %s", err)
+	}
+
+	// send second transaction to endorser
+	if err := e.Handle(tx2); err == nil {
+		t.Errorf("Transacton handler did not fail for double spending")
+	}
+
+	// validate that DltDb's AddTx method was called two times
+	if testDb.AddTxCallCount != 2 {
+		t.Errorf("Incorrect method call count: %d", testDb.AddTxCallCount)
+	}
+
+	// validate the DLT DB's submitter update was called twice
+	if testDb.UpdateSubmitterCount != 2 {
+		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
+	}
+}
+
+// test that tx handler allows for relaxed sequence requirements
+func TestTxHandler_RelaxedSequenceRequirements(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	e, _ := NewEndorser(testDb)
+
+	// create 2 double spending transactions using same submitter/seq, but different shard
+	tx1 := dto.TestSignedTransaction("test data")
+	tx2 := dto.TestSignedTransaction("test data")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	// make sure shard ID is different, for relaxed sequence requirement
+	tx2.Anchor().ShardId = []byte("a different shard")
+
+	// send first transaction to endorser
+	if err := e.Handle(tx1); err != nil {
+		t.Errorf("Transacton approval failed: %s", err)
+	}
+
+	// send second transaction to endorser
+	if err := e.Handle(tx2); err != nil {
+		t.Errorf("Transacton approval failed: %s", err)
+	}
+
+	// validate that DltDb's AddTx method was called two times
+	if testDb.AddTxCallCount != 2 {
+		t.Errorf("Incorrect method call count: %d", testDb.AddTxCallCount)
+	}
+
+	// validate the DLT DB's submitter update was called twice
+	if testDb.UpdateSubmitterCount != 2 {
+		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
 	}
 }
 
@@ -204,16 +335,55 @@ func TestAnchor_DoubleSpending(t *testing.T) {
 	}
 	testDb.Reset()
 
-	// create a new submitter anchor with pre-populated transaction from parent above, but same seq as the child
+	// create a new submitter anchor with same submitter ID, Seq and Shard ID
 	a := &dto.Anchor{
 		Submitter:       child.Anchor().Submitter,
 		SubmitterSeq:    child.Anchor().SubmitterSeq,
 		SubmitterLastTx: parent.Id(),
+		ShardId:         child.Anchor().ShardId,
 	}
 
 	// send anchor for validation to endorser
 	if err := e.Anchor(a); err == nil {
 		t.Errorf("Anchor validation did not check double spending")
+	}
+
+	// validate that submitter history was fetched twice, once for the parent and then for current sequence
+	if testDb.GetSubmitterHistoryCount != 2 {
+		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
+	}
+}
+
+// anchor method allows relaxed submitter sequence requirements
+func TestAnchor_RelaxedSequenceRequirements(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	e, _ := NewEndorser(testDb)
+
+	// pre-populate DLT DB with a parent/child transaction sequence
+	parent := dto.TestSignedTransaction("transaction 1")
+	if err := testDb.UpdateSubmitter(parent); err != nil {
+		t.Errorf("Failed to update parent transaction: %s", err)
+	}
+	child := dto.TestSignedTransaction("test data")
+	child.Anchor().Submitter = parent.Anchor().Submitter
+	child.Anchor().SubmitterLastTx = parent.Id()
+	child.Anchor().SubmitterSeq = parent.Anchor().SubmitterSeq + 1
+	if err := testDb.UpdateSubmitter(child); err != nil {
+		t.Errorf("Failed to update child transaction: %s", err)
+	}
+	testDb.Reset()
+
+	// create a new submitter anchor with same submitter ID, Seq but a different Shard ID
+	a := &dto.Anchor{
+		Submitter:       child.Anchor().Submitter,
+		SubmitterSeq:    child.Anchor().SubmitterSeq,
+		SubmitterLastTx: parent.Id(),
+		ShardId:         []byte("a different shard"),
+	}
+
+	// send anchor for validation to endorser
+	if err := e.Anchor(a); err != nil {
+		t.Errorf("Anchor validation did not allow different shard with same sequence")
 	}
 
 	// validate that submitter history was fetched twice, once for the parent and then for current sequence

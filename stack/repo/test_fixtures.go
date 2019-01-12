@@ -51,13 +51,13 @@ func (d *mockDb) GetShardDagNode(id [64]byte) *DagNode {
 	d.GetShardDagNodeCallCount += 1
 	return d.db.GetShardDagNode(id)
 }
+//
+//func (d *mockDb) GetSubmitterDagNode(id [64]byte) *DagNode {
+//	d.GetSubmitterDagNodeCallCount += 1
+//	return d.db.GetSubmitterDagNode(id)
+//}
 
-func (d *mockDb) GetSubmitterDagNode(id [64]byte) *DagNode {
-	d.GetSubmitterDagNodeCallCount += 1
-	return d.db.GetSubmitterDagNode(id)
-}
-
-func (d *mockDb) GetSubmitterHistory(id []byte, seq uint64) *DagNode {
+func (d *mockDb) GetSubmitterHistory(id []byte, seq uint64) *SubmitterHistory {
 	d.GetSubmitterHistoryCount += 1
 	return d.db.GetSubmitterHistory(id, seq)
 }

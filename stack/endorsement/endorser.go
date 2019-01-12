@@ -44,14 +44,29 @@ func (e *endorser) Anchor(a *dto.Anchor) error {
 	if a.SubmitterSeq > 1 {
 		if parent := e.db.GetSubmitterHistory(a.Submitter, a.SubmitterSeq-1); parent == nil {
 			return fmt.Errorf("Unexpected submitter sequence: %d", a.SubmitterSeq)
-		} else if parent.TxId != a.SubmitterLastTx {
-			return fmt.Errorf("Incorrect submitter parent: %x", a.SubmitterLastTx)
+		} else {
+			// walk through known shard/tx pairs to check if parent is there
+			found := false
+			for _, pair := range parent.ShardTxPairs {
+				if pair.TxId == a.SubmitterLastTx {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("Incorrect submitter parent: %x", a.SubmitterLastTx)
+			}
 		}
 	}
 
-	// ensure this is not a double spending transaction (i.e. no other transaction with same seq)
-	if node := e.db.GetSubmitterHistory(a.Submitter, a.SubmitterSeq); node != nil {
-		return fmt.Errorf("Double spending transaction: %x", node.TxId)
+	// ensure this is not a double spending transaction (i.e. no other transaction with same seq and shard)
+	if current := e.db.GetSubmitterHistory(a.Submitter, a.SubmitterSeq); current != nil {
+		// walk through known shard/tx pairs to check for double spending
+		for _, pair := range current.ShardTxPairs {
+			if string(pair.ShardId) == string(a.ShardId) {
+				return fmt.Errorf("Double spending attempt for seq: %d, shardId: %x", a.SubmitterSeq, a.ShardId)
+			}
+		}
 	}
 
 	// anchor parameter's look good for submitter
@@ -86,7 +101,7 @@ func (e *endorser) Approve(tx dto.Transaction) error {
 		return fmt.Errorf("invalid transaction")
 	}
 
-	// update submitter's DAG
+	// update submitter's history (fails if this is double spending transaction)
 	if err := e.db.UpdateSubmitter(tx); err != nil {
 		return err
 	}
