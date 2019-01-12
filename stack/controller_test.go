@@ -6,6 +6,7 @@ import (
 	"github.com/trust-net/dag-lib-go/log"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
+	"github.com/trust-net/dag-lib-go/stack/repo"
 	"github.com/trust-net/dag-lib-go/stack/shard"
 	"github.com/trust-net/dag-lib-go/stack/state"
 	"testing"
@@ -13,11 +14,18 @@ import (
 )
 
 func initMocks() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P) {
+	stack, sharder, endorser, mockP2PLayer, _ := initMocksAndDb()
+	return stack, sharder, endorser, mockP2PLayer
+}
+
+func initMocksAndDb() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P, *repo.MockDltDb) {
 	// supress all logs
 	log.SetLogLevel(log.NONE)
 
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+	mockDb := repo.NewMockDltDb()
+	stack.db = mockDb
 
 	// inject mock p2p module into stack
 	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
@@ -39,8 +47,9 @@ func initMocks() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P) {
 	sharder.Reset()
 	endorser.Reset()
 	mockP2PLayer.Reset()
+	mockDb.Reset()
 
-	return stack, sharder, endorser, mockP2PLayer
+	return stack, sharder, endorser, mockP2PLayer, mockDb
 }
 
 // initialize DLT stack and validate
@@ -1240,11 +1249,12 @@ func TestPeerListnerGeneratesEventForShardAncestorResponseMsg(t *testing.T) {
 // test stack controller event listener handles RECV_ShardAncestorResponseMsg when all hashesh are unknown
 func TestRECV_ShardAncestorResponseMsg_AllUnknown(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
 	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1284,6 +1294,13 @@ func TestRECV_ShardAncestorResponseMsg_AllUnknown(t *testing.T) {
 		t.Errorf("did not get state from peer to validate response")
 	}
 
+	// we should have checked for known ancestors from shard DAG and not tx DB
+	if testDb.GetTxCallCount != 0 {
+		t.Errorf("should not have called GetTx")
+	} else if testDb.GetShardDagNodeCallCount != 10 {
+		t.Errorf("Incorrect number of calls to GetShardDagNode: %d", testDb.GetShardDagNodeCallCount)
+	}
+
 	// we should have set the peer state to last of the unknown ancestors
 	if data := peer.GetState(int(RECV_ShardAncestorResponseMsg)); data == nil {
 		t.Errorf("controller did not save last hash for ancestor response message")
@@ -1307,11 +1324,12 @@ func TestRECV_ShardAncestorResponseMsg_AllUnknown(t *testing.T) {
 // test stack controller event listener handles RECV_ShardAncestorResponseMsg when last hash state is not correct
 func TestRECV_ShardAncestorResponseMsg_IncorrectState(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
 	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1351,6 +1369,11 @@ func TestRECV_ShardAncestorResponseMsg_IncorrectState(t *testing.T) {
 		t.Errorf("did not get state from peer to validate response")
 	}
 
+	// we should NOT have checked for known ancestors from shard DAG
+	if testDb.GetShardDagNodeCallCount != 0 {
+		t.Errorf("should not have called GetShardDagNode")
+	}
+
 	// we should not have changed the peer state
 	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)).([64]byte); state != startHash {
 		t.Errorf("controller changed start hash for incorrect state:\n%x\nExpected:\n%x", state, startHash)
@@ -1366,11 +1389,12 @@ func TestRECV_ShardAncestorResponseMsg_IncorrectState(t *testing.T) {
 // test stack controller event listener handles RECV_ShardAncestorResponseMsg there is a known common ancestor
 func TestRECV_ShardAncestorResponseMsg_KnownAncestor(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
 	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1410,6 +1434,11 @@ func TestRECV_ShardAncestorResponseMsg_KnownAncestor(t *testing.T) {
 	// we should have fetched the peer state to validate ancestor response's starting hash
 	if !peer.GetStateCalled {
 		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should have checked for known ancestors from shard DAG
+	if testDb.GetShardDagNodeCallCount != 6 {
+		t.Errorf("Incorrect number of calls to GetShardDagNode: %d", testDb.GetShardDagNodeCallCount)
 	}
 
 	// we should have set the peer state to last known common ancestor for RECV_ShardAncestorResponseMsg state
@@ -1756,11 +1785,12 @@ func TestPeerListnerGeneratesEventForShardChildrenResponseMsg(t *testing.T) {
 // test stack controller event listener handles RECV_ShardChildrenResponseMsg when Parent hash is unexpected
 func TestRECV_ShardChildrenResponseMsg_UnexpectedHash(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
 	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1801,6 +1831,11 @@ func TestRECV_ShardChildrenResponseMsg_UnexpectedHash(t *testing.T) {
 		t.Errorf("did not get state from peer to validate response")
 	}
 
+	// we should NOT have checked for known child from shard DAG
+	if testDb.GetShardDagNodeCallCount != 0 {
+		t.Errorf("should not have called GetShardDagNode")
+	}
+
 	// we should not have changed the peer state
 	if state := peer.GetState(int(RECV_ShardChildrenResponseMsg)).([64]byte); state != tx1.Id() {
 		t.Errorf("controller changed start hash for incorrect state:\n%x\nExpected:\n%x", state, tx1.Id())
@@ -1820,11 +1855,12 @@ func TestRECV_ShardChildrenResponseMsg_UnexpectedHash(t *testing.T) {
 // test stack controller event listener handles RECV_ShardChildrenResponseMsg when Parent hash is as expected
 func TestRECV_ShardChildrenResponseMsg_ExpectedHash(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
 	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1865,6 +1901,13 @@ func TestRECV_ShardChildrenResponseMsg_ExpectedHash(t *testing.T) {
 		t.Errorf("did not get state from peer to validate response")
 	}
 
+	// we should have checked for known children from shard DAG and not tx DB
+	if testDb.GetTxCallCount != 0 {
+		t.Errorf("should not have called GetTx")
+	} else if testDb.GetShardDagNodeCallCount != 5 {
+		t.Errorf("Incorrect number of calls to GetShardDagNode: %d", testDb.GetShardDagNodeCallCount)
+	}
+
 	// we should have changed the peer state to null so that no further children response can be processed
 	if state := peer.GetState(int(RECV_ShardChildrenResponseMsg)).([64]byte); state != [64]byte{} {
 		t.Errorf("controller did not change start hash, current:\n%x\nExpected:\n%x", state, [64]byte{})
@@ -1889,7 +1932,7 @@ func TestRECV_ShardChildrenResponseMsg_ExpectedHash(t *testing.T) {
 // test stack controller event listener handles RECV_ShardChildrenResponseMsg when one of the children is already known
 func TestRECV_ShardChildrenResponseMsg_KnownChild(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
 	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, [64]byte{}), "test payload1")
@@ -1898,6 +1941,7 @@ func TestRECV_ShardChildrenResponseMsg_KnownChild(t *testing.T) {
 	// submit another transactions to add child to local shard's Anchor
 	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x02, tx1.Id()), "test payload2")
 	stack.Submit(tx2)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1939,6 +1983,11 @@ func TestRECV_ShardChildrenResponseMsg_KnownChild(t *testing.T) {
 	// we should have fetched the peer state to validate ancestor response's starting hash
 	if !peer.GetStateCalled {
 		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should have checked for known child from shard DAG
+	if testDb.GetShardDagNodeCallCount != 5 {
+		t.Errorf("Incorrect number of calls to GetShardDagNode: %d", testDb.GetShardDagNodeCallCount)
 	}
 
 	// we should have changed the peer state to null so that no further children response can be processed

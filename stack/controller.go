@@ -338,8 +338,8 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				// walk through each ancestor to check if it's known common ancestor
 				found, i := false, 0
 				for ; !found && i < len(msg.Ancestors); i++ {
-					// look up ancestor hash in DB
-					found = d.db.GetTx(msg.Ancestors[i]) != nil
+					// look up ancestor hash in shard DAG
+					found = d.db.GetShardDagNode(msg.Ancestors[i]) != nil
 				}
 				if !found && i > 0 {
 					// did not find any commone ancestor, so continue walking up the DAG
@@ -391,7 +391,7 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			} else {
 				// walk through each child to check if it's unknown, then add to child queue
 				for _, child := range msg.Children {
-					if d.db.GetTx(child) == nil {
+					if d.db.GetShardDagNode(child) == nil {
 						if err := peer.ShardChildrenQ().Push(child); err != nil {
 							d.logger.Debug("Failed to add child to shard queue: %s", err)
 							// EndOfSync
