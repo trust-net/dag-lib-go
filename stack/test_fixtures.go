@@ -167,9 +167,11 @@ type mockPeer struct {
 	SeenCalled       bool
 	ReadMsgCalled    bool
 	//	states           map[int]interface{}
-	GetStateCalled          bool
-	SetStateCalled          bool
-	ShardChildrenQCallCount int
+	GetStateCalled            bool
+	SetStateCalled            bool
+	ShardChildrenQCallCount   int
+	ToBeFetchedStackPushCount int
+	ToBeFetchedStackPopCount  int
 }
 
 func NewMockPeer(mockConn devp2p.MsgReadWriter) *mockPeer {
@@ -254,4 +256,14 @@ func (p *mockPeer) GetState(stateId int) interface{} {
 func (p *mockPeer) ShardChildrenQ() repo.Queue {
 	p.ShardChildrenQCallCount += 1
 	return p.peer.ShardChildrenQ()
+}
+
+func (p *mockPeer) ToBeFetchedStackPush(tx dto.Transaction) error {
+	p.ToBeFetchedStackPushCount += 1
+	return p.peer.ToBeFetchedStackPush(tx)
+}
+
+func (p *mockPeer) ToBeFetchedStackPop() dto.Transaction {
+	p.ToBeFetchedStackPopCount += 1
+	return p.peer.ToBeFetchedStackPop()
 }

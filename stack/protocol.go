@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 )
 
@@ -35,6 +36,10 @@ const (
 	TxShardChildResponseMsgCode
 	// force a shard sync during app registration
 	ForceShardSyncMsgCode
+	// submitter history request message
+	SubmitterHistoryRequestMsgCode
+	// submitter history response message
+	SubmitterHistoryResponseMsgCode
 	// ProtocolLength should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength
@@ -113,7 +118,8 @@ type ShardSyncMsg struct {
 }
 
 func (m *ShardSyncMsg) Id() []byte {
-	return m.Anchor.Signature
+	id := []byte("ShardSyncMsg")
+	return append(id, m.Anchor.Signature...)
 }
 
 func (m *ShardSyncMsg) Code() uint64 {
@@ -123,6 +129,28 @@ func (m *ShardSyncMsg) Code() uint64 {
 func NewShardSyncMsg(anchor *dto.Anchor) *ShardSyncMsg {
 	return &ShardSyncMsg{
 		Anchor: anchor,
+	}
+}
+
+type SubmitterHistoryRequestMsg struct {
+	Submitter []byte
+	Seq       uint64
+}
+
+func (m *SubmitterHistoryRequestMsg) Id() []byte {
+	id := []byte("SubmitterSyncMsg")
+	id = append(id, common.Uint64ToBytes(m.Seq)...)
+	return append(id, m.Submitter...)
+}
+
+func (m *SubmitterHistoryRequestMsg) Code() uint64 {
+	return SubmitterHistoryRequestMsgCode
+}
+
+func NewSubmitterHistoryRequestMsg(anchor *dto.Anchor) *SubmitterHistoryRequestMsg {
+	return &SubmitterHistoryRequestMsg{
+		Submitter: anchor.Submitter,
+		Seq:       anchor.SubmitterSeq - 1,
 	}
 }
 

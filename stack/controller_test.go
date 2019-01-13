@@ -649,6 +649,241 @@ func TestRECV_NewTxBlockMsgEvent(t *testing.T) {
 	}
 }
 
+// test stack controller event listener handles RECV_NewTxBlockMsg correctly for a duplicate transaction
+func TestRECV_NewTxBlockMsgEvent_Duplicate(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
+	stack.Submit(tx)
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+	testDb.Reset()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// now emit RECV_NewTxBlockMsg event using same transaction
+	events <- newControllerEvent(RECV_NewTxBlockMsg, tx)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle new transaction
+
+	// verify that endorser gets called for network message
+	if !endorser.TxHandlerCalled {
+		t.Errorf("Endorser did not get called for network transaction")
+	}
+	if endorser.TxId != tx.Id() {
+		t.Errorf("Endorser transaction does not match network transaction")
+	}
+
+	// sharding layer should not have be asked to handle duplicate transaction
+	if sharder.TxHandlerCalled {
+		t.Errorf("DLT stack controller should not call sharding layer for duplicate transaction")
+	}
+
+	// we should NOT have broadcasted message
+	if p2pLayer.DidBroadcast {
+		t.Errorf("Listener should not froward duplicate network transaction")
+	}
+
+	// we should NOT disconnect for duplicate transaction
+	if peer.DisconnectCalled {
+		t.Errorf("Listener should not disconnect peer for duplicate network transaction")
+	}
+}
+
+// test stack controller event listener handles RECV_NewTxBlockMsg correctly for a duplicate transaction
+func TestRECV_NewTxBlockMsgEvent_DoubleSpend(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
+	stack.Submit(TestAnchoredTransaction(a, "test payload1"))
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+	testDb.Reset()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// now emit RECV_NewTxBlockMsg event using different transaction using same submitter/seq/shard
+	dblTx := TestAnchoredTransaction(a, "test payload1")
+	events <- newControllerEvent(RECV_NewTxBlockMsg, dblTx)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle new transaction
+	// when transaction is double spending
+
+	// verify that endorser gets called for network message
+	if !endorser.TxHandlerCalled {
+		t.Errorf("Endorser did not get called for network transaction")
+	}
+	if endorser.TxId != dblTx.Id() {
+		t.Errorf("Endorser transaction does not match network transaction")
+	}
+
+	// sharding layer should not have be asked to handle double spending transaction
+	if sharder.TxHandlerCalled {
+		t.Errorf("DLT stack controller should not call sharding layer for double spending transaction")
+	}
+
+	// we should NOT have broadcasted message
+	if p2pLayer.DidBroadcast {
+		t.Errorf("Listener should not froward double spending network transaction")
+	}
+
+	// we should disconnect for double spending transaction
+	if !peer.DisconnectCalled {
+		t.Errorf("Listener should disconnect peer for double spending network transaction")
+	}
+}
+
+// test stack controller event listener handles RECV_NewTxBlockMsg correctly for unknown submitter last transaction
+func TestRECV_NewTxBlockMsgEvent_UnknownLastTx(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
+	stack.Submit(TestAnchoredTransaction(a, "test payload1"))
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+	testDb.Reset()
+
+	log.SetLogLevel(log.DEBUG)
+	defer log.SetLogLevel(log.NONE)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// now emit RECV_NewTxBlockMsg event using an unknown last submitter transaction
+	a.SubmitterSeq += 1
+	a.SubmitterLastTx = dto.RandomHash()
+	orphTx := TestAnchoredTransaction(a, "test payload2")
+	events <- newControllerEvent(RECV_NewTxBlockMsg, orphTx)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle new transaction
+	// when submitter's last transaction is not known
+
+	// verify that endorser gets called for network message
+	if !endorser.TxHandlerCalled {
+		t.Errorf("Endorser did not get called for network transaction")
+	}
+	if endorser.TxId != orphTx.Id() {
+		t.Errorf("Endorser transaction does not match network transaction")
+	}
+
+	// sharding layer should not have be asked to handle transaction
+	if sharder.TxHandlerCalled {
+		t.Errorf("DLT stack controller should not call sharding layer for unknown last submitter transaction")
+	}
+
+	// we should NOT have broadcasted message
+	if p2pLayer.DidBroadcast {
+		t.Errorf("Listener should not froward network transaction when submitter's last transaction is unknown")
+	}
+
+	// we should not disconnect for transaction
+	if peer.DisconnectCalled {
+		t.Errorf("Listener should not disconnect peer when submitter's last transaction is unknown")
+	}
+
+	// we should have pushed the orphan transaction into ToBeFetchedStack for later processing
+	if peer.ToBeFetchedStackPushCount == 0 {
+		t.Errorf("controller did not save orphan tx for later processing")
+	}
+
+	// we should have added the orphan submitter tx to stack
+	if tx := peer.ToBeFetchedStackPop(); tx == nil || tx.Id() != orphTx.Id() {
+		t.Errorf("saved orphan tx incorrect")
+	}
+
+	// we should have sent the submitter sync message
+	if !peer.SendCalled {
+		t.Errorf("did not send submitter sync message to peer")
+	} else if peer.SendMsgCode != SubmitterHistoryRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if string(peer.SendMsg.(*SubmitterHistoryRequestMsg).Submitter) != string(a.Submitter) {
+		t.Errorf("Incorrect SubmitterHistoryRequestMsg Submitter: %s", peer.SendMsg.(*SubmitterHistoryRequestMsg).Submitter)
+	} else if peer.SendMsg.(*SubmitterHistoryRequestMsg).Seq != a.SubmitterSeq-1 {
+		t.Errorf("Incorrect SubmitterHistoryRequestMsg Sequence: %d", peer.SendMsg.(*SubmitterHistoryRequestMsg).Seq)
+	}
+}
+
+// stack controller listner generates RECV_SubmitterHistoryRequestMsg event for SubmitterHistoryRequestMsg message
+func TestPeerListnerGeneratesEventForSubmitterHistoryRequestMsg(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// setup mock connection to send a SubmitterHistoryRequestMsg followed by clean shutdown
+	mockConn.NextMsg(SubmitterHistoryRequestMsgCode, &SubmitterHistoryRequestMsg{})
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	finished := checkForEventCode(RECV_SubmitterHistoryRequestMsg, events)
+
+	// now call stack's listener
+	if err := stack.listener(peer, events); err != nil {
+		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// wait for event listener to process
+	result := <-finished
+
+	// check if listener generate correct event
+	if !result.seenMsgEvent {
+		t.Errorf("Event listener did not generate RECV_SubmitterHistoryRequestMsg event!!!")
+	}
+}
+
 // test stack controller event listener handles RECV_ShardSyncMsg correctly when remote weight is more
 func TestRECV_ShardSyncMsgEvent_RemoteHeavy(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
@@ -2172,9 +2407,6 @@ func TestRECV_TxShardChildRequestMsg_KnownHash(t *testing.T) {
 		stack.peerEventsListener(peer, events)
 		finished <- struct{}{}
 	}()
-
-	//	log.SetLogLevel(log.DEBUG)
-	//	defer log.SetLogLevel(log.NONE)
 
 	// build a transaction request with shard children for known hash
 	msg := &TxShardChildRequestMsg{

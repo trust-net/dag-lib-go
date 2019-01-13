@@ -150,8 +150,7 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 	}
 
 	// next in line process with endorsement layer
-	// TBD: below needs to change to a different method that will check whether transaction
-	// has correct TxAnchor in the submitted transaction
+	// will check whether transaction has correct TxAnchor in the submitted transaction
 	if err := d.endorser.Approve(tx); err != nil {
 		d.logger.Debug("Submitted transaction failed to approve at endorser: %s", err)
 		return err
@@ -228,18 +227,39 @@ func (d *dlt) handshake(peer p2p.Peer) error {
 	return nil
 }
 
-func (d *dlt) handleTransaction(peer p2p.Peer, tx dto.Transaction) error {
+func (d *dlt) handleTransaction(peer p2p.Peer, tx dto.Transaction, allowDupe bool) error {
 	// send transaction to endorsing layer for handling
 	if res, err := d.endorser.Handle(tx); err != nil {
-		d.logger.Error("Failed to endorse transaction: %s", err)
 		// check for failure reason
 		switch res {
 		case endorsement.ERR_DOUBLE_SPEND:
-		// trigger double spending resolution
-		// TBD
+			// trigger double spending resolution
+			// TBD
+
+			// disconnect peer
+			d.logger.Error("Disconnect peer due to double spending error: %s", err)
+			peer.Disconnect()
+			return err
+		case endorsement.ERR_DUPLICATE:
+			// continue if dupe's are allowed, e.g. during sync
+			if !allowDupe {
+				// we don't want to disconnect, since duplicate could happen if some other peer already forwarded the transaction
+				return err
+			}
 		case endorsement.ERR_ORPHAN:
-		// trigger submitter sync
-		// TBD
+			// save the orphan transaction for later processing
+			if err := peer.ToBeFetchedStackPush(tx); err != nil {
+				return err
+			}
+			// trigger submitter sync
+			req := NewSubmitterHistoryRequestMsg(tx.Anchor())
+			d.logger.Debug("Initiating submitter sync for Submitter/Seq: %x/%d", req.Submitter, req.Seq)
+			// save the request hash into peer's state to validate ancestors response
+			peer.SetState(int(RECV_SubmitterHistoryRequestMsg), req.Id())
+			// send the submitter history request to peer
+			peer.Send(req.Id(), req.Code(), req)
+
+			return err
 		default:
 			return err
 		}
@@ -270,7 +290,12 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			// check if transaction's parent is known
 			if tx := e.data.(dto.Transaction); d.db.GetTx(tx.Anchor().ShardParent) != nil {
 				// parent is known, so process normally
-				d.handleTransaction(peer, tx)
+				if err := d.handleTransaction(peer, tx, false); err != nil {
+					d.logger.Debug("Failed to handle network transaction: %s", err)
+					// TBD: should we disconnect from peer?
+					// let the handler decide based on error type
+					break
+				}
 			} else {
 				// make sure that sharder has genesis for unknown transaction's shard
 				d.sharder.SyncAnchor(tx.Anchor().ShardId)
@@ -470,7 +495,7 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				d.isSeen(tx.Id())
 
 				// handle transaction for each layer
-				if err := d.handleTransaction(peer, tx); err == nil {
+				if err := d.handleTransaction(peer, tx, true); err == nil {
 					// walk through each child to check if it's unknown, then add to child queue
 					for _, child := range msg.Children {
 						if d.db.GetTx(child) == nil {
@@ -614,7 +639,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 				d.logger.Debug("Failed to decode message: %s", err)
 				return err
 			} else {
-				// emit a RECV_ShardAncestorRequestMsg event
+				// emit a RECV_ShardChildrenRequestMsg event
 				events <- newControllerEvent(RECV_ShardChildrenRequestMsg, m)
 			}
 
@@ -625,7 +650,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 				d.logger.Debug("Failed to decode message: %s", err)
 				return err
 			} else {
-				// emit a RECV_ShardAncestorRequestMsgCode event
+				// emit a RECV_ShardChildrenResponseMsg event
 				events <- newControllerEvent(RECV_ShardChildrenResponseMsg, m)
 			}
 
@@ -636,7 +661,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 				d.logger.Debug("Failed to decode message: %s", err)
 				return err
 			} else {
-				// emit a RECV_ShardAncestorRequestMsg event
+				// emit a RECV_TxShardChildRequestMsg event
 				events <- newControllerEvent(RECV_TxShardChildRequestMsg, m)
 			}
 
@@ -658,10 +683,20 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 				d.logger.Debug("Failed to decode message: %s", err)
 				return err
 			} else {
-				// emit a RECV_TxShardChildResponseMsg event
+				// emit a RECV_ForceShardSyncMsg event
 				events <- newControllerEvent(RECV_ForceShardSyncMsg, m)
 			}
 
+		case SubmitterHistoryRequestMsgCode:
+			// deserialize the submitter history request message from payload
+			m := &SubmitterHistoryRequestMsg{}
+			if err := msg.Decode(m); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				return err
+			} else {
+				// emit a RECV_SubmitterHistoryRequestMsg event
+				events <- newControllerEvent(RECV_SubmitterHistoryRequestMsg, m)
+			}
 		// case 1 message type
 
 		// case 2 message type

@@ -5,9 +5,11 @@ package p2p
 import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/discover"
+	"github.com/trust-net/dag-lib-go/common"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/repo"
-	"github.com/trust-net/go-trust-net/common"
 	"net"
+	"sync"
 )
 
 // P2P layer's wrapper for extracting Peer interface from underlying implementations
@@ -38,6 +40,10 @@ type Peer interface {
 	GetState(stateId int) interface{}
 	// Shard children Q
 	ShardChildrenQ() repo.Queue
+	// push a transaction into stack for processing later
+	ToBeFetchedStackPush(tx dto.Transaction) error
+	// pop a transaction from stack for processing (nil if stack empty)
+	ToBeFetchedStackPop() dto.Transaction
 }
 
 const (
@@ -66,6 +72,8 @@ type peerDEVp2p struct {
 	status         int
 	states         map[int]interface{}
 	shardChildrenQ repo.Queue
+	txStack        []dto.Transaction
+	lock           sync.RWMutex
 }
 
 func NewDEVp2pPeer(peer peerDEVp2pWrapper, rw p2p.MsgReadWriter) *peerDEVp2p {
@@ -80,6 +88,7 @@ func NewDEVp2pPeer(peer peerDEVp2pWrapper, rw p2p.MsgReadWriter) *peerDEVp2p {
 		seen:           common.NewSet(),
 		states:         make(map[int]interface{}),
 		shardChildrenQ: q,
+		txStack:        []dto.Transaction{},
 	}
 }
 
@@ -149,4 +158,23 @@ func (p *peerDEVp2p) GetState(stateId int) interface{} {
 
 func (p *peerDEVp2p) ShardChildrenQ() repo.Queue {
 	return p.shardChildrenQ
+}
+
+func (p *peerDEVp2p) ToBeFetchedStackPush(tx dto.Transaction) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	p.txStack = append([]dto.Transaction{tx}, p.txStack...)
+	return nil
+}
+
+func (p *peerDEVp2p) ToBeFetchedStackPop() dto.Transaction {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if len(p.txStack) > 0 {
+		tx := p.txStack[0]
+		p.txStack = p.txStack[1:]
+		return tx
+	} else {
+		return nil
+	}
 }
