@@ -453,3 +453,159 @@ func TestAnchor_RelaxedSequenceRequirements(t *testing.T) {
 		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
 	}
 }
+
+//  KnownShardsTxs returns all known pairs for known submitter/seq
+func TestKnownShardsTxs_ValidRequest(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	e, _ := NewEndorser(testDb)
+
+	// pre-populate DLT DB with two transactions for same sequence, different shards
+	tx1 := dto.TestSignedTransaction("transaction 1")
+	if err := testDb.UpdateSubmitter(tx1); err != nil {
+		t.Errorf("Failed to update first transaction: %s", err)
+	}
+	tx2 := dto.TestSignedTransaction("transaction 2")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterLastTx = tx1.Anchor().SubmitterLastTx
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	tx2.Anchor().ShardId = []byte("a different shard")
+	if err := testDb.UpdateSubmitter(tx2); err != nil {
+		t.Errorf("Failed to update 2nd transaction: %s", err)
+	}
+	testDb.Reset()
+
+	// fetch all known shard/tx pairs for the submitter/seq
+	shards, txs := e.KnownShardsTxs(tx1.Anchor().Submitter, tx1.Anchor().SubmitterSeq)
+
+	if len(shards) != len(txs) {
+		t.Errorf("mismatch in shards and tx ids")
+	}
+
+	if len(shards) != 2 {
+		t.Errorf("incorrect number of pairs: %d", len(shards))
+	}
+
+	if string(shards[0]) != string(tx1.Anchor().ShardId) || string(shards[1]) != string(tx2.Anchor().ShardId) {
+		t.Errorf("shard IDs are not correct")
+	}
+
+	if txs[0] != tx1.Id() || txs[1] != tx2.Id() {
+		t.Errorf("transaction IDs are not correct")
+	}
+
+	// validate that submitter history was fetched once
+	if testDb.GetSubmitterHistoryCount != 1 {
+		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
+	}
+}
+
+//  KnownShardsTxs returns no pairs for seq < 1
+func TestKnownShardsTxs_ZeroSeq(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	e, _ := NewEndorser(testDb)
+
+	// pre-populate DLT DB with two transactions for same sequence, different shards
+	tx1 := dto.TestSignedTransaction("transaction 1")
+	if err := testDb.UpdateSubmitter(tx1); err != nil {
+		t.Errorf("Failed to update first transaction: %s", err)
+	}
+	tx2 := dto.TestSignedTransaction("transaction 2")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterLastTx = tx1.Anchor().SubmitterLastTx
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	tx2.Anchor().ShardId = []byte("a different shard")
+	if err := testDb.UpdateSubmitter(tx2); err != nil {
+		t.Errorf("Failed to update 2nd transaction: %s", err)
+	}
+	testDb.Reset()
+
+	// fetch all known shard/tx pairs for the submitter/seq "0"
+	shards, txs := e.KnownShardsTxs(tx1.Anchor().Submitter, 0x00)
+
+	if len(shards) != len(txs) {
+		t.Errorf("mismatch in shards and tx ids")
+	}
+
+	if len(shards) != 0 {
+		t.Errorf("incorrect number of pairs: %d", len(shards))
+	}
+
+	// validate that submitter history was not fetched for incorrect sequence
+	if testDb.GetSubmitterHistoryCount != 0 {
+		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
+	}
+}
+
+//  KnownShardsTxs returns no pairs for unknown submitter
+func TestKnownShardsTxs_UnknownSubmitter(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	e, _ := NewEndorser(testDb)
+
+	// pre-populate DLT DB with two transactions for same sequence, different shards
+	tx1 := dto.TestSignedTransaction("transaction 1")
+	if err := testDb.UpdateSubmitter(tx1); err != nil {
+		t.Errorf("Failed to update first transaction: %s", err)
+	}
+	tx2 := dto.TestSignedTransaction("transaction 2")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterLastTx = tx1.Anchor().SubmitterLastTx
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	tx2.Anchor().ShardId = []byte("a different shard")
+	if err := testDb.UpdateSubmitter(tx2); err != nil {
+		t.Errorf("Failed to update 2nd transaction: %s", err)
+	}
+	testDb.Reset()
+
+	// fetch all known shard/tx pairs for an unknown submitter
+	shards, txs := e.KnownShardsTxs([]byte("unknown submitter"), 0x01)
+
+	if len(shards) != len(txs) {
+		t.Errorf("mismatch in shards and tx ids")
+	}
+
+	if len(shards) != 0 {
+		t.Errorf("incorrect number of pairs: %d", len(shards))
+	}
+
+	// validate that submitter history was not fetched once
+	if testDb.GetSubmitterHistoryCount != 1 {
+		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
+	}
+}
+
+//  KnownShardsTxs returns no pairs for unknown sequence
+func TestKnownShardsTxs_UnknownSequence(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	e, _ := NewEndorser(testDb)
+
+	// pre-populate DLT DB with two transactions for same sequence, different shards
+	tx1 := dto.TestSignedTransaction("transaction 1")
+	if err := testDb.UpdateSubmitter(tx1); err != nil {
+		t.Errorf("Failed to update first transaction: %s", err)
+	}
+	tx2 := dto.TestSignedTransaction("transaction 2")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterLastTx = tx1.Anchor().SubmitterLastTx
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	tx2.Anchor().ShardId = []byte("a different shard")
+	if err := testDb.UpdateSubmitter(tx2); err != nil {
+		t.Errorf("Failed to update 2nd transaction: %s", err)
+	}
+	testDb.Reset()
+
+	// fetch all known shard/tx pairs for an unknown sequence
+	shards, txs := e.KnownShardsTxs(tx1.Anchor().Submitter, 0x11)
+
+	if len(shards) != len(txs) {
+		t.Errorf("mismatch in shards and tx ids")
+	}
+
+	if len(shards) != 0 {
+		t.Errorf("incorrect number of pairs: %d", len(shards))
+	}
+
+	// validate that submitter history was not fetched once
+	if testDb.GetSubmitterHistoryCount != 1 {
+		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
+	}
+}

@@ -23,6 +23,8 @@ type Endorser interface {
 	Handle(tx dto.Transaction) (int, error)
 	// Approve submitted transaction
 	Approve(tx dto.Transaction) error
+	// Provide all known shard/tx pairs for a submitter/seq
+	KnownShardsTxs(submitter []byte, seq uint64) (shards [][]byte, txs [][64]byte)
 }
 
 type endorser struct {
@@ -135,6 +137,23 @@ func (e *endorser) Approve(tx dto.Transaction) error {
 	}
 
 	return nil
+}
+
+func (e *endorser) KnownShardsTxs(submitter []byte, seq uint64) (shards [][]byte, txs [][64]byte) {
+	// initialize empty lists
+	shards, txs = [][]byte{}, [][64]byte{}
+
+	// fetch submitter history for specified id/seq
+	if seq > 0 {
+		if history := e.db.GetSubmitterHistory(submitter, seq); history != nil {
+			// walk through known shard/tx pairs and add to return list
+			for _, pair := range history.ShardTxPairs {
+				shards = append(shards, pair.ShardId)
+				txs = append(txs, pair.TxId)
+			}
+		}
+	}
+	return
 }
 
 func NewEndorser(db repo.DltDb) (*endorser, error) {

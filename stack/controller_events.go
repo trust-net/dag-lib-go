@@ -19,7 +19,8 @@ const (
 	RECV_TxShardChildRequestMsg
 	RECV_TxShardChildResponseMsg
 	RECV_ForceShardSyncMsg
-	RECV_SubmitterHistoryRequestMsg
+	RECV_SubmitterWalkUpRequestMsg
+	RECV_SubmitterWalkUpResponseMsg
 	POP_ShardChild
 	SHUTDOWN
 )

@@ -36,13 +36,14 @@ func TestSignedTransaction(data string) dto.Transaction {
 }
 
 type mockEndorser struct {
-	TxId            [64]byte
-	Tx              dto.Transaction
-	TxHandlerCalled bool
-	AnchorCalled    bool
-	ApproverCalled  bool
-	HandlerReturn   error
-	orig            endorsement.Endorser
+	TxId                 [64]byte
+	Tx                   dto.Transaction
+	TxHandlerCalled      bool
+	KnownShardsTxsCalled bool
+	AnchorCalled         bool
+	ApproverCalled       bool
+	HandlerReturn        error
+	orig                 endorsement.Endorser
 }
 
 func (e *mockEndorser) Anchor(a *dto.Anchor) error {
@@ -65,6 +66,10 @@ func (e *mockEndorser) Handle(tx dto.Transaction) (int, error) {
 	} else {
 		return e.orig.Handle(tx)
 	}
+}
+func (e *mockEndorser) KnownShardsTxs(submitter []byte, seq uint64) (shards [][]byte, txs [][64]byte) {
+	e.KnownShardsTxsCalled = true
+	return e.orig.KnownShardsTxs(submitter, seq)
 }
 
 func (e *mockEndorser) Reset() {

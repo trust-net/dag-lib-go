@@ -252,10 +252,10 @@ func (d *dlt) handleTransaction(peer p2p.Peer, tx dto.Transaction, allowDupe boo
 				return err
 			}
 			// trigger submitter sync
-			req := NewSubmitterHistoryRequestMsg(tx.Anchor())
+			req := NewSubmitterWalkUpRequestMsg(tx.Anchor())
 			d.logger.Debug("Initiating submitter sync for Submitter/Seq: %x/%d", req.Submitter, req.Seq)
 			// save the request hash into peer's state to validate ancestors response
-			peer.SetState(int(RECV_SubmitterHistoryRequestMsg), req.Id())
+			peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), req.Id())
 			// send the submitter history request to peer
 			peer.Send(req.Id(), req.Code(), req)
 
@@ -550,6 +550,15 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				d.logger.Debug("Shard in sync with peer: %s", peer.String())
 			}
 
+		case RECV_SubmitterWalkUpRequestMsg:
+			msg := e.data.(*SubmitterWalkUpRequestMsg)
+
+			// fetch the submitter/seq's history for known shard/transaction pairs
+			req := NewSubmitterWalkUpResponseMsg(msg)
+			req.Shards, req.Transactions = d.endorser.KnownShardsTxs(msg.Submitter, msg.Seq)
+			d.logger.Debug("responding with %d pairs for: %x / %d", len(req.Shards), req.Submitter, req.Seq)
+			peer.Send(req.Id(), req.Code(), req)
+
 		case SHUTDOWN:
 			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true
@@ -687,15 +696,15 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 				events <- newControllerEvent(RECV_ForceShardSyncMsg, m)
 			}
 
-		case SubmitterHistoryRequestMsgCode:
+		case SubmitterWalkUpRequestMsgCode:
 			// deserialize the submitter history request message from payload
-			m := &SubmitterHistoryRequestMsg{}
+			m := &SubmitterWalkUpRequestMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
 				return err
 			} else {
-				// emit a RECV_SubmitterHistoryRequestMsg event
-				events <- newControllerEvent(RECV_SubmitterHistoryRequestMsg, m)
+				// emit a RECV_SubmitterWalkUpRequestMsg event
+				events <- newControllerEvent(RECV_SubmitterWalkUpRequestMsg, m)
 			}
 		// case 1 message type
 

@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// Trust-Net Protocol Messages
 package stack
 
 import (
@@ -36,10 +38,10 @@ const (
 	TxShardChildResponseMsgCode
 	// force a shard sync during app registration
 	ForceShardSyncMsgCode
-	// submitter history request message
-	SubmitterHistoryRequestMsgCode
-	// submitter history response message
-	SubmitterHistoryResponseMsgCode
+	// submitter history walk up request message
+	SubmitterWalkUpRequestMsgCode
+	// submitter history walk up response message
+	SubmitterWalkUpResponseMsgCode
 	// ProtocolLength should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength
@@ -132,25 +134,51 @@ func NewShardSyncMsg(anchor *dto.Anchor) *ShardSyncMsg {
 	}
 }
 
-type SubmitterHistoryRequestMsg struct {
+type SubmitterWalkUpRequestMsg struct {
 	Submitter []byte
 	Seq       uint64
 }
 
-func (m *SubmitterHistoryRequestMsg) Id() []byte {
-	id := []byte("SubmitterSyncMsg")
+func (m *SubmitterWalkUpRequestMsg) Id() []byte {
+	id := []byte("SubmitterWalkUpRequestMsg")
 	id = append(id, common.Uint64ToBytes(m.Seq)...)
 	return append(id, m.Submitter...)
 }
 
-func (m *SubmitterHistoryRequestMsg) Code() uint64 {
-	return SubmitterHistoryRequestMsgCode
+func (m *SubmitterWalkUpRequestMsg) Code() uint64 {
+	return SubmitterWalkUpRequestMsgCode
 }
 
-func NewSubmitterHistoryRequestMsg(anchor *dto.Anchor) *SubmitterHistoryRequestMsg {
-	return &SubmitterHistoryRequestMsg{
+func NewSubmitterWalkUpRequestMsg(anchor *dto.Anchor) *SubmitterWalkUpRequestMsg {
+	return &SubmitterWalkUpRequestMsg{
 		Submitter: anchor.Submitter,
 		Seq:       anchor.SubmitterSeq - 1,
+	}
+}
+
+type SubmitterWalkUpResponseMsg struct {
+	Submitter    []byte
+	Seq          uint64
+	Transactions [][64]byte
+	Shards       [][]byte
+}
+
+func (m *SubmitterWalkUpResponseMsg) Id() []byte {
+	id := []byte("SubmitterWalkUpResponseMsg")
+	id = append(id, common.Uint64ToBytes(m.Seq)...)
+	return append(id, m.Submitter...)
+}
+
+func (m *SubmitterWalkUpResponseMsg) Code() uint64 {
+	return SubmitterWalkUpResponseMsgCode
+}
+
+func NewSubmitterWalkUpResponseMsg(req *SubmitterWalkUpRequestMsg) *SubmitterWalkUpResponseMsg {
+	return &SubmitterWalkUpResponseMsg{
+		Submitter:    req.Submitter,
+		Seq:          req.Seq,
+		Transactions: nil,
+		Shards:       nil,
 	}
 }
 
