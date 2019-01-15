@@ -726,6 +726,9 @@ func TestRECV_NewTxBlockMsgEvent_DoubleSpend(t *testing.T) {
 	mockConn := p2p.TestConn()
 	peer := NewMockPeer(mockConn)
 
+	log.SetLogLevel(log.DEBUG)
+	defer log.SetLogLevel(log.NONE)
+
 	// start stack's event listener
 	events := make(chan controllerEvent, 10)
 	finished := make(chan struct{}, 2)
@@ -763,9 +766,19 @@ func TestRECV_NewTxBlockMsgEvent_DoubleSpend(t *testing.T) {
 		t.Errorf("Listener should not froward double spending network transaction")
 	}
 
-	// we should disconnect for double spending transaction
-	if !peer.DisconnectCalled {
-		t.Errorf("Listener should disconnect peer for double spending network transaction")
+	// we should have emitted a DoubleSpendAlert event
+	if len(events) == 0 || (<-events).code != ALERT_DoubleSpend {
+		t.Errorf("did not emit ALERT_DoubleSpend")
+	}
+
+	// we should NOT have sent any message to peer
+	if peer.SendCalled {
+		t.Errorf("should not send any message to peer")
+	}
+
+	// we should not disconnect here, let double spending event handler take care of decision
+	if peer.DisconnectCalled {
+		t.Errorf("Listener should not disconnect peer for double spending network transaction")
 	}
 }
 

@@ -227,18 +227,15 @@ func (d *dlt) handshake(peer p2p.Peer) error {
 	return nil
 }
 
-func (d *dlt) handleTransaction(peer p2p.Peer, tx dto.Transaction, allowDupe bool) error {
+func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx dto.Transaction, allowDupe bool) error {
 	// send transaction to endorsing layer for handling
 	if res, err := d.endorser.Handle(tx); err != nil {
 		// check for failure reason
 		switch res {
 		case endorsement.ERR_DOUBLE_SPEND:
 			// trigger double spending resolution
-			// TBD
-
-			// disconnect peer
-			d.logger.Error("Disconnect peer due to double spending error: %s", err)
-			peer.Disconnect()
+			d.logger.Error("Detected double spending for submitter/seq/shard: %x / %d / %x", tx.Anchor().Submitter, tx.Anchor().SubmitterSeq, tx.Anchor().ShardId)
+			events <- newControllerEvent(ALERT_DoubleSpend, tx.Anchor().ShardId)
 			return err
 		case endorsement.ERR_DUPLICATE:
 			// continue if dupe's are allowed, e.g. during sync
@@ -305,7 +302,7 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			// check if transaction's parent is known
 			if tx := e.data.(dto.Transaction); d.db.GetTx(tx.Anchor().ShardParent) != nil {
 				// parent is known, so process normally
-				if err := d.handleTransaction(peer, tx, false); err != nil {
+				if err := d.handleTransaction(peer, events, tx, false); err != nil {
 					d.logger.Debug("Failed to handle network transaction: %s", err)
 					// TBD: should we disconnect from peer?
 					// let the handler decide based on error type
@@ -503,7 +500,7 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				d.isSeen(tx.Id())
 
 				// handle transaction for each layer
-				if err := d.handleTransaction(peer, tx, true); err == nil {
+				if err := d.handleTransaction(peer, events, tx, true); err == nil {
 					// walk through each child to check if it's unknown, then add to child queue
 					for _, child := range msg.Children {
 						if d.db.GetTx(child) == nil {
