@@ -1,4 +1,4 @@
-// Copyright 2018 The trust-net Authors
+// Copyright 2018-2019 The trust-net Authors
 // Controller interface and implementation for DLT Statck
 package stack
 
@@ -279,6 +279,21 @@ func (d *dlt) handleTransaction(peer p2p.Peer, tx dto.Transaction, allowDupe boo
 	return nil
 }
 
+func (d *dlt) toWalkUpStage(a *dto.Anchor, peer p2p.Peer) error {
+	// make sure that sharder has genesis for unknown transaction's shard
+	d.sharder.SyncAnchor(a.ShardId)
+	// build shard ancestor walk up request
+	req := &ShardAncestorRequestMsg{
+		StartHash:    a.ShardParent,
+		MaxAncestors: 10,
+	}
+	d.logger.Debug("Initiating shard sync for unknown transaction: %x", a.ShardParent)
+	// save the last hash into peer's state to validate ancestors response
+	peer.SetState(int(RECV_ShardAncestorResponseMsg), req.StartHash)
+	// send the ancestors request to peer
+	return peer.Send(req.Id(), req.Code(), req)
+}
+
 // listen on events for a specific peer connection
 func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 	// fmt.Printf("Entering event listener...\n")
@@ -297,19 +312,12 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 					break
 				}
 			} else {
-				// make sure that sharder has genesis for unknown transaction's shard
-				d.sharder.SyncAnchor(tx.Anchor().ShardId)
-
 				// parent is unknown, so initiate sync with peer
-				req := &ShardAncestorRequestMsg{
-					StartHash:    tx.Anchor().ShardParent,
-					MaxAncestors: 10,
+				if err := d.toWalkUpStage(tx.Anchor(), peer); err != nil {
+					d.logger.Debug("Failed to transition to WalkUpStage: %s", err)
+					peer.Disconnect()
+					done = true
 				}
-				d.logger.Debug("Initiating shard sync for transaction with unknown parent: %x", tx.Anchor().ShardParent)
-				// save the last hash into peer's state to validate ancestors response
-				peer.SetState(int(RECV_ShardAncestorResponseMsg), req.StartHash)
-				// send the ancestors request to peer
-				peer.Send(req.Id(), req.Code(), req)
 			}
 
 		case RECV_ShardSyncMsg:
@@ -516,49 +524,28 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			}
 
 		case RECV_ForceShardSyncMsg:
-			msg := e.data.(*ForceShardSyncMsg)
-
-			// compare local anchor with remote anchor,
-			// fetch anchor only for remote peer's shard,
-			// since our local shard maybe different, but we may have more recent data
-			// due to network updates from other nodes,
-			// or if local sharder knows nothing about remot shard (sync anchor will be nil)
-			myAnchor := d.sharder.SyncAnchor(msg.Anchor.ShardId)
-			d.endorser.Anchor(myAnchor)
-			d.p2p.Anchor(myAnchor)
-
-			if myAnchor == nil || msg.Anchor.Weight > myAnchor.Weight ||
-				(msg.Anchor.Weight == myAnchor.Weight &&
-					shard.Numeric(msg.Anchor.ShardParent[:]) > shard.Numeric(myAnchor.ShardParent[:])) {
-				// local shard's anchor is behind, initiate sync with remote by walking up the DAG
-				req := &ShardAncestorRequestMsg{
-					StartHash:    msg.Anchor.ShardParent,
-					MaxAncestors: 10,
-				}
-				d.logger.Debug("Initiating shard sync starting by ancestors request for: %x", msg.Anchor.ShardParent)
-				// save the last hash into peer's state to validate ancestors response
-				peer.SetState(int(RECV_ShardAncestorResponseMsg), req.StartHash)
-				// send the ancestors request to peer
-				peer.Send(req.Id(), req.Code(), req)
-			} else if myAnchor != nil && (myAnchor.Weight > msg.Anchor.Weight ||
-				(myAnchor.Weight == msg.Anchor.Weight && shard.Numeric(myAnchor.ShardParent[:]) > shard.Numeric(msg.Anchor.ShardParent[:]))) {
-				// remote shard's anchor is behind, ask remote to initiate sync
-				msg := NewShardSyncMsg(myAnchor)
-				d.logger.Debug("Inidicating peer to initiate sync: %s", peer.String())
-				peer.Send(msg.Id(), msg.Code(), msg)
-			} else {
-				d.logger.Debug("Shard in sync with peer: %s", peer.String())
+			if err := d.handleRECV_ForceShardSyncMsg(peer, e.data.(*ForceShardSyncMsg)); err != nil {
+				d.logger.Debug("Failed to handle ForceShardSyncMsg: %s", err)
+				peer.Disconnect()
+				done = true
+				break
 			}
 
 		case RECV_SubmitterWalkUpRequestMsg:
-			msg := e.data.(*SubmitterWalkUpRequestMsg)
+			if err := d.handleRECV_SubmitterWalkUpRequestMsg(peer, e.data.(*SubmitterWalkUpRequestMsg)); err != nil {
+				d.logger.Debug("Failed to handle SubmitterWalkUpRequestMsg: %s", err)
+				peer.Disconnect()
+				done = true
+				break
+			}
 
-			// fetch the submitter/seq's history for known shard/transaction pairs
-			req := NewSubmitterWalkUpResponseMsg(msg)
-			req.Shards, req.Transactions = d.endorser.KnownShardsTxs(msg.Submitter, msg.Seq)
-			d.logger.Debug("responding with %d pairs for: %x / %d", len(req.Shards), req.Submitter, req.Seq)
-			peer.Send(req.Id(), req.Code(), req)
-
+		case RECV_SubmitterWalkUpResponseMsg:
+			if err := d.handleRECV_SubmitterWalkUpResponseMsg(peer, events, e.data.(*SubmitterWalkUpResponseMsg)); err != nil {
+				d.logger.Debug("Failed to handle SubmitterWalkUpResponseMsg: %s", err)
+				peer.Disconnect()
+				done = true
+				break
+			}
 		case SHUTDOWN:
 			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true
@@ -569,6 +556,124 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 		}
 	}
 	d.logger.Info("Exiting event listener...")
+}
+
+func (d *dlt) handleRECV_ForceShardSyncMsg(peer p2p.Peer, msg *ForceShardSyncMsg) error {
+	// compare local anchor with remote anchor,
+	// fetch anchor only for remote peer's shard,
+	// since our local shard maybe different, but we may have more recent data
+	// due to network updates from other nodes,
+	// or if local sharder knows nothing about remot shard (sync anchor will be nil)
+	myAnchor := d.sharder.SyncAnchor(msg.Anchor.ShardId)
+	d.endorser.Anchor(myAnchor)
+	d.p2p.Anchor(myAnchor)
+
+	if myAnchor == nil || msg.Anchor.Weight > myAnchor.Weight ||
+		(msg.Anchor.Weight == myAnchor.Weight &&
+			shard.Numeric(msg.Anchor.ShardParent[:]) > shard.Numeric(myAnchor.ShardParent[:])) {
+		// local shard's anchor is behind, initiate sync with remote by walking up the DAG
+		req := &ShardAncestorRequestMsg{
+			StartHash:    msg.Anchor.ShardParent,
+			MaxAncestors: 10,
+		}
+		d.logger.Debug("Initiating shard sync starting by ancestors request for: %x", msg.Anchor.ShardParent)
+		// save the last hash into peer's state to validate ancestors response
+		peer.SetState(int(RECV_ShardAncestorResponseMsg), req.StartHash)
+		// send the ancestors request to peer
+		peer.Send(req.Id(), req.Code(), req)
+	} else if myAnchor != nil && (myAnchor.Weight > msg.Anchor.Weight ||
+		(myAnchor.Weight == msg.Anchor.Weight && shard.Numeric(myAnchor.ShardParent[:]) > shard.Numeric(msg.Anchor.ShardParent[:]))) {
+		// remote shard's anchor is behind, ask remote to initiate sync
+		msg := NewShardSyncMsg(myAnchor)
+		d.logger.Debug("Inidicating peer to initiate sync: %s", peer.String())
+		peer.Send(msg.Id(), msg.Code(), msg)
+	} else {
+		d.logger.Debug("Shard in sync with peer: %s", peer.String())
+	}
+	return nil
+}
+
+func (d *dlt) handleRECV_SubmitterWalkUpRequestMsg(peer p2p.Peer, msg *SubmitterWalkUpRequestMsg) error {
+	// fetch the submitter/seq's history for known shard/transaction pairs
+	req := NewSubmitterWalkUpResponseMsg(msg)
+	req.Shards, req.Transactions = d.endorser.KnownShardsTxs(msg.Submitter, msg.Seq)
+	d.logger.Debug("responding with %d pairs for: %x / %d", len(req.Shards), req.Submitter, req.Seq)
+	peer.Send(req.Id(), req.Code(), req)
+	return nil
+}
+
+func (d *dlt) handleRECV_SubmitterWalkUpResponseMsg(peer p2p.Peer, events chan controllerEvent, msg *SubmitterWalkUpResponseMsg) error {
+	// confirm that we did receive pairs for non-zero sequence
+	if msg.Seq > 0 && len(msg.Shards) < 1 {
+		d.logger.Error("Recieved zero pairs for submmiter/seq: %x [%d]", msg.Submitter, msg.Seq)
+		return errors.New("zero pairs non-zero seq")
+	}
+	// confirm that number of shards and transactions is same
+	if len(msg.Shards) != len(msg.Transactions) {
+		d.logger.Error("Recieved %d shards but %d transactions for submmiter/seq: %x [%d]", len(msg.Shards), len(msg.Transactions), msg.Submitter, msg.Seq)
+		return errors.New("shard transaction pair count mismatch")
+	}
+	// confirm that message id matches expected peer state
+	if data := peer.GetState(int(RECV_SubmitterWalkUpResponseMsg)); data == nil || string(data.([]byte)) != string(msg.Id()) {
+		d.logger.Error("Recieved unexpected SubmitterWalkUpResponseMsg for submmiter/seq: %x / %d", msg.Submitter, msg.Seq)
+		return errors.New("unexpected SubmitterWalkUpResponseMsg")
+	} else {
+		// reset the peer state
+		peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), nil)
+	}
+	// fetch the local submitter/seq's history for known shard/transaction pairs
+	shards, transactions := d.endorser.KnownShardsTxs(msg.Submitter, msg.Seq)
+	shardMap := make(map[string]int)
+	for i, shard := range shards {
+		shardMap[string(shard)] = i
+	}
+	// compare recieved pairs with known local pairs
+	allMatched := true
+	for i, shard := range msg.Shards {
+		if indx, found := shardMap[string(shard)]; !found {
+			// not doing shard sync, just continueing walk up till we find seq which is same as local
+			// and will do any additional shard sync when actually processing transaction while walking down
+			//			// shard unknown, initiate sync
+			//			a := &dto.Anchor{
+			//				ShardId:     shard,
+			//				ShardParent: msg.Transactions[i],
+			//			}
+			//			if err := d.toWalkUpStage(a, peer); err != nil {
+			//				return err
+			//			}
+
+			// this shard did not match
+			allMatched = false
+		} else if transactions[indx] != msg.Transactions[i] {
+			// double spend, i.e., transaction mismatch for matched shard
+			d.logger.Error("Detected double spending for submitter/seq/shard: %x / %d / %x\nLocal Tx: %x\nRemote Tx: %x", msg.Submitter, msg.Seq, shard, transactions[indx], msg.Transactions[i])
+			events <- newControllerEvent(ALERT_DoubleSpend, shard)
+			return nil
+		}
+
+	}
+	// if all pairs matched then transition to ProcessDownStage for submitter sync
+	if allMatched {
+		// build a walk down request
+		req := NewSubmitterProcessDownRequestMsg(msg)
+		// save hash for validation of response
+		peer.SetState(int(RECV_SubmitterProcessDownResponseMsg), req.Id())
+		// send message to peer
+		d.logger.Debug("requesting submitter history for: %x / %d", req.Submitter, req.Seq)
+		peer.Send(req.Id(), req.Code(), req)
+	} else {
+		// continue walking up
+		req := &SubmitterWalkUpRequestMsg{
+			Submitter: msg.Submitter,
+			Seq:       msg.Seq - 1,
+		}
+		d.logger.Debug("continuing walk up for Submitter/Seq: %x/%d", req.Submitter, req.Seq)
+		// save the request hash into peer's state to validate ancestors response
+		peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), req.Id())
+		// send the submitter history request to peer
+		peer.Send(req.Id(), req.Code(), req)
+	}
+	return nil
 }
 
 // listen on messages from the peer node
@@ -706,6 +811,18 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 				// emit a RECV_SubmitterWalkUpRequestMsg event
 				events <- newControllerEvent(RECV_SubmitterWalkUpRequestMsg, m)
 			}
+
+		case SubmitterWalkUpResponseMsgCode:
+			// deserialize the submitter history request message from payload
+			m := &SubmitterWalkUpResponseMsg{}
+			if err := msg.Decode(m); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				return err
+			} else {
+				// emit a RECV_SubmitterWalkUpResponseMsg event
+				events <- newControllerEvent(RECV_SubmitterWalkUpResponseMsg, m)
+			}
+
 		// case 1 message type
 
 		// case 2 message type

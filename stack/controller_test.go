@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// Controller interface and implementation for DLT Statck
 package stack
 
 import (
@@ -856,104 +858,6 @@ func TestRECV_NewTxBlockMsgEvent_UnknownLastTx(t *testing.T) {
 		t.Errorf("Incorrect SubmitterWalkUpRequestMsg Submitter: %s", peer.SendMsg.(*SubmitterWalkUpRequestMsg).Submitter)
 	} else if peer.SendMsg.(*SubmitterWalkUpRequestMsg).Seq != a.SubmitterSeq-1 {
 		t.Errorf("Incorrect SubmitterWalkUpRequestMsg Sequence: %d", peer.SendMsg.(*SubmitterWalkUpRequestMsg).Seq)
-	}
-}
-
-// stack controller listner generates RECV_SubmitterWalkUpRequestMsg event for SubmitterWalkUpRequestMsg message
-func TestPeerListnerGeneratesEventForSubmitterWalkUpRequestMsg(t *testing.T) {
-	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
-
-	// build a mock peer
-	mockConn := p2p.TestConn()
-	peer := NewMockPeer(mockConn)
-
-	// setup mock connection to send a SubmitterWalkUpRequestMsg followed by clean shutdown
-	mockConn.NextMsg(SubmitterWalkUpRequestMsgCode, &SubmitterWalkUpRequestMsg{})
-	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
-
-	// setup a test event listener
-	events := make(chan controllerEvent, 10)
-	finished := checkForEventCode(RECV_SubmitterWalkUpRequestMsg, events)
-
-	// now call stack's listener
-	if err := stack.listener(peer, events); err != nil {
-		t.Errorf("Transaction processing has errors: %s", err)
-	}
-
-	// wait for event listener to process
-	result := <-finished
-
-	// check if listener generate correct event
-	if !result.seenMsgEvent {
-		t.Errorf("Event listener did not generate RECV_SubmitterWalkUpRequestMsg event!!!")
-	}
-}
-
-// test stack controller event listener handles RECV_SubmitterWalkUpRequestMsg correctly
-func TestRECV_SubmitterWalkUpRequestMsg_HasEntry(t *testing.T) {
-	// create a DLT stack instance with registered app and initialized mocks
-	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
-
-	log.SetLogLevel(log.DEBUG)
-	defer log.SetLogLevel(log.NONE)
-
-	// submit a transactions to add ancestor to local shard's Anchor
-	tx := TestSignedTransaction("test payload1")
-	stack.Submit(tx)
-	nextAnchor := stack.Anchor(tx.Anchor().Submitter, 0x02, tx.Id())
-	if nextAnchor == nil {
-		t.Errorf("Failed to get anchor for next sequence")
-	}
-	p2pLayer.Reset()
-	sharder.Reset()
-	endorser.Reset()
-	testDb.Reset()
-
-	// build a mock peer
-	mockConn := p2p.TestConn()
-	peer := NewMockPeer(mockConn)
-
-	// start stack's event listener
-	events := make(chan controllerEvent, 10)
-	finished := make(chan struct{}, 2)
-	go func() {
-		stack.peerEventsListener(peer, events)
-		finished <- struct{}{}
-	}()
-
-	// now emit RECV_SubmitterWalkUpRequestMsg event requesting history using submitter's nextAnchor
-	req := NewSubmitterWalkUpRequestMsg(nextAnchor)
-	events <- newControllerEvent(RECV_SubmitterWalkUpRequestMsg, req)
-	events <- newControllerEvent(SHUTDOWN, nil)
-
-	// wait for event listener to finish
-	<-finished
-
-	// check if event listener correctly processed the event to handle submitter's walk up request
-
-	// verify that endorser gets called to fetch submitter's known shards/tx
-	if !endorser.KnownShardsTxsCalled {
-		t.Errorf("Endorser did not get called for submitter/seq history")
-	}
-
-	// we should have sent the SubmitterWalkUpResponseMsg back with correct transaction/shard from submitter/seq history
-	if !peer.SendCalled {
-		t.Errorf("did not send any message to peer")
-	} else if peer.SendMsgCode != SubmitterWalkUpResponseMsgCode {
-		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
-	} else if string(peer.SendMsg.(*SubmitterWalkUpResponseMsg).Submitter) != string(req.Submitter) {
-		t.Errorf("Incorrect response submitter: %x\nExpected: %x", peer.SendMsg.(*SubmitterWalkUpResponseMsg).Submitter, req.Submitter)
-	} else if peer.SendMsg.(*SubmitterWalkUpResponseMsg).Seq != req.Seq {
-		t.Errorf("Incorrect response sequence: %x\nExpected: %x", peer.SendMsg.(*SubmitterWalkUpResponseMsg).Seq, req.Seq)
-	} else if len(peer.SendMsg.(*SubmitterWalkUpResponseMsg).Transactions) != 1 {
-		t.Errorf("Incorrect number of transactions: %d", len(peer.SendMsg.(*SubmitterWalkUpResponseMsg).Transactions))
-	} else if len(peer.SendMsg.(*SubmitterWalkUpResponseMsg).Shards) != 1 {
-		t.Errorf("Incorrect number of shards: %d", len(peer.SendMsg.(*SubmitterWalkUpResponseMsg).Shards))
-	} else if peer.SendMsg.(*SubmitterWalkUpResponseMsg).Transactions[0] != tx.Id() {
-		t.Errorf("Incorrect transaction in response: %x\nExpected: %x", peer.SendMsg.(*SubmitterWalkUpResponseMsg).Transactions[0], tx.Id())
-	} else if string(peer.SendMsg.(*SubmitterWalkUpResponseMsg).Shards[0]) != string(tx.Anchor().ShardId) {
-		t.Errorf("Incorrect shard in response: %x\nExpected: %x", peer.SendMsg.(*SubmitterWalkUpResponseMsg).Shards[0], tx.Anchor().ShardId)
 	}
 }
 

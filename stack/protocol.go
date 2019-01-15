@@ -42,6 +42,10 @@ const (
 	SubmitterWalkUpRequestMsgCode
 	// submitter history walk up response message
 	SubmitterWalkUpResponseMsgCode
+	// submitter history walk down request message
+	SubmitterProcessDownRequestMsgCode
+	// submitter history walk down response message
+	SubmitterProcessDownResponseMsgCode
 	// ProtocolLength should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength
@@ -175,6 +179,54 @@ func (m *SubmitterWalkUpResponseMsg) Code() uint64 {
 
 func NewSubmitterWalkUpResponseMsg(req *SubmitterWalkUpRequestMsg) *SubmitterWalkUpResponseMsg {
 	return &SubmitterWalkUpResponseMsg{
+		Submitter:    req.Submitter,
+		Seq:          req.Seq,
+		Transactions: nil,
+		Shards:       nil,
+	}
+}
+
+type SubmitterProcessDownRequestMsg struct {
+	Submitter []byte
+	Seq       uint64
+}
+
+func (m *SubmitterProcessDownRequestMsg) Id() []byte {
+	id := []byte("SubmitterProcessDownRequestMsg")
+	id = append(id, common.Uint64ToBytes(m.Seq)...)
+	return append(id, m.Submitter...)
+}
+
+func (m *SubmitterProcessDownRequestMsg) Code() uint64 {
+	return SubmitterProcessDownRequestMsgCode
+}
+
+func NewSubmitterProcessDownRequestMsg(resp *SubmitterWalkUpResponseMsg) *SubmitterProcessDownRequestMsg {
+	return &SubmitterProcessDownRequestMsg{
+		Submitter: resp.Submitter,
+		Seq:       resp.Seq + 1,
+	}
+}
+
+type SubmitterProcessDownResponseMsg struct {
+	Submitter    []byte
+	Seq          uint64
+	Transactions [][64]byte
+	Shards       [][]byte
+}
+
+func (m *SubmitterProcessDownResponseMsg) Id() []byte {
+	id := []byte("SubmitterProcessDownResponseMsg")
+	id = append(id, common.Uint64ToBytes(m.Seq)...)
+	return append(id, m.Submitter...)
+}
+
+func (m *SubmitterProcessDownResponseMsg) Code() uint64 {
+	return SubmitterProcessDownResponseMsgCode
+}
+
+func NewSubmitterProcessDownResponseMsg(req *SubmitterProcessDownRequestMsg) *SubmitterProcessDownResponseMsg {
+	return &SubmitterProcessDownResponseMsg{
 		Submitter:    req.Submitter,
 		Seq:          req.Seq,
 		Transactions: nil,
