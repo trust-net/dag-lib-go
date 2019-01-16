@@ -394,10 +394,11 @@ func cli(dlt stack.DLT) error {
 						if len(arg.Source) != 0 && len(dest1) != 0 && len(dest2) != 0 && arg.Value > 0 {
 							arg.Destination = dest1
 							anchor1 := dlt.Anchor(submitter, lastSeq+1, lastTx)
+							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
 							makeTransaction(anchor1, OpCodeXferValue, arg)
 							arg.Destination = dest2
-							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
+//							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
 							makeTransaction(anchor2, OpCodeXferValue, arg)
 						} else {

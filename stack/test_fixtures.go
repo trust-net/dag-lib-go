@@ -85,18 +85,39 @@ func NewMockEndorser(db repo.DltDb) *mockEndorser {
 }
 
 type mockSharder struct {
-	IsRegistered     bool
-	ShardId          []byte
-	AnchorCalled     bool
-	SyncAnchorCalled bool
-	AncestorsCalled  bool
-	ChildrenCalled   bool
-	ApproverCalled   bool
-	TxHandlerCalled  bool
-	GetStateCalled   bool
-	GetStateKey      []byte
-	TxHandler        func(tx dto.Transaction, state state.State) error
-	orig             shard.Sharder
+	LockStateCalled   bool
+	UnlockStateCalled bool
+	CommitStateCalled bool
+	IsRegistered      bool
+	ShardId           []byte
+	AnchorCalled      bool
+	SyncAnchorCalled  bool
+	AncestorsCalled   bool
+	ChildrenCalled    bool
+	ApproverCalled    bool
+	TxHandlerCalled   bool
+	GetStateCalled    bool
+	GetStateKey       []byte
+	TxHandler         func(tx dto.Transaction, state state.State) error
+	orig              shard.Sharder
+}
+
+func (s *mockSharder) LockState() error {
+	s.LockStateCalled = true
+	// lock world state
+	return s.orig.LockState()
+}
+
+func (s *mockSharder) UnlockState() {
+	s.UnlockStateCalled = true
+	// unlock world state
+	s.orig.UnlockState()
+}
+
+func (s *mockSharder) CommitState() error {
+	s.CommitStateCalled = true
+	// transaction processed successfully, persist world state
+	return s.orig.CommitState()
 }
 
 func (s *mockSharder) Register(shardId []byte, txHandler func(tx dto.Transaction, state state.State) error) error {

@@ -73,9 +73,9 @@ func TestRegistration(t *testing.T) {
 		t.Errorf("Incorrect method call count: %d", testDb.UpdateShardCount)
 	}
 
-	// make sure that world state reference is initialized correctly
-	if s.worldState == nil {
-		t.Errorf("Sharder did not set world state reference when app is registered")
+	// make sure that world state reference is nil (will be set then locked)
+	if s.worldState != nil {
+		t.Errorf("Sharder should not set world state reference when app is registered")
 	}
 }
 

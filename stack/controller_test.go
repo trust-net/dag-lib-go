@@ -303,6 +303,15 @@ func TestSubmit(t *testing.T) {
 	if err := stack.Submit(tx); err != nil {
 		t.Errorf("Transaction submission failed, err: %s", err)
 	}
+	if !sharder.LockStateCalled {
+		t.Errorf("Controller did not lock world state before transaction processing")
+	}
+	if !sharder.UnlockStateCalled {
+		t.Errorf("Controller did not unlock world state after transaction processing")
+	}
+	if !sharder.CommitStateCalled {
+		t.Errorf("Controller should commit world state upon failed transaction processing")
+	}
 
 	// walk down the DLT stack and validate expectations
 
@@ -358,6 +367,15 @@ func TestReSubmitSeen(t *testing.T) {
 	if sharder.ApproverCalled {
 		t.Errorf("Sharder should not get called for seen submission")
 	}
+	if sharder.LockStateCalled {
+		t.Errorf("Controller should not lock world state before transaction processing")
+	}
+	if sharder.UnlockStateCalled {
+		t.Errorf("Controller should not unlock world state after transaction processing")
+	}
+	if sharder.CommitStateCalled {
+		t.Errorf("Controller should not commit world state upon failed transaction processing")
+	}
 
 	// verify that endorser does not gets called for seen submission
 	if endorser.ApproverCalled {
@@ -387,6 +405,15 @@ func TestSubmitNetworkSeen(t *testing.T) {
 	// verify that sharding layer does not gets called for seen submission
 	if sharder.TxHandlerCalled {
 		t.Errorf("Sharder should not get called for seen submission")
+	}
+	if sharder.LockStateCalled {
+		t.Errorf("Controller should not lock world state before transaction processing")
+	}
+	if sharder.UnlockStateCalled {
+		t.Errorf("Controller should not unlock world state after transaction processing")
+	}
+	if sharder.CommitStateCalled {
+		t.Errorf("Controller should not commit world state upon failed transaction processing")
 	}
 
 	// verify that endorser does not gets called for seen submission
@@ -641,6 +668,15 @@ func TestRECV_NewTxBlockMsgEvent(t *testing.T) {
 	if !sharder.TxHandlerCalled {
 		t.Errorf("DLT stack controller did not call sharding layer")
 	}
+	if !sharder.LockStateCalled {
+		t.Errorf("Controller did not lock world state before transaction processing")
+	}
+	if !sharder.UnlockStateCalled {
+		t.Errorf("Controller did not unlock world state after transaction processing")
+	}
+	if !sharder.CommitStateCalled {
+		t.Errorf("Controller should commit world state upon failed transaction processing")
+	}
 
 	// verify that endorser gets called for network message
 	if !endorser.TxHandlerCalled {
@@ -696,6 +732,15 @@ func TestRECV_NewTxBlockMsgEvent_Duplicate(t *testing.T) {
 	// sharding layer should not have be asked to handle duplicate transaction
 	if sharder.TxHandlerCalled {
 		t.Errorf("DLT stack controller should not call sharding layer for duplicate transaction")
+	}
+	if sharder.LockStateCalled {
+		t.Errorf("Controller should not lock world state before transaction processing")
+	}
+	if sharder.UnlockStateCalled {
+		t.Errorf("Controller should not unlock world state after transaction processing")
+	}
+	if sharder.CommitStateCalled {
+		t.Errorf("Controller should not commit world state upon failed transaction processing")
 	}
 
 	// we should NOT have broadcasted message
@@ -759,6 +804,15 @@ func TestRECV_NewTxBlockMsgEvent_DoubleSpend(t *testing.T) {
 	// sharding layer should not have be asked to handle double spending transaction
 	if sharder.TxHandlerCalled {
 		t.Errorf("DLT stack controller should not call sharding layer for double spending transaction")
+	}
+	if sharder.LockStateCalled {
+		t.Errorf("Controller should not lock world state before transaction processing")
+	}
+	if sharder.UnlockStateCalled {
+		t.Errorf("Controller should not unlock world state after transaction processing")
+	}
+	if sharder.CommitStateCalled {
+		t.Errorf("Controller should not commit world state upon failed transaction processing")
 	}
 
 	// we should NOT have broadcasted message
@@ -831,6 +885,15 @@ func TestRECV_NewTxBlockMsgEvent_UnknownLastTx(t *testing.T) {
 	// sharding layer should not have be asked to handle transaction
 	if sharder.TxHandlerCalled {
 		t.Errorf("DLT stack controller should not call sharding layer for unknown last submitter transaction")
+	}
+	if sharder.LockStateCalled {
+		t.Errorf("Controller should not lock world state before transaction processing")
+	}
+	if sharder.UnlockStateCalled {
+		t.Errorf("Controller should not unlock world state after transaction processing")
+	}
+	if sharder.CommitStateCalled {
+		t.Errorf("Controller should not commit world state upon failed transaction processing")
 	}
 
 	// we should NOT have broadcasted message

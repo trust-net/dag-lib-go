@@ -144,6 +144,11 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 	}
 
 	// send the submitted transaction for approval to sharding layer
+	if err := d.sharder.LockState(); err != nil {
+		d.logger.Error("Failed to get world state lock: %s", err)
+		return err
+	}
+	defer d.sharder.UnlockState()
 	if err := d.sharder.Approve(tx); err != nil {
 		d.logger.Debug("Submitted transaction failed to approve at sharder: %s", err)
 		return err
@@ -154,6 +159,9 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 	if err := d.endorser.Approve(tx); err != nil {
 		d.logger.Debug("Submitted transaction failed to approve at endorser: %s", err)
 		return err
+	} else {
+		d.logger.Debug("Commiting world state after successful transaction: %x", tx.Id())
+		d.sharder.CommitState()
 	}
 
 	// finally send it to p2p layer, to broadcase to others
@@ -263,9 +271,17 @@ func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx d
 	}
 
 	// let sharding layer process transaction
+	if err := d.sharder.LockState(); err != nil {
+		d.logger.Error("Failed to get world state lock: %s", err)
+		return err
+	}
+	defer d.sharder.UnlockState()
 	if err := d.sharder.Handle(tx); err != nil {
 		d.logger.Error("Failed to shard transaction: %s", err)
 		return err
+	} else {
+		d.logger.Debug("Commiting world state after successful transaction: %x", tx.Id())
+		d.sharder.CommitState()
 	}
 
 	// mark sender of the message as seen
