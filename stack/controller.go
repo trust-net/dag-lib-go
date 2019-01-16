@@ -559,6 +559,15 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				done = true
 				break
 			}
+
+		case RECV_SubmitterProcessDownRequestMsg:
+			if err := d.handleRECV_SubmitterProcessDownRequestMsg(peer, events, e.data.(*SubmitterProcessDownRequestMsg)); err != nil {
+				d.logger.Debug("Failed to handle SubmitterProcessDownRequestMsg: %s", err)
+				peer.Disconnect()
+				done = true
+				break
+			}
+
 		case SHUTDOWN:
 			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true
@@ -685,6 +694,24 @@ func (d *dlt) handleRECV_SubmitterWalkUpResponseMsg(peer p2p.Peer, events chan c
 		peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), req.Id())
 		// send the submitter history request to peer
 		peer.Send(req.Id(), req.Code(), req)
+	}
+	return nil
+}
+
+func (d *dlt) handleRECV_SubmitterProcessDownRequestMsg(peer p2p.Peer, events chan controllerEvent, msg *SubmitterProcessDownRequestMsg) error {
+	// fetch the submitter/seq's history for known shard/transaction pairs
+	_, txIds := d.endorser.KnownShardsTxs(msg.Submitter, msg.Seq)
+	txs := []dto.Transaction{}
+	// fetch actual transactions that are in history
+	for _, id := range txIds {
+		txs = append(txs, d.db.GetTx(id))
+	}
+	// build the response
+	if resp := NewSubmitterProcessDownResponseMsg(msg, txs); resp != nil {
+		d.logger.Debug("responding with %d transactions for: %x / %d", len(resp.TxBytes), resp.Submitter, resp.Seq)
+		peer.Send(resp.Id(), resp.Code(), resp)
+	} else {
+		return errors.New("Failed to create a SubmitterProcessDownResponseMsg")
 	}
 	return nil
 }
@@ -834,6 +861,17 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			} else {
 				// emit a RECV_SubmitterWalkUpResponseMsg event
 				events <- newControllerEvent(RECV_SubmitterWalkUpResponseMsg, m)
+			}
+
+		case SubmitterProcessDownRequestMsgCode:
+			// deserialize the submitter history request message from payload
+			m := &SubmitterProcessDownRequestMsg{}
+			if err := msg.Decode(m); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				return err
+			} else {
+				// emit a RECV_SubmitterProcessDownRequestMsg event
+				events <- newControllerEvent(RECV_SubmitterProcessDownRequestMsg, m)
 			}
 
 		// case 1 message type

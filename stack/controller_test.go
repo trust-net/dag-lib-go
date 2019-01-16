@@ -771,9 +771,6 @@ func TestRECV_NewTxBlockMsgEvent_DoubleSpend(t *testing.T) {
 	mockConn := p2p.TestConn()
 	peer := NewMockPeer(mockConn)
 
-	log.SetLogLevel(log.DEBUG)
-	defer log.SetLogLevel(log.NONE)
-
 	// start stack's event listener
 	events := make(chan controllerEvent, 10)
 	finished := make(chan struct{}, 2)

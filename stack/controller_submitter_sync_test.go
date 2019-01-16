@@ -584,9 +584,6 @@ func TestRECV_SubmitterWalkUpResponseMsg_StateValidationFailed(t *testing.T) {
 	// set the peer state to a value different from message ID
 	peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), []byte("some random value"))
 
-	log.SetLogLevel(log.DEBUG)
-	defer log.SetLogLevel(log.NONE)
-
 	// start stack's event listener
 	events := make(chan controllerEvent, 10)
 	finished := make(chan struct{}, 2)
@@ -613,5 +610,272 @@ func TestRECV_SubmitterWalkUpResponseMsg_StateValidationFailed(t *testing.T) {
 	// we should have disconnected with peer
 	if !peer.DisconnectCalled {
 		t.Errorf("did not disconncect with peer")
+	}
+}
+
+// stack controller listner generates RECV_SubmitterProcessDownRequestMsg event for SubmitterProcessDownRequestMsg message
+func TestPeerListnerGeneratesEventForSubmitterProcessDownRequestMsg(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, _, _, _ := initMocks()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// setup mock connection to send a SubmitterProcessDownRequestMsg followed by clean shutdown
+	mockConn.NextMsg(SubmitterProcessDownRequestMsgCode, &SubmitterProcessDownRequestMsg{})
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
+
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	finished := checkForEventCode(RECV_SubmitterProcessDownRequestMsg, events)
+
+	// now call stack's listener
+	if err := stack.listener(peer, events); err != nil {
+		t.Errorf("Transaction processing has errors: %s", err)
+	}
+
+	// wait for event listener to process
+	result := <-finished
+
+	// check if listener generate correct event
+	if !result.seenMsgEvent {
+		t.Errorf("Event listener did not generate RECV_SubmitterProcessDownRequestMsg event!!!")
+	}
+}
+
+// test stack controller event listener handles RECV_SubmitterProcessDownRequestMsg correctly
+func TestRECV_SubmitterProcessDownRequestMsg_HasEntry(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
+
+	// setup DLT DB with submitter history using 2 shard/transaction pairs for the submitter/seq
+	submitter := []byte("a test submitter")
+	seq := uint64(0x21)
+	tx1 := TestSignedTransaction("test payload1")
+	tx1.Anchor().Submitter = submitter
+	tx1.Anchor().SubmitterSeq = seq
+	tx1.Anchor().ShardId = []byte("shard 1")
+	if err := testDb.UpdateSubmitter(tx1); err != nil {
+		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
+	} else if err := testDb.UpdateShard(tx1); err != nil {
+		t.Errorf("Failed to update shard DAG for transaction 1: %s", err)
+	} else if err := testDb.AddTx(tx1); err != nil {
+		t.Errorf("Failed to save transaction 1: %s", err)
+	}
+	tx2 := TestSignedTransaction("test payload2")
+	tx2.Anchor().Submitter = submitter
+	tx2.Anchor().SubmitterSeq = seq
+	tx2.Anchor().ShardId = []byte("shard 2")
+	if err := testDb.UpdateSubmitter(tx2); err != nil {
+		t.Errorf("Failed to update submitter history for transaction 2: %s", err)
+	} else if err := testDb.UpdateShard(tx2); err != nil {
+		t.Errorf("Failed to update shard DAG for transaction 2: %s", err)
+	} else if err := testDb.AddTx(tx2); err != nil {
+		t.Errorf("Failed to save transaction 2: %s", err)
+	}
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+	testDb.Reset()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// now emit RECV_SubmitterProcessDownRequestMsg event requesting history using submitter's seq setup above
+	req := &SubmitterProcessDownRequestMsg{
+		Submitter: submitter,
+		Seq:       seq,
+	}
+	events <- newControllerEvent(RECV_SubmitterProcessDownRequestMsg, req)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle submitter's process down request
+
+	// verify that endorser gets called to fetch submitter's known shards/tx
+	if !endorser.KnownShardsTxsCalled {
+		t.Errorf("Endorser did not get called for submitter/seq history")
+	}
+
+	// we should have sent the SubmitterProcessDownResponseMsg back with correct transactions from submitter/seq history
+	tx1Bytes, _ := tx1.Serialize()
+	tx2Bytes, _ := tx2.Serialize()
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != SubmitterProcessDownResponseMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if string(peer.SendMsg.(*SubmitterProcessDownResponseMsg).Submitter) != string(req.Submitter) {
+		t.Errorf("Incorrect response submitter: %x\nExpected: %x", peer.SendMsg.(*SubmitterProcessDownResponseMsg).Submitter, req.Submitter)
+	} else if peer.SendMsg.(*SubmitterProcessDownResponseMsg).Seq != req.Seq {
+		t.Errorf("Incorrect response sequence: %x\nExpected: %x", peer.SendMsg.(*SubmitterProcessDownResponseMsg).Seq, req.Seq)
+	} else if len(peer.SendMsg.(*SubmitterProcessDownResponseMsg).TxBytes) != 2 {
+		t.Errorf("Incorrect number of transactions: %d", len(peer.SendMsg.(*SubmitterProcessDownResponseMsg).TxBytes))
+	} else if string(peer.SendMsg.(*SubmitterProcessDownResponseMsg).TxBytes[0]) != string(tx1Bytes) {
+		t.Errorf("Incorrect transaction 1 in response: %x\nExpected: %x", peer.SendMsg.(*SubmitterProcessDownResponseMsg).TxBytes[0], tx1Bytes)
+	} else if string(peer.SendMsg.(*SubmitterProcessDownResponseMsg).TxBytes[1]) != string(tx2Bytes) {
+		t.Errorf("Incorrect transaction 2 in response: %x\nExpected: %x", peer.SendMsg.(*SubmitterProcessDownResponseMsg).TxBytes[1], tx2Bytes)
+	}
+}
+
+// test stack controller event listener handles RECV_SubmitterProcessDownRequestMsg correctly when no history
+func TestRECV_SubmitterProcessDownRequestMsg_NoEntry(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
+
+	// setup DLT DB with submitter history using 2 shard/transaction pairs for the submitter/seq
+	submitter := []byte("a test submitter")
+	seq := uint64(0x21)
+	tx1 := TestSignedTransaction("test payload1")
+	tx1.Anchor().Submitter = submitter
+	tx1.Anchor().SubmitterSeq = seq
+	tx1.Anchor().ShardId = []byte("shard 1")
+	if err := testDb.UpdateSubmitter(tx1); err != nil {
+		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
+	} else if err := testDb.UpdateShard(tx1); err != nil {
+		t.Errorf("Failed to update shard DAG for transaction 1: %s", err)
+	} else if err := testDb.AddTx(tx1); err != nil {
+		t.Errorf("Failed to save transaction 1: %s", err)
+	}
+	tx2 := TestSignedTransaction("test payload2")
+	tx2.Anchor().Submitter = submitter
+	tx2.Anchor().SubmitterSeq = seq
+	tx2.Anchor().ShardId = []byte("shard 2")
+	if err := testDb.UpdateSubmitter(tx2); err != nil {
+		t.Errorf("Failed to update submitter history for transaction 2: %s", err)
+	} else if err := testDb.UpdateShard(tx2); err != nil {
+		t.Errorf("Failed to update shard DAG for transaction 2: %s", err)
+	} else if err := testDb.AddTx(tx2); err != nil {
+		t.Errorf("Failed to save transaction 2: %s", err)
+	}
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+	testDb.Reset()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// now emit RECV_SubmitterProcessDownRequestMsg event requesting history using submitter's seq that has no history
+	req := &SubmitterProcessDownRequestMsg{
+		Submitter: submitter,
+		Seq:       seq + 1,
+	}
+	events <- newControllerEvent(RECV_SubmitterProcessDownRequestMsg, req)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle submitter's process down request
+
+	// verify that endorser gets called to fetch submitter's known shards/tx
+	if !endorser.KnownShardsTxsCalled {
+		t.Errorf("Endorser did not get called for submitter/seq history")
+	}
+
+	// we should have sent the SubmitterProcessDownResponseMsg back with correct transactions from submitter/seq history
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != SubmitterProcessDownResponseMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if string(peer.SendMsg.(*SubmitterProcessDownResponseMsg).Submitter) != string(req.Submitter) {
+		t.Errorf("Incorrect response submitter: %x\nExpected: %x", peer.SendMsg.(*SubmitterProcessDownResponseMsg).Submitter, req.Submitter)
+	} else if peer.SendMsg.(*SubmitterProcessDownResponseMsg).Seq != req.Seq {
+		t.Errorf("Incorrect response sequence: %x\nExpected: %x", peer.SendMsg.(*SubmitterProcessDownResponseMsg).Seq, req.Seq)
+	} else if len(peer.SendMsg.(*SubmitterProcessDownResponseMsg).TxBytes) != 0 {
+		t.Errorf("Incorrect number of transactions: %d", len(peer.SendMsg.(*SubmitterProcessDownResponseMsg).TxBytes))
+	}
+}
+
+// test stack controller event listener handles RECV_SubmitterProcessDownRequestMsg correctly for 0 seq
+func TestRECV_SubmitterProcessDownRequestMsg_ZeroSeq(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
+
+	// setup DLT DB with submitter history using 1 shard/transaction pairs for the submitter/seq
+	submitter := []byte("a test submitter")
+	seq := uint64(0x1)
+	tx1 := TestSignedTransaction("test payload1")
+	tx1.Anchor().Submitter = submitter
+	tx1.Anchor().SubmitterSeq = seq
+	tx1.Anchor().ShardId = []byte("shard 1")
+	if err := testDb.UpdateSubmitter(tx1); err != nil {
+		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
+	} else if err := testDb.UpdateShard(tx1); err != nil {
+		t.Errorf("Failed to update shard DAG for transaction 1: %s", err)
+	} else if err := testDb.AddTx(tx1); err != nil {
+		t.Errorf("Failed to save transaction 1: %s", err)
+	}
+
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+	testDb.Reset()
+
+	log.SetLogLevel(log.DEBUG)
+	defer log.SetLogLevel(log.NONE)
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// now emit RECV_SubmitterProcessDownRequestMsg event requesting history using submitter's 0 seq
+	req := &SubmitterProcessDownRequestMsg{
+		Submitter: submitter,
+		Seq:       0x00,
+	}
+	events <- newControllerEvent(RECV_SubmitterProcessDownRequestMsg, req)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle submitter's process down request
+
+	// verify that endorser gets called to fetch submitter's known shards/tx
+	if !endorser.KnownShardsTxsCalled {
+		t.Errorf("Endorser did not get called for submitter/seq history")
+	}
+
+	// we should have sent the SubmitterProcessDownResponseMsg back with correct transactions from submitter/seq history
+	if !peer.SendCalled {
+		t.Errorf("did not send any message to peer")
+	} else if peer.SendMsgCode != SubmitterProcessDownResponseMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if string(peer.SendMsg.(*SubmitterProcessDownResponseMsg).Submitter) != string(req.Submitter) {
+		t.Errorf("Incorrect response submitter: %x\nExpected: %x", peer.SendMsg.(*SubmitterProcessDownResponseMsg).Submitter, req.Submitter)
+	} else if peer.SendMsg.(*SubmitterProcessDownResponseMsg).Seq != req.Seq {
+		t.Errorf("Incorrect response sequence: %x\nExpected: %x", peer.SendMsg.(*SubmitterProcessDownResponseMsg).Seq, req.Seq)
+	} else if len(peer.SendMsg.(*SubmitterProcessDownResponseMsg).TxBytes) != 0 {
+		t.Errorf("Incorrect number of transactions: %d", len(peer.SendMsg.(*SubmitterProcessDownResponseMsg).TxBytes))
 	}
 }

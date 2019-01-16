@@ -209,10 +209,9 @@ func NewSubmitterProcessDownRequestMsg(resp *SubmitterWalkUpResponseMsg) *Submit
 }
 
 type SubmitterProcessDownResponseMsg struct {
-	Submitter    []byte
-	Seq          uint64
-	Transactions [][64]byte
-	Shards       [][]byte
+	Submitter []byte
+	Seq       uint64
+	TxBytes   [][]byte
 }
 
 func (m *SubmitterProcessDownResponseMsg) Id() []byte {
@@ -225,12 +224,19 @@ func (m *SubmitterProcessDownResponseMsg) Code() uint64 {
 	return SubmitterProcessDownResponseMsgCode
 }
 
-func NewSubmitterProcessDownResponseMsg(req *SubmitterProcessDownRequestMsg) *SubmitterProcessDownResponseMsg {
+func NewSubmitterProcessDownResponseMsg(req *SubmitterProcessDownRequestMsg, txs []dto.Transaction) *SubmitterProcessDownResponseMsg {
+	txBytes := [][]byte{}
+	for _, tx := range txs {
+		if bytes, err := tx.Serialize(); err != nil {
+			return nil
+		} else {
+			txBytes = append(txBytes, bytes)
+		}
+	}
 	return &SubmitterProcessDownResponseMsg{
-		Submitter:    req.Submitter,
-		Seq:          req.Seq,
-		Transactions: nil,
-		Shards:       nil,
+		Submitter: req.Submitter,
+		Seq:       req.Seq,
+		TxBytes:   txBytes,
 	}
 }
 
