@@ -675,7 +675,7 @@ func TestRECV_NewTxBlockMsgEvent(t *testing.T) {
 		t.Errorf("Controller did not unlock world state after transaction processing")
 	}
 	if !sharder.CommitStateCalled {
-		t.Errorf("Controller should commit world state upon failed transaction processing")
+		t.Errorf("Controller should commit world state upon successfull transaction processing")
 	}
 
 	// verify that endorser gets called for network message
@@ -913,14 +913,14 @@ func TestRECV_NewTxBlockMsgEvent_UnknownLastTx(t *testing.T) {
 		t.Errorf("saved orphan tx incorrect")
 	}
 
-	// we should have set the peer state
-	if data := peer.GetState(int(RECV_SubmitterWalkUpResponseMsg)); data == nil {
-		t.Errorf("controller did not save last hash for walk up response message")
-	} else if state, ok := data.([]byte); !ok {
-		t.Errorf("controller saved incorrect state type: %T", data)
-	} else if string(state) != string(peer.SendMsgId) {
-		t.Errorf("controller saved incorrect hash:\n%x\nExpected:\n%x", state, peer.SendMsgId)
-	}
+	//	// we should have set the peer state
+	//	if data := peer.GetState(int(RECV_SubmitterWalkUpResponseMsg)); data == nil {
+	//		t.Errorf("controller did not save last hash for walk up response message")
+	//	} else if state, ok := data.([]byte); !ok {
+	//		t.Errorf("controller saved incorrect state type: %T", data)
+	//	} else if string(state) != string(peer.SendMsgId) {
+	//		t.Errorf("controller saved incorrect hash:\n%x\nExpected:\n%x", state, peer.SendMsgId)
+	//	}
 
 	// we should have sent the submitter sync message
 	if !peer.SendCalled {

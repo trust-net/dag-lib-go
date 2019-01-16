@@ -8,7 +8,7 @@ import (
 func TestInitiatization(t *testing.T) {
 	var tr Trustee
 	var err error
-	tr, err = NewTrustee(db.NewInMemDatabase())
+	tr, err = NewTrustee(db.NewInMemDatabase("test db"))
 	if tr.(*trustee) != nil || err == nil {
 		t.Errorf("Initiatization validation failed, c: %s, err: %s", tr, err)
 	}

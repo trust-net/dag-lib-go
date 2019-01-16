@@ -259,8 +259,13 @@ func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx d
 			// trigger submitter sync
 			req := NewSubmitterWalkUpRequestMsg(tx.Anchor())
 			d.logger.Debug("Initiating submitter sync for Submitter/Seq: %x/%d", req.Submitter, req.Seq)
-			// save the request hash into peer's state to validate ancestors response
-			peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), req.Id())
+
+			// not saving/checking peer state because ID for request is different response, and
+			// we possibly want to run multiple sync's in parallel with same peer, so just do validation
+			// on actual response message contents
+			//			// save the request hash into peer's state to validate ancestors response
+			//			peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), req.Id())
+
 			// send the submitter history request to peer
 			peer.Send(req.Id(), req.Code(), req)
 
@@ -568,6 +573,14 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				break
 			}
 
+		case RECV_SubmitterProcessDownResponseMsg:
+			if err := d.handleRECV_SubmitterProcessDownResponseMsg(peer, events, e.data.(*SubmitterProcessDownResponseMsg)); err != nil {
+				d.logger.Debug("Failed to handle SubmitterProcessDownResponseMsg: %s", err)
+				peer.Disconnect()
+				done = true
+				break
+			}
+
 		case SHUTDOWN:
 			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true
@@ -635,14 +648,19 @@ func (d *dlt) handleRECV_SubmitterWalkUpResponseMsg(peer p2p.Peer, events chan c
 		d.logger.Error("Recieved %d shards but %d transactions for submmiter/seq: %x [%d]", len(msg.Shards), len(msg.Transactions), msg.Submitter, msg.Seq)
 		return errors.New("shard transaction pair count mismatch")
 	}
-	// confirm that message id matches expected peer state
-	if data := peer.GetState(int(RECV_SubmitterWalkUpResponseMsg)); data == nil || string(data.([]byte)) != string(msg.Id()) {
-		d.logger.Error("Recieved unexpected SubmitterWalkUpResponseMsg for submmiter/seq: %x / %d", msg.Submitter, msg.Seq)
-		return errors.New("unexpected SubmitterWalkUpResponseMsg")
-	} else {
-		// reset the peer state
-		peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), nil)
-	}
+	// not saving/checking peer state because ID for request is different response, and
+	// we possibly want to run multiple sync's in parallel with same peer, so just do validation
+	// on actual response message contents
+
+	//	// confirm that message id matches expected peer state
+	//	if data := peer.GetState(int(RECV_SubmitterWalkUpResponseMsg)); data == nil || string(data.([]byte)) != string(msg.Id()) {
+	//		d.logger.Error("Recieved unexpected SubmitterWalkUpResponseMsg for submmiter/seq: %x / %d", msg.Submitter, msg.Seq)
+	//		return errors.New("unexpected SubmitterWalkUpResponseMsg")
+	//	} else {
+	//		// reset the peer state
+	//		peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), nil)
+	//	}
+
 	// fetch the local submitter/seq's history for known shard/transaction pairs
 	shards, transactions := d.endorser.KnownShardsTxs(msg.Submitter, msg.Seq)
 	shardMap := make(map[string]int)
@@ -678,8 +696,8 @@ func (d *dlt) handleRECV_SubmitterWalkUpResponseMsg(peer p2p.Peer, events chan c
 	if allMatched {
 		// build a walk down request
 		req := NewSubmitterProcessDownRequestMsg(msg)
-		// save hash for validation of response
-		peer.SetState(int(RECV_SubmitterProcessDownResponseMsg), req.Id())
+		//		// save hash for validation of response
+		//		peer.SetState(int(RECV_SubmitterProcessDownResponseMsg), req.Id())
 		// send message to peer
 		d.logger.Debug("requesting submitter history for: %x / %d", req.Submitter, req.Seq)
 		peer.Send(req.Id(), req.Code(), req)
@@ -690,8 +708,8 @@ func (d *dlt) handleRECV_SubmitterWalkUpResponseMsg(peer p2p.Peer, events chan c
 			Seq:       msg.Seq - 1,
 		}
 		d.logger.Debug("continuing walk up for Submitter/Seq: %x/%d", req.Submitter, req.Seq)
-		// save the request hash into peer's state to validate ancestors response
-		peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), req.Id())
+		//		// save the request hash into peer's state to validate ancestors response
+		//		peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), req.Id())
 		// send the submitter history request to peer
 		peer.Send(req.Id(), req.Code(), req)
 	}
@@ -714,6 +732,72 @@ func (d *dlt) handleRECV_SubmitterProcessDownRequestMsg(peer p2p.Peer, events ch
 		return errors.New("Failed to create a SubmitterProcessDownResponseMsg")
 	}
 	return nil
+}
+
+func (d *dlt) handleRECV_SubmitterProcessDownResponseMsg(peer p2p.Peer, events chan controllerEvent, msg *SubmitterProcessDownResponseMsg) error {
+	// confirm that we did receive response for non-zero sequence
+	if msg.Seq < 1 {
+		d.logger.Error("Recieved incorrect submmiter/seq: %x [%d]", msg.Submitter, msg.Seq)
+		return errors.New("zero seq")
+	}
+	// if response does not have any transactions then EndOfSync
+	if len(msg.TxBytes) == 0 {
+		d.logger.Debug("End of sync at submmiter/seq: %x [%d]", msg.Submitter, msg.Seq)
+		return nil
+	}
+	// process each transaction in the response
+	for _, bytes := range msg.TxBytes {
+		// deserialize the transaction message from bytes
+		tx := dto.NewTransaction(&dto.Anchor{})
+		if err := tx.DeSerialize(bytes); err != nil {
+			d.logger.Error("Failed to decode transaction from SubmitterProcessDownResponseMsg: %s", err)
+			return err
+		}
+
+		// validate transaction signature using transaction submitter's ID
+		if !d.p2p.Verify(tx.Self().Payload, tx.Self().Signature, tx.Anchor().Submitter) {
+			d.logger.Error("recieved a transaction with invalid signature in SubmitterProcessDownResponseMsg")
+			return errors.New("Transaction signature invalid")
+		}
+
+		// if transaction's submitter/seq does not match response's submitter/seq -- disconnect peer and abort
+		if string(tx.Anchor().Submitter) != string(msg.Submitter) || tx.Anchor().SubmitterSeq != msg.Seq {
+			d.logger.Error("Included transaction: %x / %d does not match SubmitterProcessDownResponseMsg: %x / %d", tx.Anchor().Submitter, tx.Anchor().SubmitterSeq, msg.Submitter, msg.Seq)
+			return errors.New("transaction mismatch")
+		}
+
+		// mark the transaction as seen by stack
+		d.isSeen(tx.Id())
+
+		// check if need to initiate a shard sync with peer due to this transaction
+		// check if transaction's parent is known
+		if d.db.GetTx(tx.Anchor().ShardParent) != nil {
+			// parent is known, so process normally
+			if err := d.handleTransaction(peer, events, tx, false); err != nil {
+				d.logger.Debug("Failed to handle SubmitterProcessDownResponseMsg transaction: %s", err)
+				// we got an error condition (i.e. either got double spend, or an orphan transaction)
+				// terminate processing and return, but do not disconnect with peer
+				return nil
+			}
+		} else {
+			// parent is unknown, so initiate sync with peer
+			if err := d.toWalkUpStage(tx.Anchor(), peer); err != nil {
+				d.logger.Debug("Failed to transition to WalkUpStage: %s", err)
+				return errors.New("transition to WalkUpStage failed")
+			} else {
+				// initiated shard sync, so stop processing for now
+				return nil
+			}
+		}
+	}
+	// send a SubmitterProcessDownRequestMsg with next higher sequence to peer
+	req := &SubmitterProcessDownRequestMsg{
+		Submitter: msg.Submitter,
+		Seq:       msg.Seq + 1,
+	}
+	d.logger.Debug("continuing processing down for Submitter/Seq: %x/%d", req.Submitter, req.Seq)
+	// send the submitter history request to peer
+	return peer.Send(req.Id(), req.Code(), req)
 }
 
 // listen on messages from the peer node
@@ -872,6 +956,17 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			} else {
 				// emit a RECV_SubmitterProcessDownRequestMsg event
 				events <- newControllerEvent(RECV_SubmitterProcessDownRequestMsg, m)
+			}
+
+		case SubmitterProcessDownResponseMsgCode:
+			// deserialize the submitter history request message from payload
+			m := &SubmitterProcessDownResponseMsg{}
+			if err := msg.Decode(m); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				return err
+			} else {
+				// emit a RECV_SubmitterProcessDownResponseMsg event
+				events <- newControllerEvent(RECV_SubmitterProcessDownResponseMsg, m)
 			}
 
 		// case 1 message type
