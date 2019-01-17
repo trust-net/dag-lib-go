@@ -23,6 +23,7 @@ const (
 	RECV_SubmitterWalkUpResponseMsg
 	RECV_SubmitterProcessDownRequestMsg
 	RECV_SubmitterProcessDownResponseMsg
+	RECV_ForceShardFlushMsg
 	POP_ShardChild
 	ALERT_DoubleSpend
 	SHUTDOWN

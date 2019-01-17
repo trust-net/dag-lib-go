@@ -593,6 +593,14 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				break
 			}
 
+		case RECV_ForceShardFlushMsg:
+			if err := d.handleRECV_ForceShardFlushMsg(peer, events, e.data.(*ForceShardFlushMsg)); err != nil {
+				d.logger.Debug("Failed to handle RECV_ForceShardFlushMsg: %s", err)
+				peer.Disconnect()
+				done = true
+				break
+			}
+
 		case SHUTDOWN:
 			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true
@@ -855,6 +863,49 @@ func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent
 	return nil
 }
 
+func (d *dlt) handleRECV_ForceShardFlushMsg(peer p2p.Peer, events chan controllerEvent, msg *ForceShardFlushMsg) error {
+	// deserialize remote transaction from message
+	remoteTx := dto.NewTransaction(&dto.Anchor{})
+	if err := remoteTx.DeSerialize(msg.Bytes); err != nil {
+		d.logger.Debug("Failed to decode remote message: %s", err)
+		return err
+	}
+
+	// fetch local transaction for same submitter/seq/shard
+	shards, transactions := d.endorser.KnownShardsTxs(remoteTx.Anchor().Submitter, remoteTx.Anchor().SubmitterSeq)
+	shardMap := make(map[string]int)
+	for i, shard := range shards {
+		shardMap[string(shard)] = i
+	}
+	var localTx dto.Transaction
+	if indx, found := shardMap[string(remoteTx.Anchor().ShardId)]; !found {
+		d.logger.Error("did not find local shard for submitter/seq: %x / %d", remoteTx.Anchor().Submitter, remoteTx.Anchor().SubmitterSeq)
+		// we received incorrect request, disconnect
+		return errors.New("incorred request to flush shard")
+	} else if localTx = d.db.GetTx(transactions[indx]); localTx == nil {
+		d.logger.Error("did not find my own local transaction: %x", transactions[indx])
+		// local corruption, abort everything
+		return errors.New("local DB corruption")
+	}
+	// compare local with remote
+	// first compare weights, if equal then compare numeric hash
+	if localId, remoteId := localTx.Id(), remoteTx.Id(); localTx.Anchor().Weight > remoteTx.Anchor().Weight ||
+		(localTx.Anchor().Weight == remoteTx.Anchor().Weight &&
+			shard.Numeric(localId[:]) > shard.Numeric(remoteId[:])) {
+		if err := d.sharder.Flush(remoteTx.Anchor().ShardId); err != nil {
+			return err
+		} else {
+			d.logger.Debug("flushed local shard")
+		}
+	} else {
+		// we received incorrect request, disconnect
+		return errors.New("incorred request to flush shard")
+	}
+	// disconnect, will reconnect and initiate new handshake after flush
+	peer.Disconnect()
+	return nil
+}
+
 // listen on messages from the peer node
 func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 	for {
@@ -1022,6 +1073,17 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			} else {
 				// emit a RECV_SubmitterProcessDownResponseMsg event
 				events <- newControllerEvent(RECV_SubmitterProcessDownResponseMsg, m)
+			}
+
+		case ForceShardFlushMsgCode:
+			// deserialize the submitter history request message from payload
+			m := &ForceShardFlushMsg{}
+			if err := msg.Decode(m); err != nil {
+				d.logger.Debug("Failed to decode message: %s", err)
+				return err
+			} else {
+				// emit a RECV_ForceShardFlushMsg event
+				events <- newControllerEvent(RECV_ForceShardFlushMsg, m)
 			}
 
 		// case 1 message type
