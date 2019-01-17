@@ -35,7 +35,6 @@ var submitter []byte
 
 var lastTx = [64]byte{}
 var lastSeq = uint64(0)
-var dltStack stack.DLT
 
 // Transaction Ops
 type Ops struct {
@@ -83,7 +82,7 @@ func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
 	return tx
 }
 
-func makeTransaction(a *dto.Anchor, opCode uint64, arg interface{}) {
+func makeTransaction(dltStack stack.DLT, a *dto.Anchor, opCode uint64, arg interface{}) {
 	if a == nil {
 		fmt.Printf("Error submitting transaction: no anchor!!!\n")
 		return
@@ -164,7 +163,7 @@ func handleOpCodeCreate(tx dto.Transaction, ws state.State, op Ops) error {
 	if err := common.Deserialize(op.Args, &arg); err != nil {
 		return err
 	}
-	fmt.Printf("Transaction to create a resource: %s = %d\n", arg.Name, arg.Value)
+	//	fmt.Printf("Transaction to create a resource: %s = %d\n", arg.Name, arg.Value)
 	// validate: resource should not already exist
 	if r, err := ws.Get([]byte(arg.Name)); err == nil {
 		fmt.Printf("ERROR: attempt to create an existing resource: %s\nOwner: %x", arg.Name, r.Owner)
@@ -186,18 +185,15 @@ func handleOpCodeXferValue(tx dto.Transaction, ws state.State, op Ops) error {
 	if err := common.Deserialize(op.Args, &arg); err != nil {
 		return err
 	}
-	fmt.Printf("Transaction to xfer '%s' ---%d--> '%s'\n", arg.Source, arg.Value, arg.Destination)
-	fmt.Printf("Shard Seq: '%x', Weight: '%x', Parent: %x\n", tx.Anchor().ShardSeq, tx.Anchor().Weight, tx.Anchor().ShardParent)
-	fmt.Printf("Submt Seq: '%x', Parent: %x\n", tx.Anchor().SubmitterSeq, tx.Anchor().SubmitterLastTx)
+	//	fmt.Printf("Transaction to xfer '%s' ---%d--> '%s'\n", arg.Source, arg.Value, arg.Destination)
+	//	fmt.Printf("Shard Seq: '%x', Weight: '%x', Parent: %x\n", tx.Anchor().ShardSeq, tx.Anchor().Weight, tx.Anchor().ShardParent)
+	//	fmt.Printf("Submt Seq: '%x', Parent: %x\n", tx.Anchor().SubmitterSeq, tx.Anchor().SubmitterLastTx)
 	// validate: resources should already exist
 	var from, to *state.Resource
 	var err error
+	// first deduct from source and update world state
 	if from, err = ws.Get([]byte(arg.Source)); err != nil {
 		fmt.Printf("ERROR: attempt to xfer value from a non existing resource: %s\nSubmitter: %x\n", arg.Source, tx.Anchor().Submitter)
-		return fmt.Errorf("Resource does not exists")
-	}
-	if to, err = ws.Get([]byte(arg.Destination)); err != nil {
-		fmt.Printf("ERROR: attempt to xfer value to a non existing resource: %s\nSubmitter: %x\n", arg.Destination, tx.Anchor().Submitter)
 		return fmt.Errorf("Resource does not exists")
 	}
 	// validate: source resource must be owned by submitter
@@ -216,16 +212,22 @@ func handleOpCodeXferValue(tx dto.Transaction, ws state.State, op Ops) error {
 		fmt.Printf("ERROR: attempt to make deduction from other people: %d\nSubmitter: %x\n", arg.Value, tx.Anchor().Submitter)
 		return fmt.Errorf("Negative transaction")
 	}
-	// make the transaction
-	toValue := int64(common.BytesToUint64(to.Value))
-	fromValue, toValue = fromValue-arg.Value, toValue+arg.Value
-	from.Value = common.Uint64ToBytes(uint64(fromValue))
-	to.Value = common.Uint64ToBytes(uint64(toValue))
-	// update resources in world state
+	// deduct from source
+	from.Value = common.Uint64ToBytes(uint64(fromValue - arg.Value))
+	// update world state
 	if err := ws.Put(from); err != nil {
 		fmt.Printf("Error in updating '%s' with world state: %s\n", from.Key, err)
 		return err
 	}
+	// now fetch destination
+	if to, err = ws.Get([]byte(arg.Destination)); err != nil {
+		fmt.Printf("ERROR: attempt to xfer value to a non existing resource: %s\nSubmitter: %x\n", arg.Destination, tx.Anchor().Submitter)
+		return fmt.Errorf("Resource does not exists")
+	}
+	// add value to destination resource
+	toValue := int64(common.BytesToUint64(to.Value))
+	to.Value = common.Uint64ToBytes(uint64(toValue + arg.Value))
+	// update world state
 	if err := ws.Put(to); err != nil {
 		fmt.Printf("Error in updating '%s' with world state: %s\n", to.Key, err)
 		return err
@@ -253,11 +255,15 @@ func txHandler(tx dto.Transaction, state state.State) error {
 }
 
 // main CLI loop
-func cli(dlt stack.DLT) error {
-	dltStack = dlt
-	if err := dlt.Start(); err != nil {
+func cli(localDlt, remoteDlt stack.DLT) error {
+	dlt := localDlt
+	if err := localDlt.Start(); err != nil {
 		return err
-	} else if err := dlt.Register(AppShard, AppName, txHandler); err != nil {
+	} else if err := localDlt.Register(AppShard, AppName, txHandler); err != nil {
+		return err
+	} else if err := remoteDlt.Start(); err != nil {
+		return err
+	} else if err := remoteDlt.Register(AppShard, AppName, txHandler); err != nil {
 		return err
 	}
 	for {
@@ -314,14 +320,14 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, arg := range args {
 								fmt.Printf("adding transaction: create %s %d\n", arg.Name, arg.Value)
-								makeTransaction(dlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeCreate, arg)
+								makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeCreate, arg)
 							}
 						}
 					case "info":
 						for wordScanner.Scan() {
 							continue
 						}
-						if a := dlt.Anchor(submitter, lastSeq+1, lastTx); a == nil {
+						if a := remoteDlt.Anchor(submitter, lastSeq+1, lastTx); a == nil {
 							fmt.Printf("failed to get any info...\n")
 						} else {
 							fmt.Printf("ShardId: %s\n", a.ShardId)
@@ -343,7 +349,7 @@ func cli(dlt stack.DLT) error {
 						}
 						if len(arg.Source) != 0 && len(arg.Destination) != 0 && arg.Value > 0 {
 							fmt.Printf("adding transaction: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(dlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeXferValue, arg)
+							makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeXferValue, arg)
 						} else {
 							fmt.Printf("usage: xfer <owned resource name> <xfer value> <recipient resource name>\n")
 						}
@@ -368,10 +374,10 @@ func cli(dlt stack.DLT) error {
 							anchor1 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(anchor1, OpCodeXferValue, arg)
+							makeTransaction(dlt, anchor1, OpCodeXferValue, arg)
 							arg.Destination = dest2
 							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(anchor2, OpCodeXferValue, arg)
+							makeTransaction(dlt, anchor2, OpCodeXferValue, arg)
 						} else {
 							fmt.Printf("usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
 						}
@@ -396,13 +402,82 @@ func cli(dlt stack.DLT) error {
 							anchor1 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(anchor1, OpCodeXferValue, arg)
+							makeTransaction(dlt, anchor1, OpCodeXferValue, arg)
 							arg.Destination = dest2
-//							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
+							//							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(anchor2, OpCodeXferValue, arg)
+							makeTransaction(dlt, anchor2, OpCodeXferValue, arg)
 						} else {
 							fmt.Printf("usage: double <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
+						}
+					case "xover":
+						arg := ArgsXferValue{}
+						if wordScanner.Scan() {
+							arg.Source = wordScanner.Text()
+						}
+						if wordScanner.Scan() {
+							value, _ := strconv.Atoi(wordScanner.Text())
+							arg.Value = int64(value)
+						}
+						if wordScanner.Scan() {
+							arg.Destination = wordScanner.Text()
+						}
+						if len(arg.Source) != 0 && len(arg.Destination) != 0 && arg.Value > 0 {
+							fmt.Printf("adding transaction: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
+							makeTransaction(remoteDlt, localDlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeXferValue, arg)
+						} else {
+							fmt.Printf("usage: xover <owned resource name> <xfer value> <recipient resource name>\n")
+						}
+					case "multi":
+						arg := ArgsXferValue{}
+						if wordScanner.Scan() {
+							arg.Source = wordScanner.Text()
+						}
+						if wordScanner.Scan() {
+							value, _ := strconv.Atoi(wordScanner.Text())
+							arg.Value = int64(value)
+						}
+						if wordScanner.Scan() {
+							arg.Destination = wordScanner.Text()
+						}
+						if len(arg.Source) != 0 && len(arg.Destination) != 0 && arg.Value > 0 {
+							anchor1 := localDlt.Anchor(submitter, lastSeq+1, lastTx)
+							anchor2 := remoteDlt.Anchor(submitter, lastSeq+1, lastTx)
+							fmt.Printf("adding local transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
+							makeTransaction(localDlt, anchor1, OpCodeXferValue, arg)
+							fmt.Printf("adding remote transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
+							makeTransaction(remoteDlt, anchor2, OpCodeXferValue, arg)
+						} else {
+							fmt.Printf("usage: multi <owned resource name> <xfer value> <recipient resource name>\n")
+						}
+					case "split":
+						arg := ArgsXferValue{}
+						if wordScanner.Scan() {
+							arg.Source = wordScanner.Text()
+						}
+						if wordScanner.Scan() {
+							value, _ := strconv.Atoi(wordScanner.Text())
+							arg.Value = int64(value)
+						}
+						var dest1, dest2 string
+						if wordScanner.Scan() {
+							dest1 = wordScanner.Text()
+						}
+						if wordScanner.Scan() {
+							dest2 = wordScanner.Text()
+						}
+						if len(arg.Source) != 0 && len(dest1) != 0 && len(dest2) != 0 && arg.Value > 0 {
+							arg.Destination = dest1
+							anchor1 := localDlt.Anchor(submitter, lastSeq+1, lastTx)
+							anchor2 := remoteDlt.Anchor(submitter, lastSeq+1, lastTx)
+							fmt.Printf("adding local transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
+							makeTransaction(localDlt, anchor1, OpCodeXferValue, arg)
+							arg.Destination = dest2
+							//							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
+							fmt.Printf("adding remote transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
+							makeTransaction(remoteDlt, anchor2, OpCodeXferValue, arg)
+						} else {
+							fmt.Printf("usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
 						}
 					default:
 						fmt.Printf("Unknown Command: %s", cmd)
@@ -416,7 +491,6 @@ func cli(dlt stack.DLT) error {
 			fmt.Printf("\n%s", cmdPrompt)
 		}
 	}
-	dltStack = nil
 	return nil
 }
 
@@ -448,14 +522,23 @@ func main() {
 		return
 	}
 
+	// create a 2nd node config from original config
+	config2 := p2p.Config{}
+	config2 = config
+	config2.KeyFile = "remoteKey.json"
+	port, _ := strconv.Atoi(config.Port)
+	config2.Port = strconv.Itoa(port + 100)
+
 	// create a new ECDSA key for submitter client
 	key, _ = crypto.GenerateKey()
 	submitter = crypto.FromECDSAPub(&key.PublicKey)
 
-	// instantiate the DLT stack
-	if dlt, err := stack.NewDltStack(config, db.NewInMemDbProvider()); err != nil {
-		fmt.Printf("Failed to create DLT stack: %s", err)
-	} else if err = cli(dlt); err != nil {
+	// instantiate two DLT stacks
+	if localDlt, err := stack.NewDltStack(config, db.NewInMemDbProvider()); err != nil {
+		fmt.Printf("Failed to create 1st DLT stack: %s", err)
+	} else if remoteDlt, err := stack.NewDltStack(config2, db.NewInMemDbProvider()); err != nil {
+		fmt.Printf("Failed to create 2nd DLT stack: %s", err)
+	} else if err = cli(localDlt, remoteDlt); err != nil {
 		fmt.Printf("Error in CLI: %s", err)
 	} else {
 		fmt.Printf("Shutdown cleanly")
