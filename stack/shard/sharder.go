@@ -38,6 +38,8 @@ type Sharder interface {
 	Handle(tx dto.Transaction) error
 	// get value for a resource from current world state for the registered shard
 	GetState(key []byte) (*state.Resource, error)
+	// flush a shard
+	Flush(shardId []byte) error
 }
 
 type sharder struct {
@@ -362,6 +364,15 @@ func (s *sharder) GetState(key []byte) (*state.Resource, error) {
 		} else {
 			return state.Get(key)
 		}
+	}
+}
+
+func (s *sharder) Flush(shardId []byte) error {
+	// fetch world state for the shard
+	if state, err := state.NewWorldState(s.dbp, shardId); err != nil {
+		return err
+	} else {
+		return state.Reset()
 	}
 }
 

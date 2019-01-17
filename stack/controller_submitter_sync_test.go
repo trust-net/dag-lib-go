@@ -9,6 +9,12 @@ import (
 	"testing"
 )
 
+func private() {
+	// a phony method to keep log package in imports
+	log.SetLogLevel(log.DEBUG)
+	defer log.SetLogLevel(log.NONE)
+}
+
 // stack controller listner generates RECV_SubmitterWalkUpRequestMsg event for SubmitterWalkUpRequestMsg message
 func TestPeerListnerGeneratesEventForSubmitterWalkUpRequestMsg(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
@@ -238,21 +244,19 @@ func TestRECV_SubmitterWalkUpResponseMsg_DoubleSpend(t *testing.T) {
 		t.Errorf("Endorser did not get called for submitter/seq history")
 	}
 
-	// we should have initiate a double spend resolution
-
-	// we should have set the peer state to nil value
-	if data := peer.GetState(int(RECV_SubmitterWalkUpResponseMsg)); data != nil {
-		t.Errorf("controller did not reset state for walk up response message")
+	// we should NOT have initiate a double spend resolution, and instead just keep walking
+	// up the history till we find a sequence which matches locally
+	if len(events) != 0 {
+		t.Errorf("should not emit ALERT_DoubleSpend")
 	}
-
-	// we should have emitted a DoubleSpendAlert event
-	if len(events) == 0 || (<-events).code != ALERT_DoubleSpend {
-		t.Errorf("did not emit ALERT_DoubleSpend")
-	}
-
-	// we should NOT have sent any message to peer
-	if peer.SendCalled {
-		t.Errorf("should not send any message to peer")
+	if !peer.SendCalled {
+		t.Errorf("did not send submitter sync message to peer")
+	} else if peer.SendMsgCode != SubmitterWalkUpRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if string(peer.SendMsg.(*SubmitterWalkUpRequestMsg).Submitter) != string(msg.Submitter) {
+		t.Errorf("Incorrect SubmitterWalkUpRequestMsg Submitter: %s", peer.SendMsg.(*SubmitterWalkUpRequestMsg).Submitter)
+	} else if peer.SendMsg.(*SubmitterWalkUpRequestMsg).Seq != msg.Seq-1 {
+		t.Errorf("Incorrect SubmitterWalkUpRequestMsg Sequence: %d", peer.SendMsg.(*SubmitterWalkUpRequestMsg).Seq)
 	}
 }
 
@@ -1211,9 +1215,6 @@ func TestRECV_SubmitterProcessDownResponseMsg_EndOfSync(t *testing.T) {
 		stack.peerEventsListener(peer, events)
 		finished <- struct{}{}
 	}()
-
-	log.SetLogLevel(log.DEBUG)
-	defer log.SetLogLevel(log.NONE)
 
 	// now emit RECV_SubmitterProcessDownResponseMsg event with no transactions
 	msg := NewSubmitterProcessDownResponseMsg(&SubmitterProcessDownRequestMsg{

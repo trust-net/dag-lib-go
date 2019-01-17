@@ -72,6 +72,8 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx dto.Transa
 
 	// initiate app registration sync protocol
 	if anchor := d.anchor(append([]byte("ForceShardSync"), shardId...), 0x00, [64]byte{}); anchor != nil {
+		d.endorser.Anchor(anchor)
+		d.p2p.Anchor(anchor)
 		msg := NewForceShardSyncMsg(anchor)
 		d.logger.Debug("Broadcasting ForceShardSync: %x", msg.Id())
 		d.p2p.Broadcast(msg.Id(), msg.Code(), msg)
@@ -226,10 +228,12 @@ func (d *dlt) handshake(peer p2p.Peer) error {
 	//   1) ask sharding layer for the current shard's Anchor
 	//   2) ask endorsing layer for the current Anchor's update
 	//   3) send the ShardSyncMsg message to peer
-	if a := d.anchor([]byte("ShardSyncMsg"), 0x00, [64]byte{}); a == nil {
+	if anchor := d.anchor([]byte("ShardSyncMsg"), 0x00, [64]byte{}); anchor == nil {
 		d.logger.Debug("Cannot run handshake")
 	} else {
-		msg := NewShardSyncMsg(a)
+		d.endorser.Anchor(anchor)
+		d.p2p.Anchor(anchor)
+		msg := NewShardSyncMsg(anchor)
 		return peer.Send(msg.Id(), msg.Code(), msg)
 	}
 	return nil
@@ -243,7 +247,7 @@ func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx d
 		case endorsement.ERR_DOUBLE_SPEND:
 			// trigger double spending resolution
 			d.logger.Error("Detected double spending for submitter/seq/shard: %x / %d / %x", tx.Anchor().Submitter, tx.Anchor().SubmitterSeq, tx.Anchor().ShardId)
-			events <- newControllerEvent(ALERT_DoubleSpend, tx.Anchor().ShardId)
+			events <- newControllerEvent(ALERT_DoubleSpend, tx)
 			return err
 		case endorsement.ERR_DUPLICATE:
 			// continue if dupe's are allowed, e.g. during sync
@@ -581,6 +585,14 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				break
 			}
 
+		case ALERT_DoubleSpend:
+			if err := d.handleALERT_DoubleSpend(peer, events, e.data.(dto.Transaction)); err != nil {
+				d.logger.Debug("Failed to handle ALERT_DoubleSpend: %s", err)
+				peer.Disconnect()
+				done = true
+				break
+			}
+
 		case SHUTDOWN:
 			d.logger.Debug("Recieved SHUTDOWN event")
 			done = true
@@ -684,11 +696,17 @@ func (d *dlt) handleRECV_SubmitterWalkUpResponseMsg(peer p2p.Peer, events chan c
 
 			// this shard did not match
 			allMatched = false
+
 		} else if transactions[indx] != msg.Transactions[i] {
+			// this shard's transactions did not match
+			allMatched = false
+			// will not do error handling here, will just keep walking up in submitter history till we reach
+			// a sequence that matches locally -- or till we reach to seq 1, and then process transactions during
+			// down walk, that's when will handle alerts/errors etc, so there is only one place to take care
 			// double spend, i.e., transaction mismatch for matched shard
-			d.logger.Error("Detected double spending for submitter/seq/shard: %x / %d / %x\nLocal Tx: %x\nRemote Tx: %x", msg.Submitter, msg.Seq, shard, transactions[indx], msg.Transactions[i])
-			events <- newControllerEvent(ALERT_DoubleSpend, shard)
-			return nil
+			//			d.logger.Error("Detected double spending for submitter/seq/shard: %x / %d / %x\nLocal Tx: %x\nRemote Tx: %x", msg.Submitter, msg.Seq, shard, transactions[indx], msg.Transactions[i])
+			//			events <- newControllerEvent(ALERT_DoubleSpend, shard)
+			//			return nil
 		}
 
 	}
@@ -798,6 +816,43 @@ func (d *dlt) handleRECV_SubmitterProcessDownResponseMsg(peer p2p.Peer, events c
 	d.logger.Debug("continuing processing down for Submitter/Seq: %x/%d", req.Submitter, req.Seq)
 	// send the submitter history request to peer
 	return peer.Send(req.Id(), req.Code(), req)
+}
+
+func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent, remoteTx dto.Transaction) error {
+	// fetch local transaction for same submitter/seq/shard
+	shards, transactions := d.endorser.KnownShardsTxs(remoteTx.Anchor().Submitter, remoteTx.Anchor().SubmitterSeq)
+	shardMap := make(map[string]int)
+	for i, shard := range shards {
+		shardMap[string(shard)] = i
+	}
+	var localTx dto.Transaction
+	if indx, found := shardMap[string(remoteTx.Anchor().ShardId)]; !found {
+		d.logger.Error("did not find local shard for submitter/seq: %x / %d", remoteTx.Anchor().Submitter, remoteTx.Anchor().SubmitterSeq)
+		return nil
+	} else if localTx = d.db.GetTx(transactions[indx]); localTx == nil {
+		d.logger.Error("did not find my own local transaction: %x", transactions[indx])
+		// local corruption, abort everything
+		return errors.New("local DB corruption")
+	}
+	// compare local with remote
+	// first compare weights, if equal then compare numeric hash
+	if localId, remoteId := localTx.Id(), remoteTx.Id(); localTx.Anchor().Weight > remoteTx.Anchor().Weight ||
+		(localTx.Anchor().Weight == remoteTx.Anchor().Weight &&
+			shard.Numeric(localId[:]) > shard.Numeric(remoteId[:])) {
+		if err := d.sharder.Flush(remoteTx.Anchor().ShardId); err != nil {
+			return err
+		} else {
+			d.logger.Debug("flushed local shard")
+		}
+	} else {
+		// send peer alert to flush
+		msg := NewForceShardFlushMsg(localTx)
+		d.logger.Debug("Alerting remote peer to flush and re-sync")
+		peer.Send(msg.Id(), msg.Code(), msg)
+	}
+	// disconnect, let peer initiate new handshake after flush
+	peer.Disconnect()
+	return nil
 }
 
 // listen on messages from the peer node

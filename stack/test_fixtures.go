@@ -98,6 +98,7 @@ type mockSharder struct {
 	TxHandlerCalled   bool
 	GetStateCalled    bool
 	GetStateKey       []byte
+	FlushCalled       bool
 	TxHandler         func(tx dto.Transaction, state state.State) error
 	orig              shard.Sharder
 }
@@ -167,6 +168,11 @@ func (s *mockSharder) GetState(key []byte) (*state.Resource, error) {
 	s.GetStateCalled = true
 	s.GetStateKey = key
 	return s.orig.GetState(key)
+}
+
+func (s *mockSharder) Flush(shardId []byte) error {
+	s.FlushCalled = true
+	return s.orig.Flush(shardId)
 }
 
 func (s *mockSharder) Reset() {

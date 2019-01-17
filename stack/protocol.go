@@ -46,6 +46,8 @@ const (
 	SubmitterProcessDownRequestMsgCode
 	// submitter history walk down response message
 	SubmitterProcessDownResponseMsgCode
+	// notify remote node to flush shard due to double spend
+	ForceShardFlushMsgCode
 	// ProtocolLength should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength
@@ -292,6 +294,30 @@ func NewTxShardChildResponseMsg(tx dto.Transaction, children [][64]byte) *TxShar
 			hash:     tx.Id(),
 			Bytes:    bytes,
 			Children: children,
+		}
+	}
+}
+
+type ForceShardFlushMsg struct {
+	hash  [64]byte
+	Bytes []byte
+}
+
+func (m *ForceShardFlushMsg) Id() []byte {
+	return append([]byte("ForceShardFlushMsg"), m.hash[:]...)
+}
+
+func (m *ForceShardFlushMsg) Code() uint64 {
+	return ForceShardFlushMsgCode
+}
+
+func NewForceShardFlushMsg(tx dto.Transaction) *ForceShardFlushMsg {
+	if bytes, err := tx.Serialize(); err != nil {
+		return nil
+	} else {
+		return &ForceShardFlushMsg{
+			hash:  tx.Id(),
+			Bytes: bytes,
 		}
 	}
 }

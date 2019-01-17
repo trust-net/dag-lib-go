@@ -840,3 +840,89 @@ func TestWorldStateReadAccessNoApp(t *testing.T) {
 		t.Errorf("Should fail to get state for unregistered app")
 	}
 }
+
+// test shard flush when app is registered
+func TestFlush_RegisteredApp(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	dbp := db.NewInMemDbProvider()
+	s, _ := NewSharder(testDb, dbp)
+
+	// register an app
+	txHandler := func(tx dto.Transaction, s state.State) error { return nil }
+
+	// send a mock network transaction with shard seq 1 to sharder before app is registered
+	tx, _ := SignedShardTransaction("test data to validate")
+	s.db.AddTx(tx)
+	s.Handle(tx)
+	testShard := tx.Anchor().ShardId
+
+	// set test value in world state for test shard
+	db := dbp.DB("Shard-World-State-" + string(testShard))
+	r := &state.Resource{
+		Key:   []byte("key"),
+		Value: []byte("test data to validate"),
+	}
+	data, _ := r.Serialize()
+	db.Put(r.Key, data)
+
+	// now register the app for the shard
+	s.Register(testShard, txHandler)
+
+	// lookup resource value using read API
+	if read, err := s.GetState([]byte("key")); err != nil {
+		t.Errorf("Failed to get state: %s", err)
+	} else if string(read.Value) != "test data to validate" {
+		t.Errorf("Incorrect data from get state: %s", read.Value)
+	}
+
+	// now flush the shard
+	if err := s.Flush(testShard); err != nil {
+		t.Errorf("shard flush failed: %s", err)
+	}
+
+	// validate the world state was flushed
+	if _, err := s.GetState([]byte("key")); err == nil {
+		t.Errorf("did not expect to get resource after flush")
+	}
+}
+
+// test shard flush for a shard different from registered app
+func TestFlush_UnregisteredShard(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	dbp := db.NewInMemDbProvider()
+	s, _ := NewSharder(testDb, dbp)
+
+	// register an app
+	txHandler := func(tx dto.Transaction, s state.State) error { return nil }
+
+	// send a mock network transaction with shard seq 1 to sharder before app is registered
+	tx, _ := SignedShardTransaction("test data to validate")
+	s.db.AddTx(tx)
+	s.Handle(tx)
+	testShard := tx.Anchor().ShardId
+
+	// set test value in world state for test shard
+	db := dbp.DB("Shard-World-State-" + string(testShard))
+	r := &state.Resource{
+		Key:   []byte("key"),
+		Value: []byte("test data to validate"),
+	}
+	data, _ := r.Serialize()
+	db.Put(r.Key, data)
+
+	// now register the app for the shard
+	s.Register(testShard, txHandler)
+
+	// now flush the shard for some other id
+	if err := s.Flush([]byte("a different shard")); err != nil {
+		t.Errorf("shard flush failed: %s", err)
+	}
+
+	// lookup resource value using read API for registered app's shard
+	// flush of different shard should not have affected registered app
+	if read, err := s.GetState([]byte("key")); err != nil {
+		t.Errorf("Failed to get state: %s", err)
+	} else if string(read.Value) != "test data to validate" {
+		t.Errorf("Incorrect data from get state: %s", read.Value)
+	}
+}

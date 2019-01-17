@@ -818,8 +818,14 @@ func TestRECV_NewTxBlockMsgEvent_DoubleSpend(t *testing.T) {
 	}
 
 	// we should have emitted a DoubleSpendAlert event
-	if len(events) == 0 || (<-events).code != ALERT_DoubleSpend {
+	if len(events) == 0 {
 		t.Errorf("did not emit ALERT_DoubleSpend")
+	} else if event := (<-events); event.code != ALERT_DoubleSpend {
+		t.Errorf("did not emit ALERT_DoubleSpend")
+	} else if tx, match := event.data.(dto.Transaction); !match {
+		t.Errorf("did not add transaction to ALERT_DoubleSpend")
+	} else if tx.Id() != dblTx.Id() {
+		t.Errorf("added incorrect transaction to ALERT_DoubleSpend")
 	}
 
 	// we should NOT have sent any message to peer
