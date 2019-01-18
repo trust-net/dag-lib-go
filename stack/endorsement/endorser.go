@@ -21,6 +21,8 @@ type Endorser interface {
 	Anchor(*dto.Anchor) error
 	// Handle network transaction
 	Handle(tx dto.Transaction) (int, error)
+	// Replace submitter history
+	Replace(tx dto.Transaction) error
 	// Approve submitted transaction
 	Approve(tx dto.Transaction) error
 	// Provide all known shard/tx pairs for a submitter/seq
@@ -118,6 +120,20 @@ func (e *endorser) Handle(tx dto.Transaction) (int, error) {
 	// ^^^ this will be done by the controller if there is no error
 
 	return SUCCESS, nil
+}
+
+func (e *endorser) Replace(tx dto.Transaction) error {
+	// validate transaction
+	if tx == nil || tx.Anchor() == nil || tx.Anchor().SubmitterSeq < 1 {
+		return fmt.Errorf("invalid transaction")
+	}
+
+	// update submitter's history and replace if already exists
+	if err := e.db.ReplaceSubmitter(tx); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (e *endorser) Approve(tx dto.Transaction) error {

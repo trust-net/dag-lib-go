@@ -373,12 +373,23 @@ func (s *sharder) GetState(key []byte) (*state.Resource, error) {
 }
 
 func (s *sharder) Flush(shardId []byte) error {
-	// fetch world state for the shard
+	// flush world state for the shard
 	if state, err := state.NewWorldState(s.dbp, shardId); err != nil {
 		return err
 	} else {
-		return state.Reset()
+		state.Reset()
 	}
+	// flush shard DAG
+	if err := s.db.FlushShard(shardId); err != nil {
+		return err
+	}
+	// update genesis for the shard
+	gen := GenesisShardTx(shardId)
+	s.db.AddTx(gen)
+	if err := s.db.UpdateShard(gen); err != nil {
+		return err
+	}
+	return nil
 }
 
 func NewSharder(db repo.DltDb, dbp db.DbProvider) (*sharder, error) {

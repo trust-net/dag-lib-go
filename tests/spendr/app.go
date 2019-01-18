@@ -327,13 +327,20 @@ func cli(localDlt, remoteDlt stack.DLT) error {
 						for wordScanner.Scan() {
 							continue
 						}
-						if a := remoteDlt.Anchor(submitter, lastSeq+1, lastTx); a == nil {
-							fmt.Printf("failed to get any info...\n")
+						if a := localDlt.Anchor([]byte("dummy"), 0x01, [64]byte{}); a == nil {
+							fmt.Printf("failed to get any info from local node...\n")
 						} else {
-							fmt.Printf("ShardId: %s\n", a.ShardId)
-							fmt.Printf("Next Seq: %d\n", a.ShardSeq)
-							fmt.Printf("Parent: %x\n", a.ShardParent)
-							fmt.Printf("NodeId: %x\n", a.NodeId)
+							fmt.Printf("LOCAL ShardId: %s\n", a.ShardId)
+							fmt.Printf("LOCAL Next Seq: %d\n", a.ShardSeq)
+							fmt.Printf("LOCAL Weight: %d\n", a.Weight)
+							fmt.Printf("LOCAL Parent: %x\n", a.ShardParent)
+						}
+						if a := remoteDlt.Anchor([]byte("dummy"), 0x01, [64]byte{}); a == nil {
+							fmt.Printf("failed to get any info from remote node...\n")
+						} else {
+							fmt.Printf("REMOT Parent: %x\n", a.ShardParent)
+							fmt.Printf("REMOT Next Seq: %d\n", a.ShardSeq)
+							fmt.Printf("REMOT Weight: %d\n", a.Weight)
 						}
 					case "xfer":
 						arg := ArgsXferValue{}
@@ -526,6 +533,7 @@ func main() {
 	config2 := p2p.Config{}
 	config2 = config
 	config2.KeyFile = "remoteKey.json"
+	config2.Name = "remote-" + config.Name
 	port, _ := strconv.Atoi(config.Port)
 	config2.Port = strconv.Itoa(port + 100)
 

@@ -110,6 +110,39 @@ func TestUpdateShardInSequence(t *testing.T) {
 	}
 }
 
+// test shard flush
+func TestFlushShard(t *testing.T) {
+	repo, _ := NewDltDb(db.NewInMemDbProvider())
+	tx1 := dto.TestSignedTransaction("test data")
+	tx2 := dto.TestSignedTransaction("test data")
+	tx2.Anchor().ShardParent = tx1.Id()
+	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq
+
+	// update shard with transaction sequence
+	if err := repo.UpdateShard(tx1); err != nil {
+		t.Errorf("Failed to add 1st transaction: %s", err)
+	}
+	if err := repo.UpdateShard(tx2); err != nil {
+		t.Errorf("Failed to add 2nd transaction: %s", err)
+	}
+
+	// now flush the shard
+	if err := repo.FlushShard(tx1.Anchor().ShardId); err != nil {
+		t.Errorf("Failed to flush shard: %s", err)
+	}
+
+	// validate that shard DAG node are flushed
+	if node := repo.GetShardDagNode(tx1.Id()); node != nil {
+		t.Errorf("Did not flush DAG node in shard DB for 1st transaction")
+	}
+	if node := repo.GetShardDagNode(tx2.Id()); node != nil {
+		t.Errorf("Did not flush DAG node in shard DB for 2nd transaction")
+	}
+	if tips := repo.ShardTips(tx1.Anchor().ShardId); len(tips) != 0 {
+		t.Errorf("Did not flush tips for the shard")
+	}
+}
+
 // test shard DAG update during adding transaction
 func TestAddTxShardDagUpdate(t *testing.T) {
 	repo, _ := NewDltDb(db.NewInMemDbProvider())

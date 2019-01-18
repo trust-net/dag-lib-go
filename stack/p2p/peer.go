@@ -8,7 +8,9 @@ import (
 	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/repo"
+	"github.com/trust-net/dag-lib-go/log"
 	"net"
+	"errors"
 	"sync"
 )
 
@@ -44,6 +46,10 @@ type Peer interface {
 	ToBeFetchedStackPush(tx dto.Transaction) error
 	// pop a transaction from stack for processing (nil if stack empty)
 	ToBeFetchedStackPop() dto.Transaction
+	// set logger
+	SetLogger(logger log.Logger)
+	// get logger
+	Logger() log.Logger
 }
 
 const (
@@ -74,6 +80,7 @@ type peerDEVp2p struct {
 	shardChildrenQ repo.Queue
 	txStack        []dto.Transaction
 	lock           sync.RWMutex
+	logger         log.Logger
 }
 
 func NewDEVp2pPeer(peer peerDEVp2pWrapper, rw p2p.MsgReadWriter) *peerDEVp2p {
@@ -81,7 +88,7 @@ func NewDEVp2pPeer(peer peerDEVp2pWrapper, rw p2p.MsgReadWriter) *peerDEVp2p {
 	if err != nil {
 		return nil
 	}
-	return &peerDEVp2p{
+	p := &peerDEVp2p{
 		peer:           peer,
 		rw:             rw,
 		status:         Connected,
@@ -90,6 +97,15 @@ func NewDEVp2pPeer(peer peerDEVp2pWrapper, rw p2p.MsgReadWriter) *peerDEVp2p {
 		shardChildrenQ: q,
 		txStack:        []dto.Transaction{},
 	}
+	return p
+}
+
+func (p *peerDEVp2p) SetLogger(logger log.Logger) {
+	p.logger = logger
+}
+
+func (p *peerDEVp2p) Logger() log.Logger {
+	return p.logger
 }
 
 func (p *peerDEVp2p) ID() []byte {
@@ -127,7 +143,7 @@ func (p *peerDEVp2p) Send(msgId []byte, msgcode uint64, data interface{}) error 
 		p.Seen(msgId)
 		return p2p.Send(p.rw, msgcode, data)
 	}
-	return nil
+	return errors.New("seen transaction")
 }
 
 func (p *peerDEVp2p) Seen(msgId []byte) {

@@ -41,8 +41,12 @@ type DltDb interface {
 	AddTx(tx dto.Transaction) error
 	// update a shard's DAG and tips for a new transaction
 	UpdateShard(tx dto.Transaction) error
+	// flush a shard DAG
+	FlushShard(shardId []byte) error
 	// update a submitter's DAG and tips for a new transaction
 	UpdateSubmitter(tx dto.Transaction) error
+	// replace a submitter's DAG and tips for a new transaction
+	ReplaceSubmitter(tx dto.Transaction) error
 	// delete an existing transaction from transaction history (deleting a non-tip transaction will cause errors)
 	DeleteTx(id [64]byte) error
 	// get the shard's DAG node for given transaction Id (no entry == nil)
@@ -100,6 +104,32 @@ func (d *dltDb) AddTx(tx dto.Transaction) error {
 	// save the transaction in DB
 	if err = d.txDb.Put(id[:], data); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (d *dltDb) FlushShard(shardId []byte) error {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	// walk through shard's tips, traverse up and remove
+	tipNodes := []*DagNode{}
+	for _, tip := range d.shardTips(shardId) {
+		tipNodes = append(tipNodes, d.getShardDagNode(tip))
+	}
+	if err := d.shardTipsDb.Delete(shardId); err != nil {
+		return err
+	}
+	for len(tipNodes) > 0 {
+		// pop a dag node
+		node := tipNodes[0]
+		tipNodes = tipNodes[1:]
+		if parent := d.getShardDagNode(node.Parent); parent != nil {
+			tipNodes = append(tipNodes, parent)
+		}
+		// remove current node
+		if err := d.shardDAGsDb.Delete(node.TxId[:]); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -162,6 +192,48 @@ func (d *dltDb) saveShardDagNode(node *DagNode) error {
 	if err = d.shardDAGsDb.Put(node.TxId[:], data); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (d *dltDb) ReplaceSubmitter(tx dto.Transaction) error {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	// lookup submitter history, if present
+	var history *SubmitterHistory
+	if history = d.getSubmitterHistory(tx.Anchor().Submitter, tx.Anchor().SubmitterSeq); history == nil {
+		history = &SubmitterHistory{
+			Submitter:    tx.Anchor().Submitter,
+			Seq:          tx.Anchor().SubmitterSeq,
+			ShardTxPairs: make([]ShardTxPair, 0, 1),
+		}
+	}
+
+	// remove any pre-existing shard/tx in history
+	found := false
+	newPair := ShardTxPair{
+		ShardId: tx.Anchor().ShardId,
+		TxId:    tx.Id(),
+	}
+	for i, existingPair := range history.ShardTxPairs {
+		if string(existingPair.ShardId) == string(newPair.ShardId) {
+			// there is some tx for same shard, replace this new pair
+			history.ShardTxPairs[i] = newPair
+			found = true
+		}
+	}
+
+	// add the new shard/tx pair to history if not replaced old
+	if !found {
+		history.ShardTxPairs = append(history.ShardTxPairs, newPair)
+	}
+	// update the submitter history
+	if data, err := common.Serialize(history); err != nil {
+		return err
+	} else if err := d.submitterHistoryDb.Put(submitterHistoryKey(history.Submitter, history.Seq), data); err != nil {
+		return err
+	}
+
 	return nil
 }
 
