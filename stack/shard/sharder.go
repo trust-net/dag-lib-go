@@ -84,7 +84,12 @@ func (s *sharder) UnlockState() {
 
 func (s *sharder) CommitState() error {
 	// transaction processed successfully, persist world state
-	return s.worldState.Persist()
+	if s.worldState != nil {
+		return s.worldState.Persist()
+	} else {
+		return nil
+	}
+
 }
 
 func (s *sharder) Register(shardId []byte, txHandler func(tx dto.Transaction, state state.State) error) error {
@@ -164,10 +169,6 @@ func (s *sharder) Register(shardId []byte, txHandler func(tx dto.Transaction, st
 }
 
 func (s *sharder) Unregister() error {
-	s.shardId = nil
-	s.txHandler = nil
-	s.genesisTx = nil
-	s.worldState = nil
 	///////////////////////////////////////////////////////
 	// TBD: remove below when we start persisting last processed transaction during unregister,
 	// and do not replay previosuly processed transactions during register
@@ -175,6 +176,10 @@ func (s *sharder) Unregister() error {
 		state.Reset()
 	}
 	///////////////////////////////////////////////////////
+	s.shardId = nil
+	s.txHandler = nil
+	s.genesisTx = nil
+	s.worldState = nil
 	return nil
 }
 

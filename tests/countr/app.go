@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack"
 	"github.com/trust-net/dag-lib-go/stack/dto"
@@ -27,9 +26,7 @@ var cmdPrompt = "<headless>: "
 
 var shardId []byte
 
-var key *ecdsa.PrivateKey
-
-var submitter []byte
+var submitter *dto.Submitter
 
 type testTx struct {
 	Op     string
@@ -45,7 +42,7 @@ func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
 	}
 	s := signature{}
 	hash := sha512.Sum512(txPayload)
-	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
+	s.R, s.S, _ = ecdsa.Sign(rand.Reader, submitter.Key, hash[:])
 	tx.Self().Payload = txPayload
 	tx.Self().Signature, _ = common.Serialize(s)
 	return tx
@@ -213,8 +210,12 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: incr %s %d\n", op.name, op.delta)
-								if err := dlt.Submit(incrementTx(dlt.Anchor(submitter, 0x00, [64]byte{}), op.name, op.delta)); err != nil {
+								tx := incrementTx(dlt.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), op.name, op.delta)
+								if err := dlt.Submit(tx); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
+								} else {
+									submitter.Seq += 1
+									submitter.LastTx = tx.Id()
 								}
 							}
 						}
@@ -225,8 +226,12 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: decr %s %d\n", op.name, op.delta)
-								if err := dlt.Submit(decrementTx(dlt.Anchor(submitter, 0x00, [64]byte{}), op.name, op.delta)); err != nil {
+								tx := decrementTx(dlt.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), op.name, op.delta)
+								if err := dlt.Submit(tx); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
+								} else {
+									submitter.Seq += 1
+									submitter.LastTx = tx.Id()
 								}
 							}
 						}
@@ -234,7 +239,7 @@ func cli(dlt stack.DLT) error {
 						for wordScanner.Scan() {
 							continue
 						}
-						if a := dlt.Anchor(submitter, 0x00, [64]byte{}); a == nil {
+						if a := dlt.Anchor(submitter.Id, submitter.Seq, submitter.LastTx); a == nil {
 							fmt.Printf("failed to get any info...\n")
 						} else {
 							fmt.Printf("ShardId: %s\n", a.ShardId)
@@ -308,9 +313,8 @@ func main() {
 		return
 	}
 
-	// create a new ECDSA key for submitter client
-	key, _ = crypto.GenerateKey()
-	submitter = crypto.FromECDSAPub(&key.PublicKey)
+	// create a new submitter client
+	submitter = dto.TestSubmitter()
 
 	// instantiate the DLT stack
 	if dlt, err := stack.NewDltStack(config, db.NewInMemDbProvider()); err != nil {
