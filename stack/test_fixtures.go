@@ -3,6 +3,7 @@ package stack
 import (
 	devp2p "github.com/ethereum/go-ethereum/p2p"
 	"github.com/trust-net/dag-lib-go/db"
+	"github.com/trust-net/dag-lib-go/log"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/endorsement"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
@@ -40,6 +41,7 @@ type mockEndorser struct {
 	Tx                   dto.Transaction
 	TxHandlerCalled      bool
 	KnownShardsTxsCalled bool
+	ReplaceCalled        bool
 	AnchorCalled         bool
 	ApproverCalled       bool
 	HandlerReturn        error
@@ -70,6 +72,11 @@ func (e *mockEndorser) Handle(tx dto.Transaction) (int, error) {
 func (e *mockEndorser) KnownShardsTxs(submitter []byte, seq uint64) (shards [][]byte, txs [][64]byte) {
 	e.KnownShardsTxsCalled = true
 	return e.orig.KnownShardsTxs(submitter, seq)
+}
+
+func (e *mockEndorser) Replace(tx dto.Transaction) error {
+	e.ReplaceCalled = true
+	return e.orig.Replace(tx)
 }
 
 func (e *mockEndorser) Reset() {
@@ -208,10 +215,20 @@ type mockPeer struct {
 
 func NewMockPeer(mockConn devp2p.MsgReadWriter) *mockPeer {
 	mockP2pPeer := p2p.TestMockPeer("test peer")
-	return &mockPeer{
+	m := &mockPeer{
 		peer: p2p.NewDEVp2pPeer(mockP2pPeer, mockConn),
 		//		states: make(map[int]interface{}),
 	}
+	m.peer.SetLogger(log.NewLogger("test peer"))
+	return m
+}
+
+func (p *mockPeer) SetLogger(logger log.Logger) {
+	p.peer.SetLogger(logger)
+}
+
+func (p *mockPeer) Logger() log.Logger {
+	return p.peer.Logger()
 }
 
 func (p *mockPeer) Reset() {

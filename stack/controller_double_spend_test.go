@@ -21,6 +21,9 @@ func TestRECV_ALERT_DoubleSpend_LocalWinner(t *testing.T) {
 		submitter.LastTx = newTx.Id()
 		submitter.Seq += 1
 	}
+
+	log.SetLogLevel(log.DEBUG)
+	defer log.SetLogLevel(log.NONE)
 	// create two double spending transactions
 	localTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "spend $10")
 	// add some extra weight for remote transaction
@@ -78,9 +81,9 @@ func TestRECV_ALERT_DoubleSpend_LocalWinner(t *testing.T) {
 		//		t.Errorf("Incorrect ForceShardFlushMsg: %x\nExpected: %x", peer.SendMsg.(*ForceShardFlushMsg).Id(), "ForceShardFlushMsg" + string(localTx.Id()))
 	}
 
-	// we should disconnect with peer, let it initiate handshake and re-sync after flush
-	if !peer.DisconnectCalled {
-		t.Errorf("we should disconnect peer for double spending alert")
+	// we should not disconnect with peer, let it initiate handshake and re-sync after flush
+	if peer.DisconnectCalled {
+		t.Errorf("we should not disconnect peer for double spending alert")
 	}
 }
 
@@ -143,14 +146,14 @@ func TestRECV_ALERT_DoubleSpend_RemoteWinner(t *testing.T) {
 		t.Errorf("shard flush did not get called when remote transaction wins")
 	}
 	
-	// we should NOT send any message to peer
-	if peer.SendCalled {
-		t.Errorf("should not send any message to peer")
+	// we should send force shard sync message to peer
+	if !peer.SendCalled {
+		t.Errorf("should send force shard sync message to peer")
 	}
 
-	// we should disconnect with peer, let it initiate handshake and re-sync after flush
-	if !peer.DisconnectCalled {
-		t.Errorf("we should disconnect peer for double spending alert")
+	// we should not disconnect with peer, let it initiate handshake and re-sync after flush
+	if peer.DisconnectCalled {
+		t.Errorf("we should not disconnect peer for double spending alert")
 	}
 }
 
@@ -282,9 +285,6 @@ func TestRECV_ForceShardFlushMsg_RemoteWasEarlier(t *testing.T) {
 	endorser.Reset()
 	testDb.Reset()
 
-	log.SetLogLevel(log.DEBUG)
-	defer log.SetLogLevel(log.NONE)
-
 	// build a mock peer
 	mockConn := p2p.TestConn()
 	peer := NewMockPeer(mockConn)
@@ -317,13 +317,13 @@ func TestRECV_ForceShardFlushMsg_RemoteWasEarlier(t *testing.T) {
 		t.Errorf("shard flush did not get called when remote transaction wins")
 	}
 	
-	// we should NOT send any message to peer
-	if peer.SendCalled {
-		t.Errorf("should not send any message to peer")
+	// we should send force shard sync message to peer
+	if !peer.SendCalled {
+		t.Errorf("should send force shard sync message to peer")
 	}
 
-	// we should disconnect with peer, let it reconnect and re-sync after flush
-	if !peer.DisconnectCalled {
-		t.Errorf("we should disconnect peer for valid double spending alert")
+	// we should not disconnect with peer, let it initiate handshake and re-sync after flush
+	if peer.DisconnectCalled {
+		t.Errorf("we should not disconnect peer for double spending alert")
 	}
 }

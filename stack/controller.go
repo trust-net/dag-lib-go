@@ -1154,7 +1154,14 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 
 // handle a new peer node connection from p2p layer
 func (d *dlt) runner(peer p2p.Peer) error {
-	peer.SetLogger(log.NewLogger(d.conf.Name + " | " + peer.LocalAddr().String() + " | " + peer.RemoteAddr().String()))
+	localAddr, remoteAddr := d.conf.ListenAddr, "unknown"
+	if peer.LocalAddr() != nil {
+		localAddr = peer.LocalAddr().String()
+	}
+	if peer.RemoteAddr() != nil {
+		remoteAddr = peer.RemoteAddr().String()
+	}
+	peer.SetLogger(log.NewLogger(d.conf.Name + " | " + localAddr + " | " + remoteAddr))
 
 	// initiate handshake with peer's sharding layer
 	if err := d.handshake(peer); err != nil {
