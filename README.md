@@ -4,12 +4,12 @@ Go library for DAG protocol
 * [How to setup workspace](https://github.com/trust-net/dag-lib-go#how-to-setup-workspace)
     * [Clone Repo](https://github.com/trust-net/dag-lib-go#clone-repo)
     * [Install Dependencies](https://github.com/trust-net/dag-lib-go#Install-Dependencies)
-* [Example Applications Using DLT Stack Library](https://github.com/trust-net/dag-lib-go#Example-Application-Using-DLT-Stack-Library)
-    * [Build test applications](https://github.com/trust-net/dag-lib-go#Build-test-application)
-    * [Stage test applications](https://github.com/trust-net/dag-lib-go#Stage-test-application)
+* [Example Applications Using DLT Stack Library](https://github.com/trust-net/dag-lib-go#Example-Applications-Using-DLT-Stack-Library)
+    * [Build test applications](https://github.com/trust-net/dag-lib-go#Build-test-applications)
+    * [Stage test applications](https://github.com/trust-net/dag-lib-go#Stage-test-applications)
     * [Create sub-directories for each instance of the test application](https://github.com/trust-net/dag-lib-go#Create-sub-directories-for-each-instance-of-the-test-application)
     * [Create config file for each instance](https://github.com/trust-net/dag-lib-go#Create-config-file-for-each-instance)
-    * [Run the test applications](https://github.com/trust-net/dag-lib-go#Run-the-test-application)
+    * [Run the test applications](https://github.com/trust-net/dag-lib-go#Run-the-test-applications)
     * [Double Spender Application CLI](https://github.com/trust-net/dag-lib-go#Double-Spender-Application-CLI)
     * [Network Counter Application CLI](https://github.com/trust-net/dag-lib-go#Network-Counter-Application-CLI)
 * [How to use DLT stack library in your application](https://github.com/trust-net/dag-lib-go#how-to-use-dlt-stack-library-in-your-application)
@@ -20,6 +20,7 @@ Go library for DAG protocol
     * [Process transactions from network peers](https://github.com/trust-net/dag-lib-go#Process-transactions-from-network-peers)
     * [Stop DLT Stack](https://github.com/trust-net/dag-lib-go#Stop-DLT-Stack)
 * [Release Notes](https://github.com/trust-net/dag-lib-go#Release-Notes)
+    * [Iteration 5](https://github.com/trust-net/dag-lib-go#Iteration-5)
     * [Iteration 4](https://github.com/trust-net/dag-lib-go#Iteration-4)
     * [Iteration 3](https://github.com/trust-net/dag-lib-go#Iteration-3)
     * [Iteration 2](https://github.com/trust-net/dag-lib-go#Iteration-2)
@@ -228,6 +229,37 @@ If application had registered with DLT stack with appropriate callback methods, 
 Once application execution completes (either due to application shutdown, or any other reason), call the `stack.DLT.Stop()` method to disconnect from all connected network peers.
 
 ## Release Notes
+
+### Iteration 5
+
+**Assumptions**:
+
+* All submitters are required to maintain correct latest transaction sequence and transaction ID for submitted transactions by them
+* A submitter's transaction sequence will be a monotonically increasing number for all transactions by that submitter across all different application shards that submitter submits transactions to
+* A new transaction will have reference to previous transaction sequence and ID from the submitter
+* There are 2 types of transactions defined for any application: "outgoing" transactions where some value gets transferred out from assets belonging to a network identity, and "incoming" transactions where some value gets transferred into assets belonging to a network identity. Only asset owners can submit "outgoing" transactions against an asset, whereas anyone can submit an "incoming" transaction towards an asset.
+
+**Implementation**:
+
+* DLT stack validates a locally submitted transaction for correct sequence number from submitter as following:
+  * if submitted transaction from same submitter, sequence number and shard already exists, then submitted transaction will be rejected as double spend
+  * else (i.e., there is no other transaction from same submitter, using same submitter sequence, for the same shard) then
+    * if parent transaction from same submitter and previous sequence number does not exists, then submitted transaction will be rejected as out of sequence
+    * if parent transaction from same submitter and previous sequence number does not match submitted transaction's parent, then submitted transaction will be rejected as invalid
+    * else submitted transaction will be accepted and broadcasted to network
+* Similarly, a network transaction is validated as following:
+  * if node's submitter history has an existing transaction that has same submitter ID, Submitter Sequence and Shard as the received network transaction, then
+    * if the transaction ID in local submitter history is same as received transaction, then we discard received transaction as duplicate
+    * else (i.e. network transaction ID is different from local transaction) trigger a **double spending resolution**
+  * else (i.e., there is no other transaction from same submitter, using same submitter sequence, for the same shard) then
+  * local submitter history does not have the transaction mentioned in "Previous Submitter Tx" of the received network transaction, then trigger a submitter history sync with the peer node
+  * else (i.e. local history has the reference last submitter transaction) accept the network transaction for processing
+* A **consensus** protocol is defined, to resolve double spending when 2 competing transactions from same submitter and sequence are seen
+  * protocol is able to handle the impact to shard DAG, since transactions cannot be rolled back in sharding DAG
+  * protocol is able to handle when a competing/duplicate network transaction is seen after a submission is accepted from client
+  * protocol is able to handle when two competing network transactions from different peers are seen on a node
+* A **submitter sync** protocol is defined for peer's to update submitter transaction sequences for out of sync network transactions.
+
 ### Iteration 4
 * nodes can join the network at any time after transaction processing has started
 * app can shutdown/leave the network and join back dynamically (does not need to be running since the beginning)
