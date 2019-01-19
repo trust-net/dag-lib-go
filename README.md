@@ -128,67 +128,18 @@ $USER/tmp/test-trust-node/spendr -config config.json
 > As per iteration 4, nodes can join/leave/re-join network dynamically while rest of the network is processing transactions. Nodes will perform on-demand sync at shard level during peer handshake, app registration and unknown transaction processing. Also, while nodes do not yet persist state across reboot, they perform full re-sync across reboot. Hence, as long as there is 1 active node on the network, progress will be made.
 
 ### Double Spender Application CLI
+A test driver application is provided to demonstrate and validate the double spending resolution protocol of the DLT stack protocol. Application implements following capabilities:
+* a simple "value transfer" functionality to demonstrate how such applications can be implemented using DLT stack
+* support to simulate a "dishonest" client that submits double spending transaction on same node
+* support to simulate a "dishonest" client that submits double spending transaction on two different nodes across the network
+
+
 Refer to documentation for double spender application CLI at [documentation link](https://github.com/trust-net/dag-lib-go/issues/36)
 
 ### Network Counter Application CLI
-Following are CLI commands for using network counter application...
+A test driver application is provided that implements simple network counters isolated within specific name space, to demonstrate and validate support for multiple shards with proper isolation and sync across the shared network.
 
-#### Register application shard
-Use the application's CLI to join a shard as following:
-
-```
-<headless>: join app1
-<app1>:
-```
-
-> This step is optional, an instance can be run without joining any shard, as a headless node. However, on that instance no transaction can be submitted. It will simply participate in the network as a headless node.
-
-#### Send counter transaction
-Use the application's CLI to submit transactions as following:
-
-```
-<app1>: incr cntr1 
-adding transaction: incr cntr1 1
-
-<app1>: decr cntr2
-adding transaction: decr cntr2 1
-```
-
-Use application's CLI to query a counter's value:
-
-```
-<app1>: countr cntr1
-     cntr1: 1
-<app1>: countr cntr2
-     cntr2: -1
-<app1>: countr cntr3
-     cntr3: not found
-```
-
-#### Leave/Un-register from shard
-Use the application's CLI to leave a previosuly registered shard as following:
-
-```
-<app1>: leave
-<headless>:
-```
-
-> Above will unregister the app and run node in headless node. App can re-join the same shard, or join a different shard, and will get synced with rest of the apps in that shard after it joins.
-
-#### Shutdown application
-```
-<app>: quit
-Shutdown cleanly
-```
-#### Restart application
-Application can be restarted to re-join an existing network:
-
-```
-cd $USER/tmp/test-trust-node/node-1
-../countr -config config.json
-```
-
-When application is restarted, it will perform a sync with peers during handshake for active shards of the peers. Additionally, when application registers a shard locally, it will sync with all connected peers for that shard's history on the network.
+Refer to documentation for double spender application CLI at [documentation link](https://github.com/trust-net/dag-lib-go/issues/39)
 
 ## How to use DLT stack library in your application
 
