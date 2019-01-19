@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"fmt"
+	"github.com/trust-net/dag-lib-go/stack/dto"
 	"testing"
 )
 
@@ -149,5 +150,41 @@ func TestGetState(t *testing.T) {
 		if string(state.slice) != string([]byte{0x03, 0x04, 0x3e}) {
 			t.Errorf("incorrect slice state value: %x", state.slice)
 		}
+	}
+}
+
+func TestToBeFetchedStackPush(t *testing.T) {
+	conn := TestConn()
+	peer := NewDEVp2pPeer(TestMockPeer("test peer"), conn)
+	if err := peer.ToBeFetchedStackPush(dto.TestSignedTransaction("test data")); err != nil {
+		t.Errorf("Failed to push transaction: %s", err)
+	}
+}
+
+func TestToBeFetchedStackPop_HasTx(t *testing.T) {
+	conn := TestConn()
+	peer := NewDEVp2pPeer(TestMockPeer("test peer"), conn)
+	// push few transactions to bottom
+	peer.ToBeFetchedStackPush(dto.TestSignedTransaction("test data"))
+	peer.ToBeFetchedStackPush(dto.TestSignedTransaction("test data"))
+	// now push one more on top
+	tx := dto.TestSignedTransaction("test data")
+	peer.ToBeFetchedStackPush(tx)
+
+	// pop a transaction, it should be the one pushed last
+	if popped := peer.ToBeFetchedStackPop(); popped == nil {
+		t.Errorf("Failed to pop transaction")
+	} else if popped.Id() != tx.Id() {
+		t.Errorf("Failed to pop the top transaction")
+	}
+}
+
+func TestToBeFetchedStackPop_HasNoTx(t *testing.T) {
+	conn := TestConn()
+	peer := NewDEVp2pPeer(TestMockPeer("test peer"), conn)
+
+	// pop a transaction from empty stack, it should be nil
+	if popped := peer.ToBeFetchedStackPop(); popped != nil {
+		t.Errorf("Unexpected popped transaction")
 	}
 }

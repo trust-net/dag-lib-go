@@ -2,11 +2,14 @@ package stack
 
 import (
 	devp2p "github.com/ethereum/go-ethereum/p2p"
+	"github.com/trust-net/dag-lib-go/db"
+	"github.com/trust-net/dag-lib-go/log"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/endorsement"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/repo"
 	"github.com/trust-net/dag-lib-go/stack/shard"
+	"github.com/trust-net/dag-lib-go/stack/state"
 	"net"
 )
 
@@ -34,13 +37,15 @@ func TestSignedTransaction(data string) dto.Transaction {
 }
 
 type mockEndorser struct {
-	TxId            [64]byte
-	Tx              dto.Transaction
-	TxHandlerCalled bool
-	AnchorCalled    bool
-	ApproverCalled  bool
-	HandlerReturn   error
-	orig            endorsement.Endorser
+	TxId                 [64]byte
+	Tx                   dto.Transaction
+	TxHandlerCalled      bool
+	KnownShardsTxsCalled bool
+	ReplaceCalled        bool
+	AnchorCalled         bool
+	ApproverCalled       bool
+	HandlerReturn        error
+	orig                 endorsement.Endorser
 }
 
 func (e *mockEndorser) Anchor(a *dto.Anchor) error {
@@ -54,15 +59,24 @@ func (e *mockEndorser) Approve(tx dto.Transaction) error {
 	return e.orig.Approve(tx)
 }
 
-func (e *mockEndorser) Handle(tx dto.Transaction) error {
+func (e *mockEndorser) Handle(tx dto.Transaction) (int, error) {
 	e.TxHandlerCalled = true
 	e.TxId = tx.Id()
 	e.Tx = tx
 	if e.HandlerReturn != nil {
-		return e.HandlerReturn
+		return endorsement.ERR_INVALID, e.HandlerReturn
 	} else {
 		return e.orig.Handle(tx)
 	}
+}
+func (e *mockEndorser) KnownShardsTxs(submitter []byte, seq uint64) (shards [][]byte, txs [][64]byte) {
+	e.KnownShardsTxsCalled = true
+	return e.orig.KnownShardsTxs(submitter, seq)
+}
+
+func (e *mockEndorser) Replace(tx dto.Transaction) error {
+	e.ReplaceCalled = true
+	return e.orig.Replace(tx)
 }
 
 func (e *mockEndorser) Reset() {
@@ -78,19 +92,43 @@ func NewMockEndorser(db repo.DltDb) *mockEndorser {
 }
 
 type mockSharder struct {
-	IsRegistered     bool
-	ShardId          []byte
-	AnchorCalled     bool
-	SyncAnchorCalled bool
-	AncestorsCalled  bool
-	ChildrenCalled   bool
-	ApproverCalled   bool
-	TxHandlerCalled  bool
-	TxHandler        func(tx dto.Transaction) error
-	orig             shard.Sharder
+	LockStateCalled   bool
+	UnlockStateCalled bool
+	CommitStateCalled bool
+	IsRegistered      bool
+	ShardId           []byte
+	AnchorCalled      bool
+	SyncAnchorCalled  bool
+	AncestorsCalled   bool
+	ChildrenCalled    bool
+	ApproverCalled    bool
+	TxHandlerCalled   bool
+	GetStateCalled    bool
+	GetStateKey       []byte
+	FlushCalled       bool
+	TxHandler         func(tx dto.Transaction, state state.State) error
+	orig              shard.Sharder
 }
 
-func (s *mockSharder) Register(shardId []byte, txHandler func(tx dto.Transaction) error) error {
+func (s *mockSharder) LockState() error {
+	s.LockStateCalled = true
+	// lock world state
+	return s.orig.LockState()
+}
+
+func (s *mockSharder) UnlockState() {
+	s.UnlockStateCalled = true
+	// unlock world state
+	s.orig.UnlockState()
+}
+
+func (s *mockSharder) CommitState() error {
+	s.CommitStateCalled = true
+	// transaction processed successfully, persist world state
+	return s.orig.CommitState()
+}
+
+func (s *mockSharder) Register(shardId []byte, txHandler func(tx dto.Transaction, state state.State) error) error {
 	s.IsRegistered = true
 	s.ShardId = shardId
 	s.TxHandler = txHandler
@@ -133,13 +171,24 @@ func (s *mockSharder) Handle(tx dto.Transaction) error {
 	return s.orig.Handle(tx)
 }
 
+func (s *mockSharder) GetState(key []byte) (*state.Resource, error) {
+	s.GetStateCalled = true
+	s.GetStateKey = key
+	return s.orig.GetState(key)
+}
+
+func (s *mockSharder) Flush(shardId []byte) error {
+	s.FlushCalled = true
+	return s.orig.Flush(shardId)
+}
+
 func (s *mockSharder) Reset() {
 	*s = mockSharder{orig: s.orig}
 }
 
-func NewMockSharder(db repo.DltDb) *mockSharder {
+func NewMockSharder(dltDb repo.DltDb) *mockSharder {
 	//	db, _ := repo.NewDltDb(db.NewInMemDbProvider())
-	orig, _ := shard.NewSharder(db)
+	orig, _ := shard.NewSharder(dltDb, db.NewInMemDbProvider())
 	return &mockSharder{orig: orig}
 }
 
@@ -157,17 +206,29 @@ type mockPeer struct {
 	SeenCalled       bool
 	ReadMsgCalled    bool
 	//	states           map[int]interface{}
-	GetStateCalled          bool
-	SetStateCalled          bool
-	ShardChildrenQCallCount int
+	GetStateCalled            bool
+	SetStateCalled            bool
+	ShardChildrenQCallCount   int
+	ToBeFetchedStackPushCount int
+	ToBeFetchedStackPopCount  int
 }
 
 func NewMockPeer(mockConn devp2p.MsgReadWriter) *mockPeer {
 	mockP2pPeer := p2p.TestMockPeer("test peer")
-	return &mockPeer{
+	m := &mockPeer{
 		peer: p2p.NewDEVp2pPeer(mockP2pPeer, mockConn),
 		//		states: make(map[int]interface{}),
 	}
+	m.peer.SetLogger(log.NewLogger("test peer"))
+	return m
+}
+
+func (p *mockPeer) SetLogger(logger log.Logger) {
+	p.peer.SetLogger(logger)
+}
+
+func (p *mockPeer) Logger() log.Logger {
+	return p.peer.Logger()
 }
 
 func (p *mockPeer) Reset() {
@@ -244,4 +305,14 @@ func (p *mockPeer) GetState(stateId int) interface{} {
 func (p *mockPeer) ShardChildrenQ() repo.Queue {
 	p.ShardChildrenQCallCount += 1
 	return p.peer.ShardChildrenQ()
+}
+
+func (p *mockPeer) ToBeFetchedStackPush(tx dto.Transaction) error {
+	p.ToBeFetchedStackPushCount += 1
+	return p.peer.ToBeFetchedStackPush(tx)
+}
+
+func (p *mockPeer) ToBeFetchedStackPop() dto.Transaction {
+	p.ToBeFetchedStackPopCount += 1
+	return p.peer.ToBeFetchedStackPop()
 }

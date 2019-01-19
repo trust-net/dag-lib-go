@@ -19,7 +19,13 @@ const (
 	RECV_TxShardChildRequestMsg
 	RECV_TxShardChildResponseMsg
 	RECV_ForceShardSyncMsg
+	RECV_SubmitterWalkUpRequestMsg
+	RECV_SubmitterWalkUpResponseMsg
+	RECV_SubmitterProcessDownRequestMsg
+	RECV_SubmitterProcessDownResponseMsg
+	RECV_ForceShardFlushMsg
 	POP_ShardChild
+	ALERT_DoubleSpend
 	SHUTDOWN
 )
 

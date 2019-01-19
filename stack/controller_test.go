@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// Controller interface and implementation for DLT Statck
 package stack
 
 import (
@@ -6,17 +8,26 @@ import (
 	"github.com/trust-net/dag-lib-go/log"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
+	"github.com/trust-net/dag-lib-go/stack/repo"
 	"github.com/trust-net/dag-lib-go/stack/shard"
+	"github.com/trust-net/dag-lib-go/stack/state"
 	"testing"
 	"time"
 )
 
 func initMocks() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P) {
+	stack, sharder, endorser, mockP2PLayer, _ := initMocksAndDb()
+	return stack, sharder, endorser, mockP2PLayer
+}
+
+func initMocksAndDb() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P, *repo.MockDltDb) {
 	// supress all logs
 	log.SetLogLevel(log.NONE)
 
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+	mockDb := repo.NewMockDltDb()
+	stack.db = mockDb
 
 	// inject mock p2p module into stack
 	mockP2PLayer := p2p.TestP2PLayer("mock p2p")
@@ -32,14 +43,15 @@ func initMocks() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P) {
 
 	// register app
 	app := TestAppConfig()
-	stack.Register(app.ShardId, app.Name, func(tx dto.Transaction) error { return nil })
+	stack.Register(app.ShardId, app.Name, func(tx dto.Transaction, state state.State) error { return nil })
 
 	// reset the mocks to remove any state updated during initialization
 	sharder.Reset()
 	endorser.Reset()
 	mockP2PLayer.Reset()
+	mockDb.Reset()
 
-	return stack, sharder, endorser, mockP2PLayer
+	return stack, sharder, endorser, mockP2PLayer, mockDb
 }
 
 // initialize DLT stack and validate
@@ -84,7 +96,8 @@ func TestRegister(t *testing.T) {
 	stack.Unregister()
 	app := TestAppConfig()
 	cbCalled := false
-	txHandler := func(tx dto.Transaction) error { cbCalled = true; return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { cbCalled = true; return nil }
+
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed upon replay error: %s", err)
 	}
@@ -140,19 +153,14 @@ func TestRegisterReplayFailure(t *testing.T) {
 	// unregister default app and register a new app that rejects replay transaction
 	stack.Unregister()
 	app := TestAppConfig()
-	txHandler := func(tx dto.Transaction) error { return errors.New("forced failure") }
+	txHandler := func(tx dto.Transaction, state state.State) error { return errors.New("forced failure") }
 
 	// reset mocks to start tracking what we expect
 	sharder.Reset()
 	endorser.Reset()
 
-	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
-		t.Errorf("Registration failed upon replay error: %s", err)
-	}
-
-	// we should be registered with sharder
-	if !sharder.IsRegistered || sharder.TxHandler == nil {
-		t.Errorf("DLT stack controller did not keep app registration with sharding layer upon replay failure")
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err == nil {
+		t.Errorf("Expected registration to fail upon replay error")
 	}
 }
 
@@ -168,7 +176,7 @@ func TestPreRegistered(t *testing.T) {
 
 	// attempt to register app again
 	sharder.Reset()
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	if err := stack.Register([]byte("another shard"), "another app", txHandler); err == nil {
 		t.Errorf("Registration did not check for already registered")
 	}
@@ -236,7 +244,7 @@ func TestSubmitUnregistered(t *testing.T) {
 func TestSubmitNilValues(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
@@ -273,7 +281,7 @@ func TestSubmitNilValues(t *testing.T) {
 func TestSubmitAppIdNoMatch(t *testing.T) {
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	app := TestAppConfig()
-	txHandler := func(tx dto.Transaction) error { return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
 	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
 		t.Errorf("Registration failed, err: %s", err)
 		return
@@ -286,7 +294,7 @@ func TestSubmit(t *testing.T) {
 	stack, sharder, endorser, p2p := initMocks()
 
 	// get an anchor
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	if a == nil {
 		t.Errorf("Failed to get anchor")
 	}
@@ -294,6 +302,15 @@ func TestSubmit(t *testing.T) {
 	tx := TestAnchoredTransaction(a, "test payload")
 	if err := stack.Submit(tx); err != nil {
 		t.Errorf("Transaction submission failed, err: %s", err)
+	}
+	if !sharder.LockStateCalled {
+		t.Errorf("Controller did not lock world state before transaction processing")
+	}
+	if !sharder.UnlockStateCalled {
+		t.Errorf("Controller did not unlock world state after transaction processing")
+	}
+	if !sharder.CommitStateCalled {
+		t.Errorf("Controller should commit world state upon failed transaction processing")
 	}
 
 	// walk down the DLT stack and validate expectations
@@ -329,7 +346,7 @@ func TestReSubmitSeen(t *testing.T) {
 	stack, sharder, endorser, _ := initMocks()
 
 	// get an anchor
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	if a == nil {
 		t.Errorf("Failed to get anchor")
 	}
@@ -350,6 +367,15 @@ func TestReSubmitSeen(t *testing.T) {
 	if sharder.ApproverCalled {
 		t.Errorf("Sharder should not get called for seen submission")
 	}
+	if sharder.LockStateCalled {
+		t.Errorf("Controller should not lock world state before transaction processing")
+	}
+	if sharder.UnlockStateCalled {
+		t.Errorf("Controller should not unlock world state after transaction processing")
+	}
+	if sharder.CommitStateCalled {
+		t.Errorf("Controller should not commit world state upon failed transaction processing")
+	}
 
 	// verify that endorser does not gets called for seen submission
 	if endorser.ApproverCalled {
@@ -363,7 +389,7 @@ func TestSubmitNetworkSeen(t *testing.T) {
 	stack, sharder, endorser, _ := initMocks()
 
 	// get an anchor
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	if a == nil {
 		t.Errorf("Failed to get anchor")
 	}
@@ -379,6 +405,15 @@ func TestSubmitNetworkSeen(t *testing.T) {
 	// verify that sharding layer does not gets called for seen submission
 	if sharder.TxHandlerCalled {
 		t.Errorf("Sharder should not get called for seen submission")
+	}
+	if sharder.LockStateCalled {
+		t.Errorf("Controller should not lock world state before transaction processing")
+	}
+	if sharder.UnlockStateCalled {
+		t.Errorf("Controller should not unlock world state after transaction processing")
+	}
+	if sharder.CommitStateCalled {
+		t.Errorf("Controller should not commit world state upon failed transaction processing")
 	}
 
 	// verify that endorser does not gets called for seen submission
@@ -401,6 +436,44 @@ func TestSubmitValidation(t *testing.T) {
 	}
 	if p2pLayer.DidBroadcast {
 		t.Errorf("Invalid transaction got broadcast to peers")
+	}
+}
+
+func TestSubmitValidation_AnchorSignature(t *testing.T) {
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+	// register app
+	app := TestAppConfig()
+	stack.Register(app.ShardId, app.Name, func(tx dto.Transaction, state state.State) error { return nil })
+
+	// get a valid and signed anchor from stack
+	a := stack.Anchor([]byte("test submitter"), 0x1, dto.RandomHash())
+	// now change the submitter sequence, to simulate cheating
+	a.SubmitterSeq = 0x22
+	// create a transaction with this modified anchor
+	tx := TestAnchoredTransaction(a, "test payload")
+
+	// submit transaction, it should fail signature validation
+	if err := stack.Submit(tx); err == nil {
+		t.Errorf("Transaction submission did not check for anchor signature")
+	}
+}
+
+func TestSubmitValidation_PayloadSignature(t *testing.T) {
+	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
+	// register app
+	app := TestAppConfig()
+	stack.Register(app.ShardId, app.Name, func(tx dto.Transaction, state state.State) error { return nil })
+
+	// get a valid and signed anchor from stack
+	a := stack.Anchor([]byte("test submitter"), 0x1, dto.RandomHash())
+	// create a signed transaction
+	tx := TestAnchoredTransaction(a, "test payload")
+	// now modify payload of transaction to simulate cheating
+	tx.Self().Payload = []byte("i changed my mind")
+
+	// submit transaction, it should fail signature validation
+	if err := stack.Submit(tx); err == nil {
+		t.Errorf("Transaction submission did not check for anchor signature")
 	}
 }
 
@@ -434,9 +507,16 @@ func TestAnchorRegisteredApp(t *testing.T) {
 	stack, sharder, endorser, p2p := initMocks()
 
 	// get an anchor
-	a := stack.Anchor([]byte("test submitter"))
+	lastTx := dto.RandomHash()
+	a := stack.Anchor([]byte("test submitter"), 0x01, lastTx)
 	if a == nil {
 		t.Errorf("Failed to get anchor")
+	}
+	if a.SubmitterLastTx != lastTx {
+		t.Errorf("Incorrect submitter's last transaction: %x", a.SubmitterLastTx)
+	}
+	if a.SubmitterSeq != 0x01 {
+		t.Errorf("Incorrect submitter's sequence: %x", a.SubmitterSeq)
 	}
 
 	if !sharder.AnchorCalled {
@@ -464,7 +544,7 @@ func TestAnchorUnregisteredApp(t *testing.T) {
 	stack.Unregister()
 
 	// get an anchor
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	if a != nil {
 		t.Errorf("should not get anchor when app is not registered")
 	}
@@ -588,6 +668,15 @@ func TestRECV_NewTxBlockMsgEvent(t *testing.T) {
 	if !sharder.TxHandlerCalled {
 		t.Errorf("DLT stack controller did not call sharding layer")
 	}
+	if !sharder.LockStateCalled {
+		t.Errorf("Controller did not lock world state before transaction processing")
+	}
+	if !sharder.UnlockStateCalled {
+		t.Errorf("Controller did not unlock world state after transaction processing")
+	}
+	if !sharder.CommitStateCalled {
+		t.Errorf("Controller should commit world state upon successfull transaction processing")
+	}
 
 	// verify that endorser gets called for network message
 	if !endorser.TxHandlerCalled {
@@ -595,6 +684,259 @@ func TestRECV_NewTxBlockMsgEvent(t *testing.T) {
 	}
 	if endorser.TxId != tx.Id() {
 		t.Errorf("Endorser transaction does not match network transaction")
+	}
+}
+
+// test stack controller event listener handles RECV_NewTxBlockMsg correctly for a duplicate transaction
+func TestRECV_NewTxBlockMsgEvent_Duplicate(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
+	stack.Submit(tx)
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+	testDb.Reset()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// now emit RECV_NewTxBlockMsg event using same transaction
+	events <- newControllerEvent(RECV_NewTxBlockMsg, tx)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle new transaction
+
+	// verify that endorser gets called for network message
+	if !endorser.TxHandlerCalled {
+		t.Errorf("Endorser did not get called for network transaction")
+	}
+	if endorser.TxId != tx.Id() {
+		t.Errorf("Endorser transaction does not match network transaction")
+	}
+
+	// sharding layer should not have be asked to handle duplicate transaction
+	if sharder.TxHandlerCalled {
+		t.Errorf("DLT stack controller should not call sharding layer for duplicate transaction")
+	}
+	if sharder.LockStateCalled {
+		t.Errorf("Controller should not lock world state before transaction processing")
+	}
+	if sharder.UnlockStateCalled {
+		t.Errorf("Controller should not unlock world state after transaction processing")
+	}
+	if sharder.CommitStateCalled {
+		t.Errorf("Controller should not commit world state upon failed transaction processing")
+	}
+
+	// we should NOT have broadcasted message
+	if p2pLayer.DidBroadcast {
+		t.Errorf("Listener should not froward duplicate network transaction")
+	}
+
+	// we should NOT disconnect for duplicate transaction
+	if peer.DisconnectCalled {
+		t.Errorf("Listener should not disconnect peer for duplicate network transaction")
+	}
+}
+
+// test stack controller event listener handles RECV_NewTxBlockMsg correctly for a duplicate transaction
+func TestRECV_NewTxBlockMsgEvent_DoubleSpend(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
+	stack.Submit(TestAnchoredTransaction(a, "test payload1"))
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+	testDb.Reset()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// now emit RECV_NewTxBlockMsg event using different transaction using same submitter/seq/shard
+	dblTx := TestAnchoredTransaction(a, "test payload1")
+	events <- newControllerEvent(RECV_NewTxBlockMsg, dblTx)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle new transaction
+	// when transaction is double spending
+
+	// verify that endorser gets called for network message
+	if !endorser.TxHandlerCalled {
+		t.Errorf("Endorser did not get called for network transaction")
+	}
+	if endorser.TxId != dblTx.Id() {
+		t.Errorf("Endorser transaction does not match network transaction")
+	}
+
+	// sharding layer should not have be asked to handle double spending transaction
+	if sharder.TxHandlerCalled {
+		t.Errorf("DLT stack controller should not call sharding layer for double spending transaction")
+	}
+	if sharder.LockStateCalled {
+		t.Errorf("Controller should not lock world state before transaction processing")
+	}
+	if sharder.UnlockStateCalled {
+		t.Errorf("Controller should not unlock world state after transaction processing")
+	}
+	if sharder.CommitStateCalled {
+		t.Errorf("Controller should not commit world state upon failed transaction processing")
+	}
+
+	// we should NOT have broadcasted message
+	if p2pLayer.DidBroadcast {
+		t.Errorf("Listener should not froward double spending network transaction")
+	}
+
+	// we should have emitted a DoubleSpendAlert event
+	if len(events) == 0 {
+		t.Errorf("did not emit ALERT_DoubleSpend")
+	} else if event := (<-events); event.code != ALERT_DoubleSpend {
+		t.Errorf("did not emit ALERT_DoubleSpend")
+	} else if tx, match := event.data.(dto.Transaction); !match {
+		t.Errorf("did not add transaction to ALERT_DoubleSpend")
+	} else if tx.Id() != dblTx.Id() {
+		t.Errorf("added incorrect transaction to ALERT_DoubleSpend")
+	}
+
+	// we should NOT have sent any message to peer
+	if peer.SendCalled {
+		t.Errorf("should not send any message to peer")
+	}
+
+	// we should not disconnect here, let double spending event handler take care of decision
+	if peer.DisconnectCalled {
+		t.Errorf("Listener should not disconnect peer for double spending network transaction")
+	}
+}
+
+// test stack controller event listener handles RECV_NewTxBlockMsg correctly for unknown submitter last transaction
+func TestRECV_NewTxBlockMsgEvent_UnknownLastTx(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
+
+	// submit a transactions to add ancestor to local shard's Anchor
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
+	stack.Submit(TestAnchoredTransaction(a, "test payload1"))
+	p2pLayer.Reset()
+	sharder.Reset()
+	endorser.Reset()
+	testDb.Reset()
+
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
+
+	// start stack's event listener
+	events := make(chan controllerEvent, 10)
+	finished := make(chan struct{}, 2)
+	go func() {
+		stack.peerEventsListener(peer, events)
+		finished <- struct{}{}
+	}()
+
+	// now emit RECV_NewTxBlockMsg event using an unknown last submitter transaction
+	a.SubmitterSeq += 1
+	a.SubmitterLastTx = dto.RandomHash()
+	orphTx := TestAnchoredTransaction(a, "test payload2")
+	events <- newControllerEvent(RECV_NewTxBlockMsg, orphTx)
+	events <- newControllerEvent(SHUTDOWN, nil)
+
+	// wait for event listener to finish
+	<-finished
+
+	// check if event listener correctly processed the event to handle new transaction
+	// when submitter's last transaction is not known
+
+	// verify that endorser gets called for network message
+	if !endorser.TxHandlerCalled {
+		t.Errorf("Endorser did not get called for network transaction")
+	}
+	if endorser.TxId != orphTx.Id() {
+		t.Errorf("Endorser transaction does not match network transaction")
+	}
+
+	// sharding layer should not have be asked to handle transaction
+	if sharder.TxHandlerCalled {
+		t.Errorf("DLT stack controller should not call sharding layer for unknown last submitter transaction")
+	}
+	if sharder.LockStateCalled {
+		t.Errorf("Controller should not lock world state before transaction processing")
+	}
+	if sharder.UnlockStateCalled {
+		t.Errorf("Controller should not unlock world state after transaction processing")
+	}
+	if sharder.CommitStateCalled {
+		t.Errorf("Controller should not commit world state upon failed transaction processing")
+	}
+
+	// we should NOT have broadcasted message
+	if p2pLayer.DidBroadcast {
+		t.Errorf("Listener should not froward network transaction when submitter's last transaction is unknown")
+	}
+
+	// we should not disconnect for transaction
+	if peer.DisconnectCalled {
+		t.Errorf("Listener should not disconnect peer when submitter's last transaction is unknown")
+	}
+
+	// we should have pushed the orphan transaction into ToBeFetchedStack for later processing
+	if peer.ToBeFetchedStackPushCount == 0 {
+		t.Errorf("controller did not save orphan tx for later processing")
+	}
+
+	// we should have added the orphan submitter tx to stack
+	if tx := peer.ToBeFetchedStackPop(); tx == nil || tx.Id() != orphTx.Id() {
+		t.Errorf("saved orphan tx incorrect")
+	}
+
+	//	// we should have set the peer state
+	//	if data := peer.GetState(int(RECV_SubmitterWalkUpResponseMsg)); data == nil {
+	//		t.Errorf("controller did not save last hash for walk up response message")
+	//	} else if state, ok := data.([]byte); !ok {
+	//		t.Errorf("controller saved incorrect state type: %T", data)
+	//	} else if string(state) != string(peer.SendMsgId) {
+	//		t.Errorf("controller saved incorrect hash:\n%x\nExpected:\n%x", state, peer.SendMsgId)
+	//	}
+
+	// we should have sent the submitter sync message
+	if !peer.SendCalled {
+		t.Errorf("did not send submitter sync message to peer")
+	} else if peer.SendMsgCode != SubmitterWalkUpRequestMsgCode {
+		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
+	} else if string(peer.SendMsg.(*SubmitterWalkUpRequestMsg).Submitter) != string(a.Submitter) {
+		t.Errorf("Incorrect SubmitterWalkUpRequestMsg Submitter: %s", peer.SendMsg.(*SubmitterWalkUpRequestMsg).Submitter)
+	} else if peer.SendMsg.(*SubmitterWalkUpRequestMsg).Seq != a.SubmitterSeq-1 {
+		t.Errorf("Incorrect SubmitterWalkUpRequestMsg Sequence: %d", peer.SendMsg.(*SubmitterWalkUpRequestMsg).Seq)
 	}
 }
 
@@ -616,7 +958,7 @@ func TestRECV_ShardSyncMsgEvent_RemoteHeavy(t *testing.T) {
 	}()
 
 	// build a shard sync message with heavier Anchor
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	a.Weight += 10
 	msg := NewShardSyncMsg(a)
 	// now emit RECV_ShardSyncMsg event
@@ -657,7 +999,7 @@ func TestRECV_ShardSyncMsgEvent_LessWeight(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// submit a transaction to add weight to local shard's Anchor
-	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload")
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload")
 	if err := stack.Submit(tx); err != nil {
 		t.Errorf("Transaction submission failed, err: %s", err)
 	}
@@ -676,7 +1018,7 @@ func TestRECV_ShardSyncMsgEvent_LessWeight(t *testing.T) {
 
 	// build a shard sync message with default Anchor but same shard as local
 	a := dto.TestAnchor()
-	a.ShardId = stack.Anchor([]byte("test")).ShardId
+	a.ShardId = stack.Anchor([]byte("test"), 0x01, dto.RandomHash()).ShardId
 	msg := NewShardSyncMsg(a)
 	// now emit RECV_ShardSyncMsg event
 	events <- newControllerEvent(RECV_ShardSyncMsg, msg)
@@ -717,7 +1059,7 @@ func TestRECV_ShardSyncMsgEvent_SameWeight_NumericHeavy(t *testing.T) {
 	}()
 
 	// build a shard sync message with same weight but parent hash that is higher numeric value
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	for i := 0; i < 64; i++ {
 		a.ShardParent[i] = 0xff
 	}
@@ -765,7 +1107,7 @@ func TestRECV_ShardSyncMsgEvent_LessWeight_NumericHeavy(t *testing.T) {
 	}()
 
 	// build a shard sync message with less weight but parent hash that is higher numeric value
-	a := stack.Anchor([]byte("test submitter"))
+	a := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	a.Weight -= 1
 	for i := 0; i < 64; i++ {
 		a.ShardParent[i] = 0xff
@@ -798,7 +1140,7 @@ func TestRECV_ShardSyncMsgEvent_SameAnchors(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// submit a transaction to add weight to local shard's Anchor
-	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload")
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload")
 	if err := stack.Submit(tx); err != nil {
 		t.Errorf("Transaction submission failed, err: %s", err)
 	}
@@ -819,7 +1161,7 @@ func TestRECV_ShardSyncMsgEvent_SameAnchors(t *testing.T) {
 	}()
 
 	// build a shard sync message with same anchor as local
-	local := stack.Anchor([]byte("test submitter"))
+	local := stack.Anchor([]byte("test submitter"), 0x02, tx.Id())
 	remote := &dto.Anchor{
 		ShardId:     local.ShardId,
 		Weight:      local.Weight,
@@ -854,7 +1196,7 @@ func TestRECV_ShardSyncMsgEvent_NoAppRegistered(t *testing.T) {
 	stack, _, _, _ := initMocks()
 
 	// save app's shard for later use and then unregister the app
-	ShardId := stack.Anchor([]byte("test submitter")).ShardId
+	ShardId := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()).ShardId
 	stack.Unregister()
 
 	// build a mock peer
@@ -987,7 +1329,7 @@ func TestPeerListnerGeneratesEventForShardSyncMsg(t *testing.T) {
 	mockConn := p2p.TestConn()
 	peer := NewMockPeer(mockConn)
 
-	// setup mock connection to send a signed transaction followed by clean shutdown
+	// setup mock connection to send a shard sync message followed by clean shutdown
 	msg := NewShardSyncMsg(&dto.Anchor{})
 	mockConn.NextMsg(ShardSyncMsgCode, msg)
 	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
@@ -1092,13 +1434,14 @@ func TestRECV_ShardAncestorRequestMsgCode_KnownStartHash(t *testing.T) {
 	stack, sharder, _, _ := initMocks()
 
 	// save the genesis hash
-	gen := stack.Anchor([]byte("test submitter")).ShardParent
+	gen := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()).ShardParent
 
 	// submit 2 transactions to add ancestors to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
+
 	// the second transaction would be Anchor's parent, and hence will be the starting hash
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x02, tx1.Id()), "test payload2")
 	stack.Submit(tx2)
 
 	// build a mock peer
@@ -1114,9 +1457,8 @@ func TestRECV_ShardAncestorRequestMsgCode_KnownStartHash(t *testing.T) {
 	}()
 
 	// build an ancestor request message for stack's shard
-	a := stack.Anchor([]byte("test submitter"))
 	msg := &ShardAncestorRequestMsg{
-		StartHash:    a.ShardParent,
+		StartHash:    tx2.Id(),
 		MaxAncestors: 10,
 	}
 	// now emit RECV_ShardAncestorRequestMsgCode event
@@ -1198,11 +1540,12 @@ func TestPeerListnerGeneratesEventForShardAncestorResponseMsg(t *testing.T) {
 // test stack controller event listener handles RECV_ShardAncestorResponseMsg when all hashesh are unknown
 func TestRECV_ShardAncestorResponseMsg_AllUnknown(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1242,6 +1585,13 @@ func TestRECV_ShardAncestorResponseMsg_AllUnknown(t *testing.T) {
 		t.Errorf("did not get state from peer to validate response")
 	}
 
+	// we should have checked for known ancestors from shard DAG and not tx DB
+	if testDb.GetTxCallCount != 0 {
+		t.Errorf("should not have called GetTx")
+	} else if testDb.GetShardDagNodeCallCount != 10 {
+		t.Errorf("Incorrect number of calls to GetShardDagNode: %d", testDb.GetShardDagNodeCallCount)
+	}
+
 	// we should have set the peer state to last of the unknown ancestors
 	if data := peer.GetState(int(RECV_ShardAncestorResponseMsg)); data == nil {
 		t.Errorf("controller did not save last hash for ancestor response message")
@@ -1265,11 +1615,12 @@ func TestRECV_ShardAncestorResponseMsg_AllUnknown(t *testing.T) {
 // test stack controller event listener handles RECV_ShardAncestorResponseMsg when last hash state is not correct
 func TestRECV_ShardAncestorResponseMsg_IncorrectState(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1309,6 +1660,11 @@ func TestRECV_ShardAncestorResponseMsg_IncorrectState(t *testing.T) {
 		t.Errorf("did not get state from peer to validate response")
 	}
 
+	// we should NOT have checked for known ancestors from shard DAG
+	if testDb.GetShardDagNodeCallCount != 0 {
+		t.Errorf("should not have called GetShardDagNode")
+	}
+
 	// we should not have changed the peer state
 	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)).([64]byte); state != startHash {
 		t.Errorf("controller changed start hash for incorrect state:\n%x\nExpected:\n%x", state, startHash)
@@ -1324,11 +1680,12 @@ func TestRECV_ShardAncestorResponseMsg_IncorrectState(t *testing.T) {
 // test stack controller event listener handles RECV_ShardAncestorResponseMsg there is a known common ancestor
 func TestRECV_ShardAncestorResponseMsg_KnownAncestor(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1368,6 +1725,11 @@ func TestRECV_ShardAncestorResponseMsg_KnownAncestor(t *testing.T) {
 	// we should have fetched the peer state to validate ancestor response's starting hash
 	if !peer.GetStateCalled {
 		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should have checked for known ancestors from shard DAG
+	if testDb.GetShardDagNodeCallCount != 6 {
+		t.Errorf("Incorrect number of calls to GetShardDagNode: %d", testDb.GetShardDagNodeCallCount)
 	}
 
 	// we should have set the peer state to last known common ancestor for RECV_ShardAncestorResponseMsg state
@@ -1411,7 +1773,7 @@ func TestAppCallbackTxRejected(t *testing.T) {
 
 	// define a new tx handler call back for app to always reject
 	txHandlerCalled := false
-	txHandler := func(tx dto.Transaction) error {
+	txHandler := func(tx dto.Transaction, state state.State) error {
 		// we reject all transactions
 		txHandlerCalled = true
 		return errors.New("trust no one")
@@ -1468,7 +1830,7 @@ func TestStackRunner(t *testing.T) {
 
 	// define a new tx handler call back for app that remembers when called
 	gotCallback := false
-	txHandler := func(tx dto.Transaction) error { gotCallback = true; return nil }
+	txHandler := func(tx dto.Transaction, state state.State) error { gotCallback = true; return nil }
 
 	// register app
 	app := TestAppConfig()
@@ -1552,10 +1914,10 @@ func TestRECV_ShardChildrenRequestMsg_KnownHash(t *testing.T) {
 	stack, sharder, _, _ := initMocks()
 
 	// submit 2 transactions to add ancestors to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, [64]byte{}), "test payload1")
 	stack.Submit(tx1)
 	// the second transaction would be Anchor's parent, and hence will be the starting hash
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x02, tx1.Id()), "test payload2")
 	stack.Submit(tx2)
 
 	// build a mock peer
@@ -1609,10 +1971,10 @@ func TestRECV_ShardChildrenRequestMsg_UnknownHash(t *testing.T) {
 	stack, sharder, _, _ := initMocks()
 
 	// submit 2 transactions to add ancestors to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, [64]byte{}), "test payload1")
 	stack.Submit(tx1)
 	// the second transaction would be Anchor's parent, and hence will be the starting hash
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x02, tx1.Id()), "test payload2")
 	stack.Submit(tx2)
 
 	// build a mock peer
@@ -1714,11 +2076,12 @@ func TestPeerListnerGeneratesEventForShardChildrenResponseMsg(t *testing.T) {
 // test stack controller event listener handles RECV_ShardChildrenResponseMsg when Parent hash is unexpected
 func TestRECV_ShardChildrenResponseMsg_UnexpectedHash(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1759,6 +2122,11 @@ func TestRECV_ShardChildrenResponseMsg_UnexpectedHash(t *testing.T) {
 		t.Errorf("did not get state from peer to validate response")
 	}
 
+	// we should NOT have checked for known child from shard DAG
+	if testDb.GetShardDagNodeCallCount != 0 {
+		t.Errorf("should not have called GetShardDagNode")
+	}
+
 	// we should not have changed the peer state
 	if state := peer.GetState(int(RECV_ShardChildrenResponseMsg)).([64]byte); state != tx1.Id() {
 		t.Errorf("controller changed start hash for incorrect state:\n%x\nExpected:\n%x", state, tx1.Id())
@@ -1778,11 +2146,12 @@ func TestRECV_ShardChildrenResponseMsg_UnexpectedHash(t *testing.T) {
 // test stack controller event listener handles RECV_ShardChildrenResponseMsg when Parent hash is as expected
 func TestRECV_ShardChildrenResponseMsg_ExpectedHash(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1823,6 +2192,13 @@ func TestRECV_ShardChildrenResponseMsg_ExpectedHash(t *testing.T) {
 		t.Errorf("did not get state from peer to validate response")
 	}
 
+	// we should have checked for known children from shard DAG and not tx DB
+	if testDb.GetTxCallCount != 0 {
+		t.Errorf("should not have called GetTx")
+	} else if testDb.GetShardDagNodeCallCount != 5 {
+		t.Errorf("Incorrect number of calls to GetShardDagNode: %d", testDb.GetShardDagNodeCallCount)
+	}
+
 	// we should have changed the peer state to null so that no further children response can be processed
 	if state := peer.GetState(int(RECV_ShardChildrenResponseMsg)).([64]byte); state != [64]byte{} {
 		t.Errorf("controller did not change start hash, current:\n%x\nExpected:\n%x", state, [64]byte{})
@@ -1847,15 +2223,16 @@ func TestRECV_ShardChildrenResponseMsg_ExpectedHash(t *testing.T) {
 // test stack controller event listener handles RECV_ShardChildrenResponseMsg when one of the children is already known
 func TestRECV_ShardChildrenResponseMsg_KnownChild(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, _, _, _ := initMocks()
+	stack, _, _, _, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, [64]byte{}), "test payload1")
 	stack.Submit(tx1)
 
 	// submit another transactions to add child to local shard's Anchor
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x02, tx1.Id()), "test payload2")
 	stack.Submit(tx2)
+	testDb.Reset()
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -1897,6 +2274,11 @@ func TestRECV_ShardChildrenResponseMsg_KnownChild(t *testing.T) {
 	// we should have fetched the peer state to validate ancestor response's starting hash
 	if !peer.GetStateCalled {
 		t.Errorf("did not get state from peer to validate response")
+	}
+
+	// we should have checked for known child from shard DAG
+	if testDb.GetShardDagNodeCallCount != 5 {
+		t.Errorf("Incorrect number of calls to GetShardDagNode: %d", testDb.GetShardDagNodeCallCount)
 	}
 
 	// we should have changed the peer state to null so that no further children response can be processed
@@ -2064,10 +2446,10 @@ func TestRECV_TxShardChildRequestMsg_KnownHash(t *testing.T) {
 	stack, sharder, _, _ := initMocks()
 
 	// submit 2 transactions to add a tx and its child to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, [64]byte{}), "test payload1")
 	stack.Submit(tx1)
 	// the second transaction would be Anchor's parent, and hence will be the starting hash
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x02, tx1.Id()), "test payload2")
 	stack.Submit(tx2)
 
 	// build a mock peer
@@ -2121,10 +2503,10 @@ func TestRECV_TxShardChildRequestMsg_UnknownHash(t *testing.T) {
 	stack, sharder, _, _ := initMocks()
 
 	// submit 2 transactions to add a tx and its child to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, [64]byte{}), "test payload1")
 	stack.Submit(tx1)
 	// the second transaction would be Anchor's parent, and hence will be the starting hash
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload2")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x02, tx1.Id()), "test payload2")
 	stack.Submit(tx2)
 
 	// build a mock peer
@@ -2206,14 +2588,14 @@ func TestRECV_TxShardChildResponseMsg_UnexpectedHash(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, [64]byte{}), "test payload1")
 	stack.Submit(tx1)
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
 
 	// build another transaction as child of above transaction to send in response
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x02, tx1.Id()), "test payload1")
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -2293,14 +2675,14 @@ func TestRECV_TxShardChildResponseMsg_UnserializableTx(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, [64]byte{}), "test payload1")
 	stack.Submit(tx1)
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
 
 	// build another transaction as child of above transaction to send in response
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x02, tx1.Id()), "test payload1")
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -2383,14 +2765,14 @@ func TestRECV_TxShardChildResponseMsg_ExpectedHash(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
 
 	// build another transaction as child of above transaction to send in response
-	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx2 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x02, tx1.Id()), "test payload1")
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -2502,15 +2884,15 @@ func TestRECV_ForceShardSyncMsg_KnownShard_InSync(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to local shard
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 
 	// save app's shard's anchor for later use and then unregister the app
-	anchor := stack.Anchor([]byte("test submitter"))
+	anchor := stack.Anchor([]byte("test submitter"), 0x02, tx1.Id())
 
 	// now unregister default app, and register a different app/shard
 	stack.Unregister()
-	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction, state state.State) error { return nil })
 
 	// reset the mocks to remove any state updated during initialization
 	sharder.Reset()
@@ -2569,15 +2951,15 @@ func TestRECV_ForceShardSyncMsg_KnownShard_LocalAhead(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// save app's shard's anchor for later use and then unregister the app
-	anchor := stack.Anchor([]byte("test submitter"))
+	anchor := stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 
 	// submit a transactions to local shard to move it ahead of saved anchor
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 
 	// now unregister default app, and register a different app/shard
 	stack.Unregister()
-	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction, state state.State) error { return nil })
 
 	// reset the mocks to remove any state updated during initialization
 	sharder.Reset()
@@ -2640,15 +3022,15 @@ func TestRECV_ForceShardSyncMsg_KnownShard_RemoteAhead(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to local shard
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 
 	// save app's shard's anchor for later use and then unregister the app
-	anchor := stack.Anchor([]byte("test submitter"))
+	anchor := stack.Anchor([]byte("test submitter"), 0x02, tx1.Id())
 
 	// now unregister default app, and register a different app/shard
 	stack.Unregister()
-	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+	stack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction, state state.State) error { return nil })
 
 	// reset the mocks to remove any state updated during initialization
 	sharder.Reset()
@@ -2712,7 +3094,7 @@ func TestRECV_ForceShardSyncMsg_UnknownShard(t *testing.T) {
 	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// submit a transactions to local shard
-	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter")), "test payload1")
+	tx1 := TestAnchoredTransaction(stack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash()), "test payload1")
 	stack.Submit(tx1)
 
 	// reset the mocks to remove any state updated during initialization
@@ -2737,10 +3119,10 @@ func TestRECV_ForceShardSyncMsg_UnknownShard(t *testing.T) {
 
 	// now unregister default app, and register a different app/shard
 	peerStack.Unregister()
-	peerStack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction) error { return nil })
+	peerStack.Register([]byte("a different shard"), "shard-2", func(tx dto.Transaction, state state.State) error { return nil })
 
 	// build a ForceShardSyncMsg request with anchor of remoteStack using an unknown shard
-	anchor := peerStack.Anchor([]byte("test submitter"))
+	anchor := peerStack.Anchor([]byte("test submitter"), 0x01, dto.RandomHash())
 	msg := NewForceShardSyncMsg(anchor)
 
 	// now emit RECV_TxShardChildRequestMsg event
@@ -2782,9 +3164,6 @@ func TestRECV_ForceShardSyncMsg_UnknownShard(t *testing.T) {
 func TestRECV_NewTxBlockMsg_UnknownTxParent(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, sharder, _, _ := initMocks()
-
-	//	log.SetLogLevel(log.DEBUG)
-	//	defer log.SetLogLevel(log.NONE)
 
 	// build a mock peer
 	mockConn := p2p.TestConn()
@@ -2829,5 +3208,22 @@ func TestRECV_NewTxBlockMsg_UnknownTxParent(t *testing.T) {
 		t.Errorf("Incorrect message code send: %d", peer.SendMsgCode)
 	} else if peer.SendMsg.(*ShardAncestorRequestMsg).StartHash != tx.Anchor().ShardParent {
 		t.Errorf("Incorrect walk up hash: %x\nExpected: %x", peer.SendMsg.(*ShardAncestorRequestMsg).StartHash, tx.Anchor().ShardParent)
+	}
+}
+
+// get resource value from world state
+func TestGetState(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, _, _ := initMocks()
+
+	// reset mocks to start tracking what we expect
+	sharder.Reset()
+
+	// fetch a resource from world state
+	stack.GetState([]byte("test key"))
+
+	// we should have fetched state value from sharder
+	if !sharder.GetStateCalled {
+		t.Errorf("GetState did not fetch value from sharding layer")
 	}
 }

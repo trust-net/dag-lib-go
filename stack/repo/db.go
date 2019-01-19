@@ -2,9 +2,9 @@ package repo
 
 import (
 	"errors"
+	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/dto"
-	"github.com/trust-net/go-trust-net/common"
 	"sync"
 )
 
@@ -19,6 +19,21 @@ type DagNode struct {
 	Depth uint64
 }
 
+type ShardTxPair struct {
+	// Shard ID
+	ShardId []byte
+	// Tx ID
+	TxId [64]byte
+}
+type SubmitterHistory struct {
+	// Submitter ID
+	Submitter []byte
+	// Submitter Seq
+	Seq uint64
+	// shard id: tx id list
+	ShardTxPairs []ShardTxPair
+}
+
 type DltDb interface {
 	// get a transaction from transaction history (no entry == nil)
 	GetTx(id [64]byte) dto.Transaction
@@ -26,12 +41,18 @@ type DltDb interface {
 	AddTx(tx dto.Transaction) error
 	// update a shard's DAG and tips for a new transaction
 	UpdateShard(tx dto.Transaction) error
+	// flush a shard DAG
+	FlushShard(shardId []byte) error
+	// update a submitter's DAG and tips for a new transaction
+	UpdateSubmitter(tx dto.Transaction) error
+	// replace a submitter's DAG and tips for a new transaction
+	ReplaceSubmitter(tx dto.Transaction) error
 	// delete an existing transaction from transaction history (deleting a non-tip transaction will cause errors)
 	DeleteTx(id [64]byte) error
 	// get the shard's DAG node for given transaction Id (no entry == nil)
 	GetShardDagNode(id [64]byte) *DagNode
-	// get the submitter's DAG node for given transaction Id (no entry == nil)
-	GetSubmitterDagNode(id [64]byte) *DagNode
+	// get the submitter's history for specified submitter id and seq
+	GetSubmitterHistory(id []byte, seq uint64) *SubmitterHistory
 	// get list of shards seen so far based on transaction history
 	GetShards() []byte
 	// get list of submitters seen so far based on transaction history
@@ -43,11 +64,11 @@ type DltDb interface {
 }
 
 type dltDb struct {
-	txDb            db.Database
-	shardDAGsDb     db.Database
-	shardTipsDb     db.Database
-	submitterDAGsDb db.Database
-	lock            sync.RWMutex
+	txDb               db.Database
+	shardDAGsDb        db.Database
+	shardTipsDb        db.Database
+	submitterHistoryDb db.Database
+	lock               sync.RWMutex
 }
 
 func (d *dltDb) GetTx(id [64]byte) dto.Transaction {
@@ -83,6 +104,32 @@ func (d *dltDb) AddTx(tx dto.Transaction) error {
 	// save the transaction in DB
 	if err = d.txDb.Put(id[:], data); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (d *dltDb) FlushShard(shardId []byte) error {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	// walk through shard's tips, traverse up and remove
+	tipNodes := []*DagNode{}
+	for _, tip := range d.shardTips(shardId) {
+		tipNodes = append(tipNodes, d.getShardDagNode(tip))
+	}
+	if err := d.shardTipsDb.Delete(shardId); err != nil {
+		return err
+	}
+	for len(tipNodes) > 0 {
+		// pop a dag node
+		node := tipNodes[0]
+		tipNodes = tipNodes[1:]
+		if parent := d.getShardDagNode(node.Parent); parent != nil {
+			tipNodes = append(tipNodes, parent)
+		}
+		// remove current node
+		if err := d.shardDAGsDb.Delete(node.TxId[:]); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -148,6 +195,92 @@ func (d *dltDb) saveShardDagNode(node *DagNode) error {
 	return nil
 }
 
+func (d *dltDb) ReplaceSubmitter(tx dto.Transaction) error {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	// lookup submitter history, if present
+	var history *SubmitterHistory
+	if history = d.getSubmitterHistory(tx.Anchor().Submitter, tx.Anchor().SubmitterSeq); history == nil {
+		history = &SubmitterHistory{
+			Submitter:    tx.Anchor().Submitter,
+			Seq:          tx.Anchor().SubmitterSeq,
+			ShardTxPairs: make([]ShardTxPair, 0, 1),
+		}
+	}
+
+	// remove any pre-existing shard/tx in history
+	found := false
+	newPair := ShardTxPair{
+		ShardId: tx.Anchor().ShardId,
+		TxId:    tx.Id(),
+	}
+	for i, existingPair := range history.ShardTxPairs {
+		if string(existingPair.ShardId) == string(newPair.ShardId) {
+			// there is some tx for same shard, replace this new pair
+			history.ShardTxPairs[i] = newPair
+			found = true
+		}
+	}
+
+	// add the new shard/tx pair to history if not replaced old
+	if !found {
+		history.ShardTxPairs = append(history.ShardTxPairs, newPair)
+	}
+	// update the submitter history
+	if data, err := common.Serialize(history); err != nil {
+		return err
+	} else if err := d.submitterHistoryDb.Put(submitterHistoryKey(history.Submitter, history.Seq), data); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *dltDb) UpdateSubmitter(tx dto.Transaction) error {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	// lookup submitter history, if present
+	var history *SubmitterHistory
+	if history = d.getSubmitterHistory(tx.Anchor().Submitter, tx.Anchor().SubmitterSeq); history == nil {
+		history = &SubmitterHistory{
+			Submitter:    tx.Anchor().Submitter,
+			Seq:          tx.Anchor().SubmitterSeq,
+			ShardTxPairs: make([]ShardTxPair, 0, 1),
+		}
+	}
+
+	// make sure there is no pre-existing shard/tx in history
+	newPair := ShardTxPair{
+		ShardId: tx.Anchor().ShardId,
+		TxId:    tx.Id(),
+	}
+	for _, existingPair := range history.ShardTxPairs {
+		if string(existingPair.ShardId) == string(newPair.ShardId) {
+			// there is some tx for same shard, if its same tx then silently return
+			if existingPair.TxId == newPair.TxId {
+				return nil
+			} else {
+				// double spending error
+				return errors.New("double spending tx")
+			}
+		}
+	}
+
+	// add the new shard/tx pair to history
+	history.ShardTxPairs = append(history.ShardTxPairs, newPair)
+
+	// update the submitter history
+	if data, err := common.Serialize(history); err != nil {
+		return err
+	} else if err := d.submitterHistoryDb.Put(submitterHistoryKey(history.Submitter, history.Seq), data); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (d *dltDb) DeleteTx(id [64]byte) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
@@ -181,8 +314,34 @@ func (d *dltDb) getShardDagNode(id [64]byte) *DagNode {
 	}
 }
 
-func (d *dltDb) GetSubmitterDagNode(id [64]byte) *DagNode {
-	return nil
+func submitterHistoryKey(id []byte, seq uint64) []byte {
+	// build submitter history key as submitter ID + ":" + submitter seq
+	key := []byte{}
+	key = append(key, id...)
+	key = append(key, ':')
+	key = append(key, common.Uint64ToBytes(seq)...)
+	return key
+}
+
+func (d *dltDb) GetSubmitterHistory(id []byte, seq uint64) *SubmitterHistory {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	// get the submitter history
+	return d.getSubmitterHistory(id, seq)
+}
+
+func (d *dltDb) getSubmitterHistory(id []byte, seq uint64) *SubmitterHistory {
+	// get the submitter history
+	if data, err := d.submitterHistoryDb.Get(submitterHistoryKey(id, seq)); err != nil {
+		return nil
+	} else {
+		history := &SubmitterHistory{}
+		if err := common.Deserialize(data, history); err != nil {
+			return nil
+		}
+		return history
+	}
 }
 
 func (d *dltDb) GetShards() []byte {
@@ -233,9 +392,9 @@ func (d *dltDb) SubmitterTips(submitterId []byte) []DagNode {
 
 func NewDltDb(dbp db.DbProvider) (*dltDb, error) {
 	return &dltDb{
-		txDb:            dbp.DB("dlt_transactions"),
-		shardDAGsDb:     dbp.DB("dlt_shard_dags"),
-		shardTipsDb:     dbp.DB("dlt_shard_tips"),
-		submitterDAGsDb: dbp.DB("dlt_submitter_dags"),
+		txDb:               dbp.DB("dlt_transactions"),
+		shardDAGsDb:        dbp.DB("dlt_shard_dags"),
+		shardTipsDb:        dbp.DB("dlt_shard_tips"),
+		submitterHistoryDb: dbp.DB("dlt_submitter_history"),
 	}, nil
 }

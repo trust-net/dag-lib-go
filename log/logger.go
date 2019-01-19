@@ -91,7 +91,7 @@ func AppLogger() Logger {
 }
 
 func NewLogger(name interface{}) Logger {
-	prefix := fmt.Sprintf("|%T| ", name)
+	prefix := fmt.Sprintf("|%s| ", name)
 	return &logger{
 		debug:  log.New(getLogFile(), "DEBUG|", log.LstdFlags|log.Lmicroseconds),
 		info:   log.New(getLogFile(), "INFO |", log.LstdFlags|log.Lmicroseconds),

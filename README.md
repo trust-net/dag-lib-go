@@ -4,17 +4,14 @@ Go library for DAG protocol
 * [How to setup workspace](https://github.com/trust-net/dag-lib-go#how-to-setup-workspace)
     * [Clone Repo](https://github.com/trust-net/dag-lib-go#clone-repo)
     * [Install Dependencies](https://github.com/trust-net/dag-lib-go#Install-Dependencies)
-* [Example Application Using DLT Stack Library](https://github.com/trust-net/dag-lib-go#Example-Application-Using-DLT-Stack-Library)
-    * [Build test application](https://github.com/trust-net/dag-lib-go#Build-test-application)
-    * [Stage test application](https://github.com/trust-net/dag-lib-go#Stage-test-application)
+* [Example Applications Using DLT Stack Library](https://github.com/trust-net/dag-lib-go#Example-Applications-Using-DLT-Stack-Library)
+    * [Build test applications](https://github.com/trust-net/dag-lib-go#Build-test-applications)
+    * [Stage test applications](https://github.com/trust-net/dag-lib-go#Stage-test-applications)
     * [Create sub-directories for each instance of the test application](https://github.com/trust-net/dag-lib-go#Create-sub-directories-for-each-instance-of-the-test-application)
     * [Create config file for each instance](https://github.com/trust-net/dag-lib-go#Create-config-file-for-each-instance)
-    * [Run the test application](https://github.com/trust-net/dag-lib-go#Run-the-test-application)
-        * [Register application shard](https://github.com/trust-net/dag-lib-go#Register-application-shard)
-        * [Send counter transaction](https://github.com/trust-net/dag-lib-go#Send-counter-transaction)
-        * [Leave/Un-register from shard](https://github.com/trust-net/dag-lib-go#LeaveUn-register-from-shard)
-        * [Shutdown application](https://github.com/trust-net/dag-lib-go#Shutdown-application)
-        * [Restart application](https://github.com/trust-net/dag-lib-go#Restart-application)
+    * [Run the test applications](https://github.com/trust-net/dag-lib-go#Run-the-test-applications)
+    * [Double Spender Application CLI](https://github.com/trust-net/dag-lib-go#Double-Spender-Application-CLI)
+    * [Network Counter Application CLI](https://github.com/trust-net/dag-lib-go#Network-Counter-Application-CLI)
 * [How to use DLT stack library in your application](https://github.com/trust-net/dag-lib-go#how-to-use-dlt-stack-library-in-your-application)
     * [Create configuration](https://github.com/trust-net/dag-lib-go#Create-configuration)
     * [Instantiate DLT stack](https://github.com/trust-net/dag-lib-go#Instantiate-DLT-stack)
@@ -23,6 +20,7 @@ Go library for DAG protocol
     * [Process transactions from network peers](https://github.com/trust-net/dag-lib-go#Process-transactions-from-network-peers)
     * [Stop DLT Stack](https://github.com/trust-net/dag-lib-go#Stop-DLT-Stack)
 * [Release Notes](https://github.com/trust-net/dag-lib-go#Release-Notes)
+    * [Iteration 5](https://github.com/trust-net/dag-lib-go#Iteration-5)
     * [Iteration 4](https://github.com/trust-net/dag-lib-go#Iteration-4)
     * [Iteration 3](https://github.com/trust-net/dag-lib-go#Iteration-3)
     * [Iteration 2](https://github.com/trust-net/dag-lib-go#Iteration-2)
@@ -57,22 +55,27 @@ Above will install remaining dependencies into go workspace.
 > Note: Ethereum dependency requires gcc/CC installed for compiling and building crypto library. Hence, `go get` may fail if gcc/CC is not found. Install the platform appropriate compiler and then re-run `go get`.
 
 
-## Example Application Using DLT Stack Library
-An example test program that implements a distributed network counter using DLT stack library is provided under the `tests/countr/app.go`. It can be used as following:
+## Example Applications Using DLT Stack Library
+Two test driver applications are provided to show examples and test different capabilities of DLT stack:
 
-### Build test application
+* `tests/countr/app.go`: A test program that implements a distributed network counter across different shards using DLT stack library
+* `tests/spendr/app.go`: A test program that implements a value transfer application to test double spending resolution across multiple nodes in the network
+
+### Build test applications
 
 ```
 cd $GOPATH/src/trust-net/dag-lib-go/
 (cd tests/countr/; go build)
+(cd tests/spendr/; go build)
 ```
 
-### Stage test application
-Copy the built binary into a staging area, e.g.:
+### Stage test applications
+Copy the built binaries into a staging area, e.g.:
 
 ```
 mkdir -p $USER/tmp/test-trust-node
 cp $GOPATH/src/trust-net/dag-lib-go/tests/countr/countr $USER/tmp/test-trust-node
+cp $GOPATH/src/trust-net/dag-lib-go/tests/spendr/spendr $USER/tmp/test-trust-node
 ```
 
 ### Create sub-directories for each instance of the test application
@@ -102,16 +105,35 @@ Copy the following example config files into sub-directory for each instance tha
 * `boot_nodes` has port from some other instance (e.g. node-1 listening on port 50883 will use node-2's listening port 50884)
 
 ### Run the test application
-Start each instance of the test application with its corresponding config file (below example assumes config file for each instance is placed under its node-N directory and named as config.json):
+Start an instance of _any one_ of the two test applications with its corresponding config file (below example assumes config file for each instance is placed under its node-N directory and named as config.json):
 
 ```
+### on terminal 1 run an instance of countr app
 cd $USER/tmp/test-trust-node/node-1
-../countr -config config.json
+$USER/tmp/test-trust-node/countr -config config.json
+
+### on terminal 2 run an instance of spendr app
+cd $USER/tmp/test-trust-node/node-2
+$USER/tmp/test-trust-node/spendr -config config.json
+
+### on terminal 3 run an instance of countr app
+cd $USER/tmp/test-trust-node/node-3
+$USER/tmp/test-trust-node/countr -config config.json
+
+### on terminal 4 run an instance of spendr app
+cd $USER/tmp/test-trust-node/node-4
+$USER/tmp/test-trust-node/spendr -config config.json
 ```
 
 > As per iteration 4, nodes can join/leave/re-join network dynamically while rest of the network is processing transactions. Nodes will perform on-demand sync at shard level during peer handshake, app registration and unknown transaction processing. Also, while nodes do not yet persist state across reboot, they perform full re-sync across reboot. Hence, as long as there is 1 active node on the network, progress will be made.
 
-### Register application shard
+### Double Spender Application CLI
+Refer to documentation for double spender application CLI at [documentation link](https://github.com/trust-net/dag-lib-go/issues/36)
+
+### Network Counter Application CLI
+Following are CLI commands for using network counter application...
+
+#### Register application shard
 Use the application's CLI to join a shard as following:
 
 ```
@@ -121,7 +143,7 @@ Use the application's CLI to join a shard as following:
 
 > This step is optional, an instance can be run without joining any shard, as a headless node. However, on that instance no transaction can be submitted. It will simply participate in the network as a headless node.
 
-### Send counter transaction
+#### Send counter transaction
 Use the application's CLI to submit transactions as following:
 
 ```
@@ -143,7 +165,7 @@ Use application's CLI to query a counter's value:
      cntr3: not found
 ```
 
-### Leave/Un-register from shard
+#### Leave/Un-register from shard
 Use the application's CLI to leave a previosuly registered shard as following:
 
 ```
@@ -153,12 +175,12 @@ Use the application's CLI to leave a previosuly registered shard as following:
 
 > Above will unregister the app and run node in headless node. App can re-join the same shard, or join a different shard, and will get synced with rest of the apps in that shard after it joins.
 
-### Shutdown application
+#### Shutdown application
 ```
 <app>: quit
 Shutdown cleanly
 ```
-### Restart application
+#### Restart application
 Application can be restarted to re-join an existing network:
 
 ```
@@ -207,6 +229,37 @@ If application had registered with DLT stack with appropriate callback methods, 
 Once application execution completes (either due to application shutdown, or any other reason), call the `stack.DLT.Stop()` method to disconnect from all connected network peers.
 
 ## Release Notes
+
+### Iteration 5
+
+**Assumptions**:
+
+* All submitters are required to maintain correct latest transaction sequence and transaction ID for submitted transactions by them
+* A submitter's transaction sequence will be a monotonically increasing number for all transactions by that submitter across all different application shards that submitter submits transactions to
+* A new transaction will have reference to previous transaction sequence and ID from the submitter
+* There are 2 types of transactions defined for any application: "outgoing" transactions where some value gets transferred out from assets belonging to a network identity, and "incoming" transactions where some value gets transferred into assets belonging to a network identity. Only asset owners can submit "outgoing" transactions against an asset, whereas anyone can submit an "incoming" transaction towards an asset.
+
+**Implementation**:
+
+* DLT stack validates a locally submitted transaction for correct sequence number from submitter as following:
+  * if submitted transaction from same submitter, sequence number and shard already exists, then submitted transaction will be rejected as double spend
+  * else (i.e., there is no other transaction from same submitter, using same submitter sequence, for the same shard) then
+    * if parent transaction from same submitter and previous sequence number does not exists, then submitted transaction will be rejected as out of sequence
+    * if parent transaction from same submitter and previous sequence number does not match submitted transaction's parent, then submitted transaction will be rejected as invalid
+    * else submitted transaction will be accepted and broadcasted to network
+* Similarly, a network transaction is validated as following:
+  * if node's submitter history has an existing transaction that has same submitter ID, Submitter Sequence and Shard as the received network transaction, then
+    * if the transaction ID in local submitter history is same as received transaction, then we discard received transaction as duplicate
+    * else (i.e. network transaction ID is different from local transaction) trigger a **double spending resolution**
+  * else (i.e., there is no other transaction from same submitter, using same submitter sequence, for the same shard) then
+  * local submitter history does not have the transaction mentioned in "Previous Submitter Tx" of the received network transaction, then trigger a submitter history sync with the peer node
+  * else (i.e. local history has the reference last submitter transaction) accept the network transaction for processing
+* A **consensus** protocol is defined, to resolve double spending when 2 competing transactions from same submitter and sequence are seen
+  * protocol is able to handle the impact to shard DAG, since transactions cannot be rolled back in sharding DAG
+  * protocol is able to handle when a competing/duplicate network transaction is seen after a submission is accepted from client
+  * protocol is able to handle when two competing network transactions from different peers are seen on a node
+* A **submitter sync** protocol is defined for peer's to update submitter transaction sequences for out of sync network transactions.
+
 ### Iteration 4
 * nodes can join the network at any time after transaction processing has started
 * app can shutdown/leave the network and join back dynamically (does not need to be running since the beginning)

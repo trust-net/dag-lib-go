@@ -1,6 +1,9 @@
+// Copyright 2018-2019 The trust-net Authors
+// Trust-Net Protocol Messages
 package stack
 
 import (
+	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 )
 
@@ -35,6 +38,16 @@ const (
 	TxShardChildResponseMsgCode
 	// force a shard sync during app registration
 	ForceShardSyncMsgCode
+	// submitter history walk up request message
+	SubmitterWalkUpRequestMsgCode
+	// submitter history walk up response message
+	SubmitterWalkUpResponseMsgCode
+	// submitter history walk down request message
+	SubmitterProcessDownRequestMsgCode
+	// submitter history walk down response message
+	SubmitterProcessDownResponseMsgCode
+	// notify remote node to flush shard due to double spend
+	ForceShardFlushMsgCode
 	// ProtocolLength should contain the number of message codes used
 	// by the protocol.
 	ProtocolLength
@@ -113,7 +126,8 @@ type ShardSyncMsg struct {
 }
 
 func (m *ShardSyncMsg) Id() []byte {
-	return m.Anchor.Signature
+	id := []byte("ShardSyncMsg")
+	return append(id, m.Anchor.Signature...)
 }
 
 func (m *ShardSyncMsg) Code() uint64 {
@@ -123,6 +137,108 @@ func (m *ShardSyncMsg) Code() uint64 {
 func NewShardSyncMsg(anchor *dto.Anchor) *ShardSyncMsg {
 	return &ShardSyncMsg{
 		Anchor: anchor,
+	}
+}
+
+type SubmitterWalkUpRequestMsg struct {
+	Submitter []byte
+	Seq       uint64
+}
+
+func (m *SubmitterWalkUpRequestMsg) Id() []byte {
+	id := []byte("SubmitterWalkUpRequestMsg")
+	id = append(id, common.Uint64ToBytes(m.Seq)...)
+	return append(id, m.Submitter...)
+}
+
+func (m *SubmitterWalkUpRequestMsg) Code() uint64 {
+	return SubmitterWalkUpRequestMsgCode
+}
+
+func NewSubmitterWalkUpRequestMsg(anchor *dto.Anchor) *SubmitterWalkUpRequestMsg {
+	return &SubmitterWalkUpRequestMsg{
+		Submitter: anchor.Submitter,
+		Seq:       anchor.SubmitterSeq - 1,
+	}
+}
+
+type SubmitterWalkUpResponseMsg struct {
+	Submitter    []byte
+	Seq          uint64
+	Transactions [][64]byte
+	Shards       [][]byte
+}
+
+func (m *SubmitterWalkUpResponseMsg) Id() []byte {
+	id := []byte("SubmitterWalkUpResponseMsg")
+	id = append(id, common.Uint64ToBytes(m.Seq)...)
+	return append(id, m.Submitter...)
+}
+
+func (m *SubmitterWalkUpResponseMsg) Code() uint64 {
+	return SubmitterWalkUpResponseMsgCode
+}
+
+func NewSubmitterWalkUpResponseMsg(req *SubmitterWalkUpRequestMsg) *SubmitterWalkUpResponseMsg {
+	return &SubmitterWalkUpResponseMsg{
+		Submitter:    req.Submitter,
+		Seq:          req.Seq,
+		Transactions: nil,
+		Shards:       nil,
+	}
+}
+
+type SubmitterProcessDownRequestMsg struct {
+	Submitter []byte
+	Seq       uint64
+}
+
+func (m *SubmitterProcessDownRequestMsg) Id() []byte {
+	id := []byte("SubmitterProcessDownRequestMsg")
+	id = append(id, common.Uint64ToBytes(m.Seq)...)
+	return append(id, m.Submitter...)
+}
+
+func (m *SubmitterProcessDownRequestMsg) Code() uint64 {
+	return SubmitterProcessDownRequestMsgCode
+}
+
+func NewSubmitterProcessDownRequestMsg(resp *SubmitterWalkUpResponseMsg) *SubmitterProcessDownRequestMsg {
+	return &SubmitterProcessDownRequestMsg{
+		Submitter: resp.Submitter,
+		Seq:       resp.Seq + 1,
+	}
+}
+
+type SubmitterProcessDownResponseMsg struct {
+	Submitter []byte
+	Seq       uint64
+	TxBytes   [][]byte
+}
+
+func (m *SubmitterProcessDownResponseMsg) Id() []byte {
+	id := []byte("SubmitterProcessDownResponseMsg")
+	id = append(id, common.Uint64ToBytes(m.Seq)...)
+	return append(id, m.Submitter...)
+}
+
+func (m *SubmitterProcessDownResponseMsg) Code() uint64 {
+	return SubmitterProcessDownResponseMsgCode
+}
+
+func NewSubmitterProcessDownResponseMsg(req *SubmitterProcessDownRequestMsg, txs []dto.Transaction) *SubmitterProcessDownResponseMsg {
+	txBytes := [][]byte{}
+	for _, tx := range txs {
+		if bytes, err := tx.Serialize(); err != nil {
+			return nil
+		} else {
+			txBytes = append(txBytes, bytes)
+		}
+	}
+	return &SubmitterProcessDownResponseMsg{
+		Submitter: req.Submitter,
+		Seq:       req.Seq,
+		TxBytes:   txBytes,
 	}
 }
 
@@ -178,6 +294,30 @@ func NewTxShardChildResponseMsg(tx dto.Transaction, children [][64]byte) *TxShar
 			hash:     tx.Id(),
 			Bytes:    bytes,
 			Children: children,
+		}
+	}
+}
+
+type ForceShardFlushMsg struct {
+	hash  [64]byte
+	Bytes []byte
+}
+
+func (m *ForceShardFlushMsg) Id() []byte {
+	return append([]byte("ForceShardFlushMsg"), m.hash[:]...)
+}
+
+func (m *ForceShardFlushMsg) Code() uint64 {
+	return ForceShardFlushMsgCode
+}
+
+func NewForceShardFlushMsg(tx dto.Transaction) *ForceShardFlushMsg {
+	if bytes, err := tx.Serialize(); err != nil {
+		return nil
+	} else {
+		return &ForceShardFlushMsg{
+			hash:  tx.Id(),
+			Bytes: bytes,
 		}
 	}
 }

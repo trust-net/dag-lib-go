@@ -24,12 +24,51 @@ func TestTransaction() *transaction {
 
 func TestAnchor() *Anchor {
 	return &Anchor{
-		NodeId:    []byte("test node ID"),
-		ShardId:   []byte("test shard"),
-		Submitter: []byte("test submitter"),
-		ShardSeq:  0x01,
-		Weight:    0x01,
+		NodeId:          []byte("test node ID"),
+		ShardId:         []byte("test shard"),
+		Submitter:       []byte("test submitter"),
+		ShardSeq:        0x01,
+		Weight:          0x01,
+		SubmitterSeq:    0x01,
+		SubmitterLastTx: [64]byte{},
 	}
+}
+
+type Submitter struct {
+	Key    *ecdsa.PrivateKey
+	Id     []byte
+	Seq    uint64
+	LastTx [64]byte
+}
+
+func (s *Submitter) NewTransaction(txAnchor *Anchor, data string) Transaction {
+	tx := &transaction{
+		Payload:  []byte(data),
+		TxAnchor: txAnchor,
+	}
+	// sign the test payload using SHA512 hash and ECDSA private key
+	type signature struct {
+		R *big.Int
+		S *big.Int
+	}
+	sig := signature{}
+	hash := sha512.Sum512(tx.Payload)
+	sig.R, sig.S, _ = ecdsa.Sign(rand.Reader, s.Key, hash[:])
+	tx.Signature, _ = common.Serialize(sig)
+	return tx
+}
+
+func TestSubmitter() *Submitter {
+	// create a new ECDSA key for submitter client
+	key, _ := crypto.GenerateKey()
+	id := crypto.FromECDSAPub(&key.PublicKey)
+	return &Submitter{
+		Key:    key,
+		Id:     id,
+		Seq:    1,
+		LastTx: [64]byte{},
+	}
+
 }
 
 func TestSignedTransaction(data string) *transaction {

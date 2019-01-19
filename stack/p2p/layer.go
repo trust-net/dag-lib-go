@@ -3,11 +3,9 @@
 package p2p
 
 import (
-	//	"fmt"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha512"
-	"encoding/binary"
 	"errors"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p"
@@ -47,33 +45,15 @@ type layerDEVp2p struct {
 	lock  sync.RWMutex
 }
 
-func uint64ToBytes(value uint64) []byte {
-	var byte8 [8]byte
-	binary.BigEndian.PutUint64(byte8[:], value)
-	return byte8[:]
-}
-
 func (l *layerDEVp2p) Anchor(a *dto.Anchor) error {
 	if a == nil {
 		return errors.New("cannot sign nil anchor")
 	}
 	// update anchor's node ID with this node
 	a.NodeId = l.Id()
-	// sign the anchor and fill in Anchor signature
-	payload := []byte{}
-	payload = append(payload, a.ShardId...)
-	payload = append(payload, a.NodeId...)
-	payload = append(payload, a.Submitter...)
-	payload = append(payload, a.ShardParent[:]...)
-	for _, uncle := range a.ShardUncles {
-		payload = append(payload, uncle[:]...)
-	}
-	payload = append(payload, uint64ToBytes(a.ShardSeq)...)
-	payload = append(payload, uint64ToBytes(a.Weight)...)
-
-	// sign the test payload using SHA512 hash and ECDSA private key
+	// sign the anchor using SHA512 hash and ECDSA private key
 	s := signature{}
-	hash := sha512.Sum512(payload)
+	hash := sha512.Sum512(a.Bytes())
 	s.R, s.S, _ = ecdsa.Sign(rand.Reader, l.key, hash[:])
 	if sign, err := common.Serialize(s); err != nil {
 		return err
@@ -129,7 +109,7 @@ func (l *layerDEVp2p) Sign(data []byte) ([]byte, error) {
 func (l *layerDEVp2p) Verify(payload, sign, id []byte) bool {
 	// extract submitter's key
 	key := crypto.ToECDSAPub(id)
-	if key == nil {
+	if key == nil || key.X == nil {
 		return false
 	}
 

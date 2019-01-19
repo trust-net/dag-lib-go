@@ -10,11 +10,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
+	"github.com/trust-net/dag-lib-go/stack/state"
 	"github.com/trust-net/go-trust-net/common"
 	"math/big"
 	"os"
@@ -22,15 +22,20 @@ import (
 	"strings"
 )
 
+var commands = map[string][2]string{
+	"countr": {"usage: countr <countr name> ...", "view a counter value"},
+	"incr":   {"usage: incr <countr name> [<integer>] ...", "increment one or more counters"},
+	"decr":   {"usage: decr <countr name> [<integer>] ...", "decrement one or more counters"},
+	"info":   {"usage: info", "get current shard tip"},
+	"join":   {"usage: join <shard id> [<name>]", "join a shard (a unique string)"},
+	"leave":  {"usage: leave", "leave from a registered shard (run as headless, default behavior)"},
+}
+
 var cmdPrompt = "<headless>: "
 
 var shardId []byte
 
-var key *ecdsa.PrivateKey
-
-var submitter []byte
-
-var myDb = db.NewInMemDatabase("countr_app")
+var submitter *dto.Submitter
 
 type testTx struct {
 	Op     string
@@ -46,7 +51,7 @@ func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
 	}
 	s := signature{}
 	hash := sha512.Sum512(txPayload)
-	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
+	s.R, s.S, _ = ecdsa.Sign(rand.Reader, submitter.Key, hash[:])
 	tx.Self().Payload = txPayload
 	tx.Self().Signature, _ = common.Serialize(s)
 	return tx
@@ -56,7 +61,6 @@ func incrementTx(a *dto.Anchor, name string, delta int) dto.Transaction {
 	if a == nil {
 		return nil
 	}
-	applyDelta(name, delta)
 	op := testTx{
 		Op:     "incr",
 		Target: name,
@@ -70,7 +74,6 @@ func decrementTx(a *dto.Anchor, name string, delta int) dto.Transaction {
 	if a == nil {
 		return nil
 	}
-	applyDelta(name, -delta)
 	op := testTx{
 		Op:     "decr",
 		Target: name,
@@ -129,18 +132,22 @@ func scanOps(scanner *bufio.Scanner) (ops []op) {
 	}
 }
 
-func applyDelta(name string, delta int) int64 {
+func applyDelta(name string, delta int, s state.State) int64 {
 	last := int64(0)
-	if val, err := myDb.Get([]byte(name)); err == nil {
-		common.Deserialize(val, &last)
+	// fetch resource from world state
+	r := &state.Resource{
+		Key: []byte(name),
+	}
+	if read, err := s.Get(r.Key); err == nil {
+		common.Deserialize(read.Value, &last)
 	}
 	last += int64(delta)
-	newVal, _ := common.Serialize(last)
-	myDb.Put([]byte(name), newVal)
+	r.Value, _ = common.Serialize(last)
+	s.Put(r)
 	return last
 }
 
-func txHandler(tx dto.Transaction) error {
+func txHandler(tx dto.Transaction, state state.State) error {
 	fmt.Printf("\n")
 	op := testTx{}
 	if err := common.Deserialize(tx.Self().Payload, &op); err != nil {
@@ -155,7 +162,7 @@ func txHandler(tx dto.Transaction) error {
 	case "decr":
 		delta = int(-op.Delta)
 	}
-	fmt.Printf("%s --> %d\n%s", op.Target, applyDelta(op.Target, delta), cmdPrompt)
+	fmt.Printf("%s --> %d\n%s", op.Target, applyDelta(op.Target, delta, state), cmdPrompt)
 	return nil
 }
 
@@ -191,13 +198,13 @@ func cli(dlt stack.DLT) error {
 								} else {
 									oneDone = true
 								}
-								// get current network counter value
-								if val, err := myDb.Get([]byte(name)); err == nil {
+								// get current network counter value from world state
+								if r, err := dlt.GetState([]byte(name)); err == nil {
 									var last int64
-									common.Deserialize(val, &last)
+									common.Deserialize(r.Value, &last)
 									fmt.Printf("% 10s: %d", name, last)
 								} else {
-									fmt.Printf("% 10s: not found", name)
+									fmt.Printf("% 10s: %s", name, err)
 								}
 							}
 							hasNext = wordScanner.Scan()
@@ -212,8 +219,12 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: incr %s %d\n", op.name, op.delta)
-								if err := dlt.Submit(incrementTx(dlt.Anchor(submitter), op.name, op.delta)); err != nil {
+								tx := incrementTx(dlt.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), op.name, op.delta)
+								if err := dlt.Submit(tx); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
+								} else {
+									submitter.Seq += 1
+									submitter.LastTx = tx.Id()
 								}
 							}
 						}
@@ -224,8 +235,12 @@ func cli(dlt stack.DLT) error {
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: decr %s %d\n", op.name, op.delta)
-								if err := dlt.Submit(decrementTx(dlt.Anchor(submitter), op.name, op.delta)); err != nil {
+								tx := decrementTx(dlt.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), op.name, op.delta)
+								if err := dlt.Submit(tx); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
+								} else {
+									submitter.Seq += 1
+									submitter.LastTx = tx.Id()
 								}
 							}
 						}
@@ -233,7 +248,7 @@ func cli(dlt stack.DLT) error {
 						for wordScanner.Scan() {
 							continue
 						}
-						if a := dlt.Anchor(submitter); a == nil {
+						if a := dlt.Anchor(submitter.Id, submitter.Seq, submitter.LastTx); a == nil {
 							fmt.Printf("failed to get any info...\n")
 						} else {
 							fmt.Printf("ShardId: %s\n", a.ShardId)
@@ -263,12 +278,15 @@ func cli(dlt stack.DLT) error {
 						if err := dlt.Unregister(); err != nil {
 							fmt.Printf("Error during un-registering app: %s\n", err)
 						}
-						myDb.Flush()
 						cmdPrompt = "<headless>: "
 					default:
 						fmt.Printf("Unknown Command: %s", cmd)
 						for wordScanner.Scan() {
 							fmt.Printf(" %s", wordScanner.Text())
+						}
+						fmt.Printf("\nUsages...\n")
+						for k, v := range commands {
+							fmt.Printf("\"%s\": %s\n%s\n", k, v[1], v[0])
 						}
 						break
 					}
@@ -308,9 +326,8 @@ func main() {
 		return
 	}
 
-	// create a new ECDSA key for submitter client
-	key, _ = crypto.GenerateKey()
-	submitter = crypto.FromECDSAPub(&key.PublicKey)
+	// create a new submitter client
+	submitter = dto.TestSubmitter()
 
 	// instantiate the DLT stack
 	if dlt, err := stack.NewDltStack(config, db.NewInMemDbProvider()); err != nil {

@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"testing"
@@ -24,8 +25,11 @@ func TestInitiatization(t *testing.T) {
 	if db.shardTipsDb != testDb.DB("dlt_shard_tips") {
 		t.Errorf("Incorrect Shards DB reference expected: %s, actual: %s", testDb.DB("dlt_shard_tips").Name(), db.shardTipsDb.Name())
 	}
-	if db.submitterDAGsDb != testDb.DB("dlt_submitter_dags") {
-		t.Errorf("Incorrect Submitters DB reference expected: %s, actual: %s", testDb.DB("dlt_submitter_dags").Name(), db.submitterDAGsDb.Name())
+	//	if db.submitterDAGsDb != testDb.DB("dlt_submitter_dags") {
+	//		t.Errorf("Incorrect Submitters DB reference expected: %s, actual: %s", testDb.DB("dlt_submitter_dags").Name(), db.submitterDAGsDb.Name())
+	//	}
+	if db.submitterHistoryDb != testDb.DB("dlt_submitter_history") {
+		t.Errorf("Incorrect Submitters history DB reference expected: %s, actual: %s", testDb.DB("dlt_submitter_history").Name(), db.submitterHistoryDb.Name())
 	}
 }
 
@@ -103,6 +107,39 @@ func TestUpdateShardInSequence(t *testing.T) {
 		t.Errorf("Did not update node's TxId for 2nd transaction")
 	} else if node.Parent != tx1.Id() {
 		t.Errorf("Did not update node's parent for 2nd transaction")
+	}
+}
+
+// test shard flush
+func TestFlushShard(t *testing.T) {
+	repo, _ := NewDltDb(db.NewInMemDbProvider())
+	tx1 := dto.TestSignedTransaction("test data")
+	tx2 := dto.TestSignedTransaction("test data")
+	tx2.Anchor().ShardParent = tx1.Id()
+	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq
+
+	// update shard with transaction sequence
+	if err := repo.UpdateShard(tx1); err != nil {
+		t.Errorf("Failed to add 1st transaction: %s", err)
+	}
+	if err := repo.UpdateShard(tx2); err != nil {
+		t.Errorf("Failed to add 2nd transaction: %s", err)
+	}
+
+	// now flush the shard
+	if err := repo.FlushShard(tx1.Anchor().ShardId); err != nil {
+		t.Errorf("Failed to flush shard: %s", err)
+	}
+
+	// validate that shard DAG node are flushed
+	if node := repo.GetShardDagNode(tx1.Id()); node != nil {
+		t.Errorf("Did not flush DAG node in shard DB for 1st transaction")
+	}
+	if node := repo.GetShardDagNode(tx2.Id()); node != nil {
+		t.Errorf("Did not flush DAG node in shard DB for 2nd transaction")
+	}
+	if tips := repo.ShardTips(tx1.Anchor().ShardId); len(tips) != 0 {
+		t.Errorf("Did not flush tips for the shard")
 	}
 }
 
@@ -297,5 +334,99 @@ func TestGetShardDagNode(t *testing.T) {
 	// validate that can get shard DAG node after adding transaction
 	if dagNode := repo.GetShardDagNode(tx.Id()); dagNode == nil {
 		t.Errorf("Cannot get DAG node in shard DB")
+	}
+}
+
+// test update to submitter DAG
+func TestUpdateSubmitter(t *testing.T) {
+	repo, _ := NewDltDb(db.NewInMemDbProvider())
+	tx := dto.TestSignedTransaction("test data")
+
+	// update submitter with new transaction
+	if err := repo.UpdateSubmitter(tx); err != nil {
+		t.Errorf("Failed to add transaction: %s", err)
+	}
+
+	// validate that submitter history was updated for the transaction correctly
+	key := []byte{}
+	key = append(key, tx.Anchor().Submitter...)
+	key = append(key, ':')
+	key = append(key, common.Uint64ToBytes(tx.Anchor().SubmitterSeq)...)
+	if data, err := repo.submitterHistoryDb.Get(key); err != nil {
+		t.Errorf("Did not update submitter history in shard DB")
+	} else {
+		history := SubmitterHistory{}
+		if err := common.Deserialize(data, &history); err != nil {
+			t.Errorf("Wrong type of submitter history in shard DB")
+		} else if string(history.Submitter) != string(tx.Anchor().Submitter) {
+			t.Errorf("Incorrect submitter ID in history")
+		} else if history.Seq != tx.Anchor().SubmitterSeq {
+			t.Errorf("Incorrect submitter seq in history")
+		} else if len(history.ShardTxPairs) != 1 {
+			t.Errorf("Incorrect number of pairs in history")
+		} else if string(history.ShardTxPairs[0].ShardId) != string(tx.Anchor().ShardId) {
+			t.Errorf("Incorrect shard ID in the pairs in history")
+		} else if history.ShardTxPairs[0].TxId != tx.Id() {
+			t.Errorf("Incorrect tx ID in the pairs in history")
+		}
+	}
+}
+
+// test submitter history with relaxed requirements
+func TestUpdateSubmitter_RelaxedSequenceRequirements(t *testing.T) {
+	repo, _ := NewDltDb(db.NewInMemDbProvider())
+	tx1 := dto.TestSignedTransaction("test data")
+	tx2 := dto.TestSignedTransaction("test data")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	// make sure shard ID is different, for relaxed requirement
+	tx2.Anchor().ShardId = []byte("a different shard ID")
+
+	// update submitter with transaction sequence
+	if err := repo.UpdateSubmitter(tx1); err != nil {
+		t.Errorf("Failed to add 1st transaction: %s", err)
+	}
+	if err := repo.UpdateSubmitter(tx2); err != nil {
+		t.Errorf("Failed to add 2nd transaction: %s", err)
+	}
+
+	// validate that both transactions are added in submitter history
+	if history := repo.GetSubmitterHistory(tx1.Anchor().Submitter, tx1.Anchor().SubmitterSeq); history == nil {
+		t.Errorf("Did not update history for 2 parallel transactions")
+	} else if len(history.ShardTxPairs) != 2 {
+		t.Errorf("Incorrect number of pairs: %d", len(history.ShardTxPairs))
+	} else if history.ShardTxPairs[0].TxId != tx1.Id() {
+		t.Errorf("Incorrect 1st pair: %s", history.ShardTxPairs[0])
+	} else if history.ShardTxPairs[1].TxId != tx2.Id() {
+		t.Errorf("Incorrect 2nd pair: %s", history.ShardTxPairs[1])
+	}
+}
+
+// test submitter history with double spending
+func TestUpdateSubmitter_DoubleSpending(t *testing.T) {
+	repo, _ := NewDltDb(db.NewInMemDbProvider())
+	tx1 := dto.TestSignedTransaction("test data")
+	tx2 := dto.TestSignedTransaction("test data")
+	tx2.Anchor().Submitter = tx1.Anchor().Submitter
+	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	// make sure shard ID is same, for double spending
+	tx2.Anchor().ShardId = tx1.Anchor().ShardId
+
+	// update submitter with 1st transaction sequence
+	if err := repo.UpdateSubmitter(tx1); err != nil {
+		t.Errorf("Failed to add 1st transaction: %s", err)
+	}
+	// attempt to update with 2nd transaction which has same submitter/seq/shard
+	if err := repo.UpdateSubmitter(tx2); err == nil {
+		t.Errorf("did not fail when adding double spending transaction")
+	}
+
+	// validate that only 1st transactions is added in submitter history
+	if history := repo.GetSubmitterHistory(tx1.Anchor().Submitter, tx1.Anchor().SubmitterSeq); history == nil {
+		t.Errorf("Did not update history")
+	} else if len(history.ShardTxPairs) != 1 {
+		t.Errorf("Incorrect number of pairs: %d", len(history.ShardTxPairs))
+	} else if history.ShardTxPairs[0].TxId != tx1.Id() {
+		t.Errorf("Incorrect 1st pair: %s", history.ShardTxPairs[0])
 	}
 }
