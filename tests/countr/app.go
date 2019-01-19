@@ -22,6 +22,15 @@ import (
 	"strings"
 )
 
+var commands = map[string][2]string{
+	"countr": {"usage: countr <countr name> ...", "view a counter value"},
+	"incr":   {"usage: incr <countr name> [<integer>] ...", "increment one or more counters"},
+	"decr":   {"usage: decr <countr name> [<integer>] ...", "decrement one or more counters"},
+	"info":   {"usage: info", "get current shard tip"},
+	"join":   {"usage: join <shard id> [<name>]", "join a shard (a unique string)"},
+	"leave":  {"usage: leave", "leave from a registered shard (run as headless, default behavior)"},
+}
+
 var cmdPrompt = "<headless>: "
 
 var shardId []byte
@@ -274,6 +283,10 @@ func cli(dlt stack.DLT) error {
 						fmt.Printf("Unknown Command: %s", cmd)
 						for wordScanner.Scan() {
 							fmt.Printf(" %s", wordScanner.Text())
+						}
+						fmt.Printf("\nUsages...\n")
+						for k, v := range commands {
+							fmt.Printf("\"%s\": %s\n%s\n", k, v[1], v[0])
 						}
 						break
 					}

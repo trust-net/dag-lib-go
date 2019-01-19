@@ -23,6 +23,19 @@ import (
 	"strings"
 )
 
+var commands = map[string][2]string{
+	"show":   {"usage: show <countr name> ...", "show one or more counter's value"},
+	"create": {"usage: create <resource name> [<initial value>] ...", "create one or more counters with optional initial credits"},
+	"xfer":   {"usage: xfer <owned counter name> <xfer value> <recipient counter name>...", "transfer credits from one counter to another"},
+	"info":   {"usage: info", "get current shard tips from local and remote nodes"},
+	"xover":  {"usage: xover <owned resource name> <xfer value> <recipient resource name>", "submit a transaction that has anchor from one node, but is submitted to another node"},
+	"quit":   {"usage: quit", "leave application and shutdown"},
+	"dupe":   {"usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>", "submit two double spending transactions using same tip"},
+	"double": {"usage: double <owned counter name> <xfer value> <recipient 1 counter> <recipient 2 countr>", "submit two double spending transactions on local node"},
+	"multi":  {"usage: multi <owned resource name> <xfer value> <recipient resource name>", "submit a redundant transactions on two different nodes"},
+	"split":  {"usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>", "submit two double spending transactions on two different nodes"},
+}
+
 var (
 	AppName   = "test-driver-for-double-spending"
 	AppShard  = []byte(AppName)
@@ -490,6 +503,10 @@ func cli(localDlt, remoteDlt stack.DLT) error {
 						fmt.Printf("Unknown Command: %s", cmd)
 						for wordScanner.Scan() {
 							fmt.Printf(" %s", wordScanner.Text())
+						}
+						fmt.Printf("\nUsages...\n")
+						for k, v := range commands {
+							fmt.Printf("\"%s\": %s\n%s\n", k, v[1], v[0])
 						}
 						break
 					}

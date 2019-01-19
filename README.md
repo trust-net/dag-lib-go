@@ -4,17 +4,14 @@ Go library for DAG protocol
 * [How to setup workspace](https://github.com/trust-net/dag-lib-go#how-to-setup-workspace)
     * [Clone Repo](https://github.com/trust-net/dag-lib-go#clone-repo)
     * [Install Dependencies](https://github.com/trust-net/dag-lib-go#Install-Dependencies)
-* [Example Application Using DLT Stack Library](https://github.com/trust-net/dag-lib-go#Example-Application-Using-DLT-Stack-Library)
-    * [Build test application](https://github.com/trust-net/dag-lib-go#Build-test-application)
-    * [Stage test application](https://github.com/trust-net/dag-lib-go#Stage-test-application)
+* [Example Applications Using DLT Stack Library](https://github.com/trust-net/dag-lib-go#Example-Application-Using-DLT-Stack-Library)
+    * [Build test applications](https://github.com/trust-net/dag-lib-go#Build-test-application)
+    * [Stage test applications](https://github.com/trust-net/dag-lib-go#Stage-test-application)
     * [Create sub-directories for each instance of the test application](https://github.com/trust-net/dag-lib-go#Create-sub-directories-for-each-instance-of-the-test-application)
     * [Create config file for each instance](https://github.com/trust-net/dag-lib-go#Create-config-file-for-each-instance)
-    * [Run the test application](https://github.com/trust-net/dag-lib-go#Run-the-test-application)
-        * [Register application shard](https://github.com/trust-net/dag-lib-go#Register-application-shard)
-        * [Send counter transaction](https://github.com/trust-net/dag-lib-go#Send-counter-transaction)
-        * [Leave/Un-register from shard](https://github.com/trust-net/dag-lib-go#LeaveUn-register-from-shard)
-        * [Shutdown application](https://github.com/trust-net/dag-lib-go#Shutdown-application)
-        * [Restart application](https://github.com/trust-net/dag-lib-go#Restart-application)
+    * [Run the test applications](https://github.com/trust-net/dag-lib-go#Run-the-test-application)
+    * [Double Spender Application CLI](https://github.com/trust-net/dag-lib-go#Double-Spender-Application-CLI)
+    * [Network Counter Application CLI](https://github.com/trust-net/dag-lib-go#Network-Counter-Application-CLI)
 * [How to use DLT stack library in your application](https://github.com/trust-net/dag-lib-go#how-to-use-dlt-stack-library-in-your-application)
     * [Create configuration](https://github.com/trust-net/dag-lib-go#Create-configuration)
     * [Instantiate DLT stack](https://github.com/trust-net/dag-lib-go#Instantiate-DLT-stack)
@@ -57,22 +54,27 @@ Above will install remaining dependencies into go workspace.
 > Note: Ethereum dependency requires gcc/CC installed for compiling and building crypto library. Hence, `go get` may fail if gcc/CC is not found. Install the platform appropriate compiler and then re-run `go get`.
 
 
-## Example Application Using DLT Stack Library
-An example test program that implements a distributed network counter using DLT stack library is provided under the `tests/countr/app.go`. It can be used as following:
+## Example Applications Using DLT Stack Library
+Two test driver applications are provided to show examples and test different capabilities of DLT stack:
 
-### Build test application
+* `tests/countr/app.go`: A test program that implements a distributed network counter across different shards using DLT stack library
+* `tests/spendr/app.go`: A test program that implements a value transfer application to test double spending resolution across multiple nodes in the network
+
+### Build test applications
 
 ```
 cd $GOPATH/src/trust-net/dag-lib-go/
 (cd tests/countr/; go build)
+(cd tests/spendr/; go build)
 ```
 
-### Stage test application
-Copy the built binary into a staging area, e.g.:
+### Stage test applications
+Copy the built binaries into a staging area, e.g.:
 
 ```
 mkdir -p $USER/tmp/test-trust-node
 cp $GOPATH/src/trust-net/dag-lib-go/tests/countr/countr $USER/tmp/test-trust-node
+cp $GOPATH/src/trust-net/dag-lib-go/tests/spendr/spendr $USER/tmp/test-trust-node
 ```
 
 ### Create sub-directories for each instance of the test application
@@ -102,16 +104,35 @@ Copy the following example config files into sub-directory for each instance tha
 * `boot_nodes` has port from some other instance (e.g. node-1 listening on port 50883 will use node-2's listening port 50884)
 
 ### Run the test application
-Start each instance of the test application with its corresponding config file (below example assumes config file for each instance is placed under its node-N directory and named as config.json):
+Start an instance of _any one_ of the two test applications with its corresponding config file (below example assumes config file for each instance is placed under its node-N directory and named as config.json):
 
 ```
+### on terminal 1 run an instance of countr app
 cd $USER/tmp/test-trust-node/node-1
-../countr -config config.json
+$USER/tmp/test-trust-node/countr -config config.json
+
+### on terminal 2 run an instance of spendr app
+cd $USER/tmp/test-trust-node/node-2
+$USER/tmp/test-trust-node/spendr -config config.json
+
+### on terminal 3 run an instance of countr app
+cd $USER/tmp/test-trust-node/node-3
+$USER/tmp/test-trust-node/countr -config config.json
+
+### on terminal 4 run an instance of spendr app
+cd $USER/tmp/test-trust-node/node-4
+$USER/tmp/test-trust-node/spendr -config config.json
 ```
 
 > As per iteration 4, nodes can join/leave/re-join network dynamically while rest of the network is processing transactions. Nodes will perform on-demand sync at shard level during peer handshake, app registration and unknown transaction processing. Also, while nodes do not yet persist state across reboot, they perform full re-sync across reboot. Hence, as long as there is 1 active node on the network, progress will be made.
 
-### Register application shard
+### Double Spender Application CLI
+Refer to documentation for double spender application CLI at [documentation link](https://github.com/trust-net/dag-lib-go/issues/36)
+
+### Network Counter Application CLI
+Following are CLI commands for using network counter application...
+
+#### Register application shard
 Use the application's CLI to join a shard as following:
 
 ```
@@ -121,7 +142,7 @@ Use the application's CLI to join a shard as following:
 
 > This step is optional, an instance can be run without joining any shard, as a headless node. However, on that instance no transaction can be submitted. It will simply participate in the network as a headless node.
 
-### Send counter transaction
+#### Send counter transaction
 Use the application's CLI to submit transactions as following:
 
 ```
@@ -143,7 +164,7 @@ Use application's CLI to query a counter's value:
      cntr3: not found
 ```
 
-### Leave/Un-register from shard
+#### Leave/Un-register from shard
 Use the application's CLI to leave a previosuly registered shard as following:
 
 ```
@@ -153,12 +174,12 @@ Use the application's CLI to leave a previosuly registered shard as following:
 
 > Above will unregister the app and run node in headless node. App can re-join the same shard, or join a different shard, and will get synced with rest of the apps in that shard after it joins.
 
-### Shutdown application
+#### Shutdown application
 ```
 <app>: quit
 Shutdown cleanly
 ```
-### Restart application
+#### Restart application
 Application can be restarted to re-join an existing network:
 
 ```
