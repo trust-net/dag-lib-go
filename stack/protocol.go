@@ -10,7 +10,7 @@ import (
 // protocol specs
 const (
 	// Name should contain the official protocol name
-	ProtocolName = "smithy"
+	ProtocolName = "smithy/iter_5"
 
 	// Version should contain the version number of the protocol.
 	ProtocolVersion = uint(0x01)
