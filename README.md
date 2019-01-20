@@ -1,5 +1,5 @@
 # dag-lib-go
-Go library for DAG protocol
+Go library for [DAG protocol](https://github.com/trust-net/dag-documentation)
 
 * [How to setup workspace](https://github.com/trust-net/dag-lib-go#how-to-setup-workspace)
     * [Clone Repo](https://github.com/trust-net/dag-lib-go#clone-repo)
