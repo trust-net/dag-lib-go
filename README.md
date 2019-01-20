@@ -1,6 +1,7 @@
 # dag-lib-go
 Go library for [DAG protocol](https://github.com/trust-net/dag-documentation)
 
+* [Introduction](https://github.com/trust-net/dag-lib-go#Introduction)
 * [How to setup workspace](https://github.com/trust-net/dag-lib-go#how-to-setup-workspace)
     * [Clone Repo](https://github.com/trust-net/dag-lib-go#clone-repo)
     * [Install Dependencies](https://github.com/trust-net/dag-lib-go#Install-Dependencies)
@@ -25,6 +26,9 @@ Go library for [DAG protocol](https://github.com/trust-net/dag-documentation)
     * [Iteration 3](https://github.com/trust-net/dag-lib-go#Iteration-3)
     * [Iteration 2](https://github.com/trust-net/dag-lib-go#Iteration-2)
     * [Iteration 1](https://github.com/trust-net/dag-lib-go#Iteration-1)
+
+## Introduction
+This is a golang based implementation of the DAG protocol stack, intended to build native golang applications with DLT support. Documentation for the actual protocol design and rules is [here](https://github.com/trust-net/dag-documentation), wheras below documentation focuses on how to use the protocol stack library in an application.
 
 ## How to setup workspace
 
