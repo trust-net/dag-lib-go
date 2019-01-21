@@ -527,10 +527,9 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			if state := peer.GetState(int(RECV_TxShardChildResponseMsg)); state != tx.Id() {
 				peer.Logger().Debug("Unexpected TxShardChildResponseMsg\nhash: %x\nExpected: %x", tx.Id(), state)
 			} else {
-
-				// validate transaction signature using transaction submitter's ID
-				if !d.p2p.Verify(tx.Self().Payload, tx.Self().Signature, tx.Anchor().Submitter) {
-					peer.Logger().Debug("Signature invalid for tx: %x", tx.Id())
+				// validate signatures
+				if err := d.validateSignatures(tx); err != nil {
+					peer.Logger().Debug("TxShardChildResponseMsg transaction failed signature verification: %s", err)
 					break
 				}
 

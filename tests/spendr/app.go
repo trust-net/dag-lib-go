@@ -88,7 +88,7 @@ func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
 		S *big.Int
 	}
 	s := signature{}
-	hash := sha512.Sum512(txPayload)
+	hash := sha512.Sum512(append(common.Uint64ToBytes(tx.Anchor().SubmitterSeq), txPayload...))
 	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
 	tx.Self().Payload = txPayload
 	tx.Self().Signature, _ = common.Serialize(s)
