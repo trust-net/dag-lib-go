@@ -15,7 +15,7 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/state"
-	"github.com/trust-net/go-trust-net/common"
+	"github.com/trust-net/dag-lib-go/common"
 	"math/big"
 	"os"
 	"strconv"
@@ -50,7 +50,7 @@ func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
 		S *big.Int
 	}
 	s := signature{}
-	hash := sha512.Sum512(txPayload)
+	hash := sha512.Sum512(append(common.Uint64ToBytes(tx.Anchor().SubmitterSeq), txPayload...))
 	s.R, s.S, _ = ecdsa.Sign(rand.Reader, submitter.Key, hash[:])
 	tx.Self().Payload = txPayload
 	tx.Self().Signature, _ = common.Serialize(s)

@@ -21,6 +21,7 @@ Go library for [DAG protocol](https://github.com/trust-net/dag-documentation)
     * [Process transactions from network peers](https://github.com/trust-net/dag-lib-go#Process-transactions-from-network-peers)
     * [Stop DLT Stack](https://github.com/trust-net/dag-lib-go#Stop-DLT-Stack)
 * [Release Notes](https://github.com/trust-net/dag-lib-go#Release-Notes)
+    * [Iteration 6](https://github.com/trust-net/dag-lib-go#Iteration-6)
     * [Iteration 5](https://github.com/trust-net/dag-lib-go#Iteration-5)
     * [Iteration 4](https://github.com/trust-net/dag-lib-go#Iteration-4)
     * [Iteration 3](https://github.com/trust-net/dag-lib-go#Iteration-3)
@@ -164,13 +165,13 @@ Create a `p2p.Config` instance. These values can be read from a file, using the 
 ### Instantiate DLT stack
 Use `stack.NewDltStack(conf p2p.Config, db db.Database)` method to instantiate a DLT stack controller. This takes two arguments:
 * a `p2p.Config` structure with parameters as described above
-* an implementation of `db.Database` implementation, that will be used by DLT stack to save/retrieve/persist data
+* an implementation of `db.DbProvider` implementation, that will be used by DLT stack to instantiate DLT DB to save/retrieve/persist data
 
 ### Register application with DLT stack
-If running an application on the DLT stack, then register the application with the DLT stack using the `stack.DLT.Register(shardId []byte, name string, txHandler func(tx dto.Transaction) error) error` method. This takes following arguments:
+If running an application on the DLT stack, then register the application with the DLT stack using the `stack.DLT.Register(shardId []byte, name string, txHandler func(tx dto.Transaction, state state.State) error) error` method. This takes following arguments:
 * `shardId`: a byte array with unique identifier for the shard of the application
 * `name`: a name of the application
-* `txHandler`: a function that will be called to accept/process a transaction from a peer. If this method returns back a non-nil error, then transaction will not be forwarded to other network peers
+* `txHandler`: a function that will be called to accept/process a transaction from a peer and update the world state. If this method returns back a non-nil error, then transaction will not be forwarded to other network peers and world state updates will be discarded
 
 > This step is optional because a deployment may choose to run in "headless" mode, in which case it will not process any application transactions and will only participate in the transaction endorsement process, to provide network security.
 
@@ -178,12 +179,15 @@ If running an application on the DLT stack, then register the application with t
 Use `stack.DLT.Start()` method for DLT stack to start discovering other nodes on the network and start listening to messages from connected peers. 
 
 ### Process transactions from network peers
-If application had registered with DLT stack with appropriate callback methods, then after DLT stack is started, whenever a new network transaction is received, the application provided "`func(tx dto.Transaction) error) error`" implementation is called with transaction details, Application is suppose to return back an error if transaction was not accepted
+If application had registered with DLT stack with appropriate callback methods, then after DLT stack is started, whenever a new network transaction is received, the application provided "`func(tx dto.Transaction, state state.State) error`" implementation is called with transaction details and a reference to shard's world state. Application is suppose to return back an error if transaction was not accepted.
 
 ### Stop DLT Stack
 Once application execution completes (either due to application shutdown, or any other reason), call the `stack.DLT.Stop()` method to disconnect from all connected network peers.
 
 ## Release Notes
+
+### Iteration 6
+Details of the changes are captured in the [Issue #42](https://github.com/trust-net/dag-lib-go/issues/42).
 
 ### Iteration 5
 

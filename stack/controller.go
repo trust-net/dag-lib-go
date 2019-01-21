@@ -4,6 +4,7 @@ package stack
 
 import (
 	"errors"
+	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/log"
 	"github.com/trust-net/dag-lib-go/stack/dto"
@@ -12,7 +13,6 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/repo"
 	"github.com/trust-net/dag-lib-go/stack/shard"
 	"github.com/trust-net/dag-lib-go/stack/state"
-	"github.com/trust-net/go-trust-net/common"
 	"sync"
 )
 
@@ -101,8 +101,10 @@ func (d *dlt) validateSignatures(tx dto.Transaction) error {
 		return errors.New("Anchor signature invalid")
 	}
 
+	// use submitter's sequence as nonce in the payload signature
+	payload := tx.Self().Payload
 	// validate transaction paylaoad signature using transaction submitter's ID
-	if !d.p2p.Verify(tx.Self().Payload, tx.Self().Signature, tx.Anchor().Submitter) {
+	if !d.p2p.Verify(append(common.Uint64ToBytes(tx.Anchor().SubmitterSeq), payload...), tx.Self().Signature, tx.Anchor().Submitter) {
 		return errors.New("Payload signature invalid")
 	}
 	return nil
@@ -525,10 +527,9 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			if state := peer.GetState(int(RECV_TxShardChildResponseMsg)); state != tx.Id() {
 				peer.Logger().Debug("Unexpected TxShardChildResponseMsg\nhash: %x\nExpected: %x", tx.Id(), state)
 			} else {
-
-				// validate transaction signature using transaction submitter's ID
-				if !d.p2p.Verify(tx.Self().Payload, tx.Self().Signature, tx.Anchor().Submitter) {
-					peer.Logger().Debug("Signature invalid for tx: %x", tx.Id())
+				// validate signatures
+				if err := d.validateSignatures(tx); err != nil {
+					peer.Logger().Debug("TxShardChildResponseMsg transaction failed signature verification: %s", err)
 					break
 				}
 
@@ -539,12 +540,10 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 				if err := d.handleTransaction(peer, events, tx, true); err == nil {
 					// walk through each child to check if it's unknown, then add to child queue
 					for _, child := range msg.Children {
-//						if d.db.GetTx(child) == nil {
-							if err := peer.ShardChildrenQ().Push(child); err != nil {
-								peer.Logger().Debug("Failed to add child to shard queue: %s", err)
-								break
-							}
-//						}
+						if err := peer.ShardChildrenQ().Push(child); err != nil {
+							peer.Logger().Debug("Failed to add child to shard queue: %s", err)
+							break
+						}
 					}
 					peer.Logger().Debug("Successfully added TxShardChildResponseMsg\nhash: %x\n# of children: %x", tx.Id(), len(msg.Children))
 				}
@@ -866,13 +865,13 @@ func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent
 	if localId, remoteId := localTx.Id(), remoteTx.Id(); localTx.Anchor().Weight > remoteTx.Anchor().Weight ||
 		(localTx.Anchor().Weight == remoteTx.Anchor().Weight &&
 			shard.Numeric(localId[:]) > shard.Numeric(remoteId[:])) {
-				// we should replace the local submitter history to use the winning transaction
-				// so that don't get into loop when sync and remote sends the winning transaction
-				// but local history still has old transaction
-				if err := d.endorser.Replace(remoteTx); err != nil {
-					peer.Logger().Error("Failed to update local submitter history: %s", err)
-					return err
-				}
+		// we should replace the local submitter history to use the winning transaction
+		// so that don't get into loop when sync and remote sends the winning transaction
+		// but local history still has old transaction
+		if err := d.endorser.Replace(remoteTx); err != nil {
+			peer.Logger().Error("Failed to update local submitter history: %s", err)
+			return err
+		}
 		if err := d.sharder.Flush(remoteTx.Anchor().ShardId); err != nil {
 			return err
 		} else {
@@ -880,10 +879,10 @@ func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent
 			// initiate a force shard sync for the flushed shard with peer
 			// we need to force the shard sync because if peer is headless
 			// then regular handshake will not result in sync
-			anchor := &dto.Anchor {
-				ShardId: remoteTx.Anchor().ShardId,
+			anchor := &dto.Anchor{
+				ShardId:  remoteTx.Anchor().ShardId,
 				ShardSeq: 0x00,
-				Weight: 0x00,
+				Weight:   0x00,
 			}
 			d.endorser.Anchor(anchor)
 			d.p2p.Anchor(anchor)
@@ -940,10 +939,10 @@ func (d *dlt) handleRECV_ForceShardFlushMsg(peer p2p.Peer, events chan controlle
 			// initiate a force shard sync for the flushed shard with peer
 			// we need to force the shard sync because if peer is headless
 			// then regular handshake will not result in sync
-			anchor := &dto.Anchor {
-				ShardId: remoteTx.Anchor().ShardId,
+			anchor := &dto.Anchor{
+				ShardId:  remoteTx.Anchor().ShardId,
 				ShardSeq: 0x00,
-				Weight: 0x00,
+				Weight:   0x00,
 			}
 			d.endorser.Anchor(anchor)
 			d.p2p.Anchor(anchor)
@@ -1211,7 +1210,7 @@ func NewDltStack(conf p2p.Config, dbp db.DbProvider) (*dlt, error) {
 		db:     db,
 		seen:   common.NewSet(),
 		logger: log.NewLogger(conf.Name),
-		conf: &conf,
+		conf:   &conf,
 	}
 	// update p2p.Config with protocol name, version and message count based on protocol specs
 	conf.ProtocolName = ProtocolName

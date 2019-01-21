@@ -1,7 +1,6 @@
 package stack
 
 import (
-	"github.com/trust-net/dag-lib-go/log"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"testing"
@@ -22,8 +21,6 @@ func TestRECV_ALERT_DoubleSpend_LocalWinner(t *testing.T) {
 		submitter.Seq += 1
 	}
 
-	log.SetLogLevel(log.DEBUG)
-	defer log.SetLogLevel(log.NONE)
 	// create two double spending transactions
 	localTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "spend $10")
 	// add some extra weight for remote transaction
