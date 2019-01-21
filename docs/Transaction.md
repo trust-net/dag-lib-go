@@ -13,7 +13,7 @@
     * [Weight](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Weight)
     * [Submitter Id](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Submitter-Id)
     * [Submitter Sequence](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Submitter-Sequence)
-    * [Submitter Last Transaction]((https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Submitter-Last-Transaction)
+    * [Submitter Last Transaction](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Submitter-Last-Transaction)
     * [Anchor Signature](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Anchor-Signature)
 
 ## Transaction Schema
