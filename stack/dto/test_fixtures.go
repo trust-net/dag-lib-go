@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha512"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/trust-net/go-trust-net/common"
+	"github.com/trust-net/dag-lib-go/common"
 	"math/big"
 	mrand "math/rand"
 )
@@ -52,7 +52,8 @@ func (s *Submitter) NewTransaction(txAnchor *Anchor, data string) Transaction {
 		S *big.Int
 	}
 	sig := signature{}
-	hash := sha512.Sum512(tx.Payload)
+	// use submitter's sequence as nonce in the payload signature
+	hash := sha512.Sum512(append(common.Uint64ToBytes(txAnchor.SubmitterSeq), tx.Payload...))
 	sig.R, sig.S, _ = ecdsa.Sign(rand.Reader, s.Key, hash[:])
 	tx.Signature, _ = common.Serialize(sig)
 	return tx
