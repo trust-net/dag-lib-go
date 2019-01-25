@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/trust-net/dag-lib-go/stack/dto"
-	"github.com/trust-net/go-trust-net/common"
+	"github.com/trust-net/dag-lib-go/common"
 	"math/big"
 	"sync"
 )

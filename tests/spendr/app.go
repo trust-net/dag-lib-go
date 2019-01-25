@@ -267,9 +267,29 @@ func txHandler(tx dto.Transaction, state state.State) error {
 	}
 }
 
+var dlt, remoteDlt, localDlt stack.DLT
+
+func doGetResource(key string) ([]byte, uint64, error) {
+	// get current network counter value from world state
+	if r, err := dlt.GetState([]byte(key)); err == nil {
+		value := common.BytesToUint64(r.Value)
+		return r.Owner, value, nil
+	} else {
+		return nil, 0, err
+	}
+}
+
+func doCreateResource(submitter []byte, lastSeq uint64, lastTx [64]byte, key string, value int64) {
+	makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeCreate, ArgsCreate{
+		Name:  key,
+		Value: value,
+	})
+}
+
 // main CLI loop
-func cli(localDlt, remoteDlt stack.DLT) error {
-	dlt := localDlt
+func cli(local, remote stack.DLT) error {
+	dlt, remoteDlt, localDlt = local, remote, local
+
 	if err := localDlt.Start(); err != nil {
 		return err
 	} else if err := localDlt.Register(AppShard, AppName, txHandler); err != nil {
@@ -303,20 +323,18 @@ func cli(localDlt, remoteDlt stack.DLT) error {
 						hasNext := wordScanner.Scan()
 						oneDone := false
 						for hasNext {
-							name := wordScanner.Text()
-							if len(name) != 0 {
+							key := wordScanner.Text()
+							if len(key) != 0 {
 								if oneDone {
 									fmt.Printf("\n")
 								} else {
 									oneDone = true
 								}
 								// get current network counter value from world state
-								if r, err := dlt.GetState([]byte(name)); err == nil {
-									value := int64(common.BytesToUint64(r.Value))
-									common.Deserialize(r.Value, &value)
-									fmt.Printf("% 10s: %d", name, value)
+								if owner, value, err := doGetResource(key); err == nil {
+									fmt.Printf("%x [% 10s]: %d", owner, key, value)
 								} else {
-									fmt.Printf("% 10s: %s", name, err)
+									fmt.Printf("% 10s: %s", key, err)
 								}
 							}
 							hasNext = wordScanner.Scan()
@@ -333,7 +351,7 @@ func cli(localDlt, remoteDlt stack.DLT) error {
 						} else {
 							for _, arg := range args {
 								fmt.Printf("adding transaction: create %s %d\n", arg.Name, arg.Value)
-								makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeCreate, arg)
+								doCreateResource(submitter, lastSeq, lastTx, arg.Name, arg.Value)
 							}
 						}
 					case "info":
@@ -344,6 +362,7 @@ func cli(localDlt, remoteDlt stack.DLT) error {
 							fmt.Printf("failed to get any info from local node...\n")
 						} else {
 							fmt.Printf("LOCAL ShardId: %s\n", a.ShardId)
+							fmt.Printf("Submitter Id : %x\n", submitter)
 							fmt.Printf("LOCAL Next Seq: %d\n", a.ShardSeq)
 							fmt.Printf("LOCAL Weight: %d\n", a.Weight)
 							fmt.Printf("LOCAL Parent: %x\n", a.ShardParent)
@@ -520,6 +539,7 @@ func cli(localDlt, remoteDlt stack.DLT) error {
 
 func main() {
 	fileName := flag.String("config", "", "config file name")
+	apiPort := flag.Int("apiPort", 0, "port for client API")
 	flag.Parse()
 	if len(*fileName) == 0 {
 		fmt.Printf("Missing required parameter \"config\"\n")
@@ -557,6 +577,11 @@ func main() {
 	// create a new ECDSA key for submitter client
 	key, _ = crypto.GenerateKey()
 	submitter = crypto.FromECDSAPub(&key.PublicKey)
+
+	// start net server
+	if err := StartServer(*apiPort); err != nil {
+		fmt.Printf("Did not start client API: %s\n", err)
+	}
 
 	// instantiate two DLT stacks
 	if localDlt, err := stack.NewDltStack(config, db.NewInMemDbProvider()); err != nil {
