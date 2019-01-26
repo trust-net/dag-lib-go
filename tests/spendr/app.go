@@ -109,18 +109,6 @@ func makeTransaction(dltStack stack.DLT, a *dto.Anchor, txPayload []byte) {
 	}
 }
 
-func submitTransaction(a *dto.Anchor, opCode uint64, arg interface{}) dto.Transaction {
-	if a == nil {
-		return nil
-	}
-	op := Ops{
-		Code: opCode,
-	}
-	op.Args, _ = common.Serialize(arg)
-	txPayload, _ := common.Serialize(op)
-	return sign(dto.NewTransaction(a), txPayload)
-}
-
 func scanCreateArgs(scanner *bufio.Scanner) (args []ArgsCreate) {
 	nextToken := func() (*string, int, bool) {
 		if !scanner.Scan() {
@@ -274,6 +262,14 @@ func doGetResource(key string) ([]byte, uint64, error) {
 	}
 }
 
+func doRequestAnchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
+	return dlt.Anchor(id, seq, lastTx)
+}
+
+func doSubmitTransaction(tx dto.Transaction) error {
+	return dlt.Submit(tx)
+}
+
 func makeXferValuePayload(source, destination string, value int64) []byte {
 	op := Ops{
 		Code: OpCodeXferValue,
@@ -299,14 +295,6 @@ func makeResourceCreationPayload(key string, value int64) []byte {
 	op.Args, _ = common.Serialize(args)
 	txPayload, _ := common.Serialize(op)
 	return txPayload
-}
-
-func doCreateResource(submitter []byte, lastSeq uint64, lastTx [64]byte, key string, value int64) {
-	makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), makeResourceCreationPayload(key, value))
-}
-
-func doRequestAnchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
-	return dlt.Anchor(id, seq, lastTx)
 }
 
 // main CLI loop
@@ -374,7 +362,7 @@ func cli(local, remote stack.DLT) error {
 						} else {
 							for _, arg := range args {
 								fmt.Printf("adding transaction: create %s %d\n", arg.Name, arg.Value)
-								doCreateResource(submitter, lastSeq, lastTx, arg.Name, arg.Value)
+								makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), makeResourceCreationPayload(arg.Name, arg.Value))
 							}
 						}
 					case "info":

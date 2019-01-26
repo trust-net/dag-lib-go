@@ -69,8 +69,31 @@ func requestAnchor(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
 		json.NewEncoder(w).Encode("no anchor")
 	} else {
-		// TBD: make it correct schema
+		// respond back with anchor
 		json.NewEncoder(w).Encode(api.NewAnchorResponse(anchor))
+	}
+}
+
+func submitTransaction(w http.ResponseWriter, r *http.Request) {
+	logger.Debug("Recieved POST /transactions from: %s", r.RemoteAddr)
+	// set headers
+	setHeaders(w)
+	// parse request body
+	req, err := api.ParseSubmitRequest(r)
+	if err != nil {
+		logger.Debug("Failed to decode request body: %s", err)
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode(err.Error())
+		return
+	}
+	// submit transaction to app
+	if err := doSubmitTransaction(req.DltTransaction()); err != nil {
+		logger.Debug("Failed to submit transaction: %s", err)
+		w.WriteHeader(http.StatusNotAcceptable)
+		json.NewEncoder(w).Encode(err.Error())
+	} else {
+		// respond back with transaction submission result
+		json.NewEncoder(w).Encode(api.NewSubmitResponse(req.DltTransaction()))
 	}
 }
 
@@ -100,6 +123,7 @@ func StartServer(listenPort int) error {
 	router.HandleFunc("/foo", getFoo).Methods("GET")
 	router.HandleFunc("/resources/{key}", getResourceByKey).Methods("GET")
 	router.HandleFunc("/anchors", requestAnchor).Methods("POST")
+	router.HandleFunc("/transactions", submitTransaction).Methods("POST")
 	router.HandleFunc("/opcode/create", requestResourceCreation).Methods("POST")
 	go func() {
 		logger.Error("End of server: %s", http.ListenAndServe(":"+strconv.Itoa(listenPort), router))

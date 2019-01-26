@@ -51,26 +51,65 @@ func (r *AnchorRequest) LastTxBytes() [64]byte {
 
 // an API specs compatible anchor response
 type AnchorResponse struct {
-	// transaction approver application instance node ID
+	// 130 char hex encoded public id/key of the node issuing this anchor
 	NodeId string `json:"node_id"`
-	// transaction approver application's shard ID
+	// a hex encoded string uniquely identifying the shard of the application
 	ShardId string `json:"shard_id"`
-	// sequence of this transaction within the shard
+	// 64 bit unsigned integer value for sequence of this anchor in the shard DAG
 	ShardSeq uint64 `json:"shard_seq"`
-	// weight of this transaction withing shard DAG (sum of all ancestor's weight + 1)
+	// 64 bit unsigned integer value for weight of this anchor in the shard DAG (sum of all ancestor's weight + 1)
 	Weight uint64 `json:"weight"`
-	// parent transaction within the shard
+	// 128 char hex encoded id of the parent tip for this anchor within shard DAG
 	ShardParent string `json:"shard_parent"`
-	// uncle transactions within the shard
+	// list of 128 char hex encoded ids of other tips for this anchor within shard DAG
 	ShardUncles []string `json:"shard_uncles"`
-	// transaction submitter's public ID
+	// 130 char hex encoded public id of the submitter
 	Submitter string `json:"submitter"`
-	// submitter's last transaction ID
+	// 128 char hex encoded id of the last transaction from submitter
 	SubmitterLastTx string `json:"last_tx"`
-	// submitter's transaction sequence number
+	// 64 bit unsigned integer value for anchor's transaction sequence from submitter
 	SubmitterSeq uint64 `json:"submitter_seq"`
-	// anchor signature from DLT stack
-	Signature string `json:"signature"`
+	// a base64 encoded ECDSA secpk256 signature using private key of issuing node
+	Signature string `json:"anchor_signature"`
+}
+
+func (r *AnchorResponse) DltAnchor() (*dto.Anchor, error) {
+	a := &dto.Anchor{
+		ShardSeq:     r.ShardSeq,
+		Weight:       r.Weight,
+		SubmitterSeq: r.SubmitterSeq,
+		ShardUncles:  make([][64]byte, len(r.ShardUncles)),
+	}
+	if a.NodeId, _ = hex.DecodeString(r.NodeId); len(a.NodeId) != 65 {
+		return nil, fmt.Errorf("invalid node_id")
+	}
+	if a.ShardId, _ = hex.DecodeString(r.ShardId); len(a.ShardId) == 0 {
+		return nil, fmt.Errorf("invalid shard_id")
+	}
+	if bytes, _ := hex.DecodeString(r.ShardParent); len(bytes) != 64 {
+		return nil, fmt.Errorf("invalid shard_parent")
+	} else {
+		copy(a.ShardParent[:], bytes)
+	}
+	if a.Submitter, _ = hex.DecodeString(r.Submitter); len(a.Submitter) != 65 {
+		return nil, fmt.Errorf("invalid submitter")
+	}
+	if bytes, _ := hex.DecodeString(r.SubmitterLastTx); len(bytes) != 64 {
+		return nil, fmt.Errorf("invalid last_tx")
+	} else {
+		copy(a.SubmitterLastTx[:], bytes)
+	}
+	if a.Signature, _ = base64.StdEncoding.DecodeString(r.Signature); len(a.Signature) == 0 {
+		return nil, fmt.Errorf("invalid anchor_signature")
+	}
+	for i, uncle := range r.ShardUncles {
+		if bytes, _ := hex.DecodeString(uncle); len(bytes) != 64 {
+			return nil, fmt.Errorf("invalid shard_uncle")
+		} else {
+			copy(a.ShardUncles[i][:], bytes)
+		}
+	}
+	return a, nil
 }
 
 func NewAnchorResponse(a *dto.Anchor) *AnchorResponse {
