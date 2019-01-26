@@ -14,9 +14,19 @@ import (
 var logger = log.NewLogger("Client API")
 
 // A world state resource for spendr application
-type ResourceByKey struct {
+type Resource struct {
 	Key   string `json:"key,omitempty"`
 	Owner string `json:"owner,omitempty"`
+	Value uint64 `json:"value"`
+}
+
+// A spendr application OpCode request to transfer value from owned resource
+type OpCodeXferValueRequest struct {
+	// The unique identifier for an owned resource within spendr application
+	Source string `json:"source"`
+	// The unique identifier for destination resource within spendr application
+	Destination string `json:"destination"`
+	// 64 bit unsigned integer value to transfer from owned resource to destination resource
 	Value uint64 `json:"value"`
 }
 
@@ -43,7 +53,7 @@ func getResourceByKey(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 		json.NewEncoder(w).Encode(err.Error())
 	} else {
-		json.NewEncoder(w).Encode(ResourceByKey{
+		json.NewEncoder(w).Encode(Resource{
 			Key:   params["key"],
 			Owner: fmt.Sprintf("%x", owner),
 			Value: value,
@@ -97,12 +107,12 @@ func submitTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func requestResourceCreation(w http.ResponseWriter, r *http.Request) {
+func requestResourceCreationPayload(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("Recieved POST /opcode/create from: %s", r.RemoteAddr)
 	// set headers
 	setHeaders(w)
 	// parse request body
-	req := &ResourceByKey{}
+	req := &Resource{}
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 		logger.Debug("Malformed request: %s", err)
 		w.WriteHeader(400)
@@ -111,6 +121,22 @@ func requestResourceCreation(w http.ResponseWriter, r *http.Request) {
 	}
 	// respond with payload for the request
 	json.NewEncoder(w).Encode(base64.StdEncoding.EncodeToString(makeResourceCreationPayload(req.Key, int64(req.Value))))
+}
+
+func requestXferValuePayload(w http.ResponseWriter, r *http.Request) {
+	logger.Debug("Recieved POST /opcode/xfer from: %s", r.RemoteAddr)
+	// set headers
+	setHeaders(w)
+	// parse request body
+	req := &OpCodeXferValueRequest{}
+	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+		logger.Debug("Malformed request: %s", err)
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode(err.Error())
+		return
+	}
+	// respond with payload for the request
+	json.NewEncoder(w).Encode(base64.StdEncoding.EncodeToString(makeXferValuePayload(req.Source, req.Destination, int64(req.Value))))
 }
 
 func StartServer(listenPort int) error {
@@ -124,7 +150,8 @@ func StartServer(listenPort int) error {
 	router.HandleFunc("/resources/{key}", getResourceByKey).Methods("GET")
 	router.HandleFunc("/anchors", requestAnchor).Methods("POST")
 	router.HandleFunc("/transactions", submitTransaction).Methods("POST")
-	router.HandleFunc("/opcode/create", requestResourceCreation).Methods("POST")
+	router.HandleFunc("/opcode/create", requestResourceCreationPayload).Methods("POST")
+	router.HandleFunc("/opcode/xfer", requestXferValuePayload).Methods("POST")
 	go func() {
 		logger.Error("End of server: %s", http.ListenAndServe(":"+strconv.Itoa(listenPort), router))
 	}()

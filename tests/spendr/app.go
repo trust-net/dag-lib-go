@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha512"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -402,6 +403,29 @@ func cli(local, remote stack.DLT) error {
 							makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 						} else {
 							fmt.Printf("usage: xfer <owned resource name> <xfer value> <recipient resource name>\n")
+						}
+					case "sign":
+						var payload string
+						var nonce int
+						if wordScanner.Scan() {
+							nonce, _ = strconv.Atoi(wordScanner.Text())
+						}
+						if wordScanner.Scan() {
+							payload = wordScanner.Text()
+						}
+						if nonce > 0 && len(payload) != 0 {
+							if bytes, err := base64.StdEncoding.DecodeString(payload); err != nil {
+								fmt.Printf("Invalid base64 payload: %s\n", err)
+							} else {
+								// sign payload using CLI's submitter
+								tx := dto.TestTransaction()
+								tx.Anchor().SubmitterSeq = uint64(nonce)
+								sign(tx, bytes)
+								// print the base64 encoded signature
+								fmt.Printf("Signature: %s\n", base64.StdEncoding.EncodeToString(tx.Self().Signature))
+							}
+						} else {
+							fmt.Printf("usage: sign <nonce> <base64 encoded payload>\n")
 						}
 					case "dupe":
 						arg := ArgsXferValue{}
