@@ -286,6 +286,10 @@ func doCreateResource(submitter []byte, lastSeq uint64, lastTx [64]byte, key str
 	})
 }
 
+func doRequestAnchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
+	return dlt.Anchor(id, seq, lastTx)
+}
+
 // main CLI loop
 func cli(local, remote stack.DLT) error {
 	dlt, remoteDlt, localDlt = local, remote, local
