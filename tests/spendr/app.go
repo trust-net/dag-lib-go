@@ -95,16 +95,11 @@ func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
 	return tx
 }
 
-func makeTransaction(dltStack stack.DLT, a *dto.Anchor, opCode uint64, arg interface{}) {
+func makeTransaction(dltStack stack.DLT, a *dto.Anchor, txPayload []byte) {
 	if a == nil {
 		fmt.Printf("Error submitting transaction: no anchor!!!\n")
 		return
 	}
-	op := Ops{
-		Code: opCode,
-	}
-	op.Args, _ = common.Serialize(arg)
-	txPayload, _ := common.Serialize(op)
 	tx := sign(dto.NewTransaction(a), txPayload)
 	if err := dltStack.Submit(tx); err != nil {
 		fmt.Printf("Error submitting transaction: %s\n", err)
@@ -279,11 +274,35 @@ func doGetResource(key string) ([]byte, uint64, error) {
 	}
 }
 
-func doCreateResource(submitter []byte, lastSeq uint64, lastTx [64]byte, key string, value int64) {
-	makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeCreate, ArgsCreate{
+func makeXferValuePayload(source, destination string, value int64) []byte {
+	op := Ops{
+		Code: OpCodeXferValue,
+	}
+	args := ArgsXferValue{
+		Source:      source,
+		Destination: destination,
+		Value:       value,
+	}
+	op.Args, _ = common.Serialize(args)
+	txPayload, _ := common.Serialize(op)
+	return txPayload
+}
+
+func makeResourceCreationPayload(key string, value int64) []byte {
+	op := Ops{
+		Code: OpCodeCreate,
+	}
+	args := ArgsCreate{
 		Name:  key,
 		Value: value,
-	})
+	}
+	op.Args, _ = common.Serialize(args)
+	txPayload, _ := common.Serialize(op)
+	return txPayload
+}
+
+func doCreateResource(submitter []byte, lastSeq uint64, lastTx [64]byte, key string, value int64) {
+	makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), makeResourceCreationPayload(key, value))
 }
 
 func doRequestAnchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
@@ -392,7 +411,7 @@ func cli(local, remote stack.DLT) error {
 						}
 						if len(arg.Source) != 0 && len(arg.Destination) != 0 && arg.Value > 0 {
 							fmt.Printf("adding transaction: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeXferValue, arg)
+							makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 						} else {
 							fmt.Printf("usage: xfer <owned resource name> <xfer value> <recipient resource name>\n")
 						}
@@ -417,10 +436,10 @@ func cli(local, remote stack.DLT) error {
 							anchor1 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(dlt, anchor1, OpCodeXferValue, arg)
+							makeTransaction(dlt, anchor1, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 							arg.Destination = dest2
 							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(dlt, anchor2, OpCodeXferValue, arg)
+							makeTransaction(dlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 						} else {
 							fmt.Printf("usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
 						}
@@ -445,11 +464,11 @@ func cli(local, remote stack.DLT) error {
 							anchor1 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(dlt, anchor1, OpCodeXferValue, arg)
+							makeTransaction(dlt, anchor1, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 							arg.Destination = dest2
 							//							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(dlt, anchor2, OpCodeXferValue, arg)
+							makeTransaction(dlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 						} else {
 							fmt.Printf("usage: double <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
 						}
@@ -467,7 +486,7 @@ func cli(local, remote stack.DLT) error {
 						}
 						if len(arg.Source) != 0 && len(arg.Destination) != 0 && arg.Value > 0 {
 							fmt.Printf("adding transaction: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(remoteDlt, localDlt.Anchor(submitter, lastSeq+1, lastTx), OpCodeXferValue, arg)
+							makeTransaction(remoteDlt, localDlt.Anchor(submitter, lastSeq+1, lastTx), makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 						} else {
 							fmt.Printf("usage: xover <owned resource name> <xfer value> <recipient resource name>\n")
 						}
@@ -487,9 +506,9 @@ func cli(local, remote stack.DLT) error {
 							anchor1 := localDlt.Anchor(submitter, lastSeq+1, lastTx)
 							anchor2 := remoteDlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding local transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(localDlt, anchor1, OpCodeXferValue, arg)
+							makeTransaction(localDlt, anchor1, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 							fmt.Printf("adding remote transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(remoteDlt, anchor2, OpCodeXferValue, arg)
+							makeTransaction(remoteDlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 						} else {
 							fmt.Printf("usage: multi <owned resource name> <xfer value> <recipient resource name>\n")
 						}
@@ -514,11 +533,11 @@ func cli(local, remote stack.DLT) error {
 							anchor1 := localDlt.Anchor(submitter, lastSeq+1, lastTx)
 							anchor2 := remoteDlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding local transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(localDlt, anchor1, OpCodeXferValue, arg)
+							makeTransaction(localDlt, anchor1, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 							arg.Destination = dest2
 							//							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding remote transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(remoteDlt, anchor2, OpCodeXferValue, arg)
+							makeTransaction(remoteDlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 						} else {
 							fmt.Printf("usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
 						}

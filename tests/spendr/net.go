@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
@@ -73,6 +74,22 @@ func requestAnchor(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func requestResourceCreation(w http.ResponseWriter, r *http.Request) {
+	logger.Debug("Recieved POST /opcode/create from: %s", r.RemoteAddr)
+	// set headers
+	setHeaders(w)
+	// parse request body
+	req := &ResourceByKey{}
+	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+		logger.Debug("Malformed request: %s", err)
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode(err.Error())
+		return
+	}
+	// respond with payload for the request
+	json.NewEncoder(w).Encode(base64.StdEncoding.EncodeToString(makeResourceCreationPayload(req.Key, int64(req.Value))))
+}
+
 func StartServer(listenPort int) error {
 	// if not a valid port, do not start
 	if listenPort < 1024 {
@@ -83,6 +100,7 @@ func StartServer(listenPort int) error {
 	router.HandleFunc("/foo", getFoo).Methods("GET")
 	router.HandleFunc("/resources/{key}", getResourceByKey).Methods("GET")
 	router.HandleFunc("/anchors", requestAnchor).Methods("POST")
+	router.HandleFunc("/opcode/create", requestResourceCreation).Methods("POST")
 	go func() {
 		logger.Error("End of server: %s", http.ListenAndServe(":"+strconv.Itoa(listenPort), router))
 	}()

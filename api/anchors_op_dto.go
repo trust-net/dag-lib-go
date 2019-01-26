@@ -4,6 +4,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -83,7 +84,7 @@ func NewAnchorResponse(a *dto.Anchor) *AnchorResponse {
 		Submitter:       hex.EncodeToString(a.Submitter),
 		SubmitterLastTx: hex.EncodeToString(a.SubmitterLastTx[:]),
 		SubmitterSeq:    a.SubmitterSeq,
-		Signature:       hex.EncodeToString(a.Signature),
+		Signature:       base64.StdEncoding.EncodeToString(a.Signature),
 	}
 	for i, uncle := range a.ShardUncles {
 		res.ShardUncles[i] = hex.EncodeToString(uncle[:])
