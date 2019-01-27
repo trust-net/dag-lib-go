@@ -46,7 +46,7 @@ func (s *Submitter) NewTransaction(txAnchor *Anchor, data string) Transaction {
 		Payload:  []byte(data),
 		TxAnchor: txAnchor,
 	}
-	// sign the test payload using SHA512 hash and ECDSA private key
+	// sign the test payload using SHA256 digest and ECDSA private key
 	type signature struct {
 		R *big.Int
 		S *big.Int

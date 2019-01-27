@@ -4,6 +4,7 @@
     * [Payload](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Payload)
     * [Signature](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Signature)
     * [TxAnchor](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#TxAnchor)
+    * [Transaction ID](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Transaction-ID)
 * [Anchor Schema](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Anchor-Schema)
     * [Node Id](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Node-Id)
     * [Shard Id](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Shard-Id)
@@ -32,7 +33,7 @@ TxAnchor *Anchor
 
 
 ### Signature
-`Signature` is a serialized byte array of the ECDSA signature using submitter's private key over SHA512 hash of submitter's sequence and the transaction payload. Assuming that payload is serialized in a byte array `payload` and reference to transaction is in `tx`, then the signature can be calculated as following:
+`Signature` is a 64 byte array of the ECDSA signature (`bytes[:32] == R, bytes[32:] == S`) using submitter's private key over SHA256 digest of submitter's sequence and the transaction payload. Assuming that payload is serialized in a byte array `payload` and reference to transaction is in `tx`, then the signature can be calculated as following:
 
 ```
 // use the submitter's sequence in transaction's anchor as nonce value
@@ -41,8 +42,8 @@ nonce := tx.Anchor().SubmitterSeq
 // append the nonce value in bytes with the payload bytes
 noncedBytes := append(common.Uint64ToBytes(nonce), payload...)
 
-// compute SHA512 hash of the bytes
-hash := sha512.Sum512(noncedBytes)
+// compute SHA256 digest of the bytes
+hash := sha256.Sum256(noncedBytes)
 
 // sign the hash using ECDS private key of the submitter
 type signature struct {
@@ -52,12 +53,27 @@ type signature struct {
 s := signature{}
 s.R, s.S, _ = ecdsa.Sign(rand.Reader, submitterKey, hash[:])
 
-// serialize the signature to add to transaction
-serializedSignature, _ := common.Serialize(s)
+// serialize the signature to [64]byte
+serializedSignature := append(sig.R.Bytes(), sig.S.Bytes()...)
 ```
 
 ### TxAnchor
 The `TxAnchor` is a signed artifact requested by the transaction submitter from an application instance node, and it contains proof of the transaction's meta data to help place transaction in right application shard and submitter's history sequence.
+
+### Transaction ID
+The transaction's ID is a `[64]byte` unique identifier computed from a SHA512 hash of transaction's contents as following:
+
+```
+data := make([]byte, 0)
+// signature should be sufficient to capture payload and submitter ID
+data = append(data, tx.Signature...)
+// append anchor's signature
+data = append(data, tx.TxAnchor.Signature...)
+tx.id = sha512.Sum512(data)
+
+```
+
+> Due to the trust-less nature of network, the transaction Id is not included with transaction structure exchanged over the network, rather its computed locally by each node when it receives a transaction's contents from a peer.
 
 ## Anchor Schema
 Following are the contents of an Anchor:
@@ -116,7 +132,7 @@ Signature []byte
 `SubmitterLastTx` is the reference to last transaction from submitter's history, provided by the submitter as a parameter for anchor request. 
 
 ### Anchor Signature
-The `Signature` in an anchor is a serialized byte array of the ECDSA signature using node's private key over SHA512 hash of Anchor's parameters in order as following:
+The `Signature` in an anchor is a 64 byte array of the ECDSA signature (`bytes[:32] == R, bytes[32:] == S`) using node's private key over SHA256 digest of Anchor's parameters in order as following:
 
 ```
 // initialize a byte array to collect anchor parameters in order
@@ -136,7 +152,7 @@ payload = append(payload, a.SubmitterLastTx[:]...)
 payload = append(payload, common.Uint64ToBytes(a.SubmitterSeq)...)
 
 // compute SHA512 hash of the bytes
-hash := sha512.Sum512(payload)
+hash := sha256.Sum256(payload)
 
 // sign the hash using ECDS private key of the node
 type signature struct {
@@ -147,5 +163,5 @@ s := signature{}
 s.R, s.S, _ = ecdsa.Sign(rand.Reader, nodeKey, hash[:])
 
 // serialize the signature to add to the anchor
-serializedSignature, _ := common.Serialize(s)
+serializedSignature := append(s.R.Bytes(), s.S.Bytes()...)
 ```
