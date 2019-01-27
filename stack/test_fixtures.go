@@ -40,6 +40,7 @@ type mockEndorser struct {
 	TxId                 [64]byte
 	Tx                   dto.Transaction
 	TxHandlerCalled      bool
+	TxUpdateCalled       bool
 	KnownShardsTxsCalled bool
 	ReplaceCalled        bool
 	AnchorCalled         bool
@@ -69,6 +70,12 @@ func (e *mockEndorser) Handle(tx dto.Transaction) (int, error) {
 		return e.orig.Handle(tx)
 	}
 }
+
+func (e *mockEndorser) Update(tx dto.Transaction) error {
+	e.TxUpdateCalled = true
+	return e.orig.Update(tx)
+}
+
 func (e *mockEndorser) KnownShardsTxs(submitter []byte, seq uint64) (shards [][]byte, txs [][64]byte) {
 	e.KnownShardsTxsCalled = true
 	return e.orig.KnownShardsTxs(submitter, seq)

@@ -3,11 +3,12 @@ package p2p
 import (
 	"crypto/ecdsa"
 	"crypto/rand"
-	"crypto/sha512"
+	"crypto/sha256"
 	"fmt"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/stack/dto"
+	"math/big"
 	"testing"
 )
 
@@ -82,17 +83,22 @@ func TestDEVp2pSign(t *testing.T) {
 	key, _ := conf.key()
 
 	// sign the test payload
-	if p2pSignature, err := p2p.Sign(payload); err != nil {
+	if sign, err := p2p.Sign(payload); err != nil {
 		t.Errorf("Failed to get p2p signature: %s", err)
 	} else {
-		// regenerate signature parameters
-		s := signature{}
-		if err := common.Deserialize(p2pSignature, &s); err != nil {
-			t.Errorf("Failed to parse signature: %s", err)
+		if len(sign) != 64 {
+			t.Errorf("Incorrect signature length: %d", len(sign))
 			return
 		}
-		// we want to validate the hash of the payload
-		hash := sha512.Sum512(payload)
+		// regenerate signature parameters
+		s := signature{
+			R: &big.Int{},
+			S: &big.Int{},
+		}
+		s.R.SetBytes(sign[0:32])
+		s.S.SetBytes(sign[32:64])
+		// we want to validate the SHA256 digest of the payload
+		hash := sha256.Sum256(payload)
 		// validate signature of payload
 		if !ecdsa.Verify(&key.PublicKey, hash[:], s.R, s.S) {
 			t.Errorf("signature validation failed")
@@ -111,11 +117,11 @@ func TestDEVp2pVerify(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	id := crypto.FromECDSAPub(&key.PublicKey)
 
-	// sign the test payload using SHA512 hash and ECDSA private key
+	// sign the test payload using SHA256 digest and ECDSA private key
 	s := signature{}
-	hash := sha512.Sum512(payload)
+	hash := sha256.Sum256(payload)
 	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
-	sign, _ := common.Serialize(s)
+	sign := append(s.R.Bytes(), s.S.Bytes()...)
 
 	// validate that p2p layer can verify the signature
 	if !p2p.Verify(payload, sign, id) {
@@ -188,12 +194,14 @@ func TestAnchor(t *testing.T) {
 	payload = append(payload, a.SubmitterLastTx[:]...)
 	payload = append(payload, common.Uint64ToBytes(a.SubmitterSeq)...)
 	// regenerate signature parameters
-	s := signature{}
-	if err := common.Deserialize(a.Signature, &s); err != nil {
-		t.Errorf("Failed to parse signature: %s", err)
+	s := signature{
+		R: &big.Int{},
+		S: &big.Int{},
 	}
-	// we want to validate the hash of the payload
-	hash := sha512.Sum512(payload)
+	s.R.SetBytes(a.Signature[0:32])
+	s.S.SetBytes(a.Signature[32:64])
+	// we want to validate the SHA256 digest of the payload
+	hash := sha256.Sum256(payload)
 	// validate signature of payload
 	if !ecdsa.Verify(&p2p.key.PublicKey, hash[:], s.R, s.S) {
 		t.Errorf("signature validation failed")
