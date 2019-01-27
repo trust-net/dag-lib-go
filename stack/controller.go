@@ -167,6 +167,10 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 		return err
 	} else {
 		d.logger.Debug("Commiting world state after successful transaction: %x", tx.Id())
+		if err := d.endorser.Update(tx); err != nil {
+			d.logger.Debug("Submitted transaction failed to update submitter history at endorser: %s\ntransaction: %x", err, tx.Id())
+			return err
+		}
 		d.sharder.CommitState()
 	}
 
@@ -297,6 +301,10 @@ func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx d
 		return err
 	} else {
 		peer.Logger().Debug("Commiting world state after successful transaction: %x", tx.Id())
+		if err := d.endorser.Update(tx); err != nil {
+			d.logger.Debug("Failed to update submitter history at endorser: %s\ntransaction: %x", err, tx.Id())
+			return err
+		}
 		d.sharder.CommitState()
 	}
 

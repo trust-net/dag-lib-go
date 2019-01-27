@@ -20,6 +20,12 @@ type Resource struct {
 	Value uint64 `json:"value"`
 }
 
+// response to successful submission of a transaction
+type OpcodeResponse struct {
+	Payload     string `json:"payload"`
+	Description string `json:"description"`
+}
+
 // A spendr application OpCode request to transfer value from owned resource
 type OpCodeXferValueRequest struct {
 	// The unique identifier for an owned resource within spendr application
@@ -120,7 +126,10 @@ func requestResourceCreationPayload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// respond with payload for the request
-	json.NewEncoder(w).Encode(base64.StdEncoding.EncodeToString(makeResourceCreationPayload(req.Key, int64(req.Value))))
+	json.NewEncoder(w).Encode(OpcodeResponse{
+			Payload: base64.StdEncoding.EncodeToString(makeResourceCreationPayload(req.Key, int64(req.Value))),
+			Description: "Create " + req.Key,
+	})
 }
 
 func requestXferValuePayload(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +145,10 @@ func requestXferValuePayload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// respond with payload for the request
-	json.NewEncoder(w).Encode(base64.StdEncoding.EncodeToString(makeXferValuePayload(req.Source, req.Destination, int64(req.Value))))
+	json.NewEncoder(w).Encode(OpcodeResponse{
+			Payload: base64.StdEncoding.EncodeToString(makeXferValuePayload(req.Source, req.Destination, int64(req.Value))),
+			Description: "Transfer from " + req.Source + " to " + req.Destination,
+	})
 }
 
 func StartServer(listenPort int) error {

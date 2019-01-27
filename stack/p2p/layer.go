@@ -5,12 +5,12 @@ package p2p
 import (
 	"crypto/ecdsa"
 	"crypto/rand"
-	"crypto/sha512"
+	"crypto/sha256"
 	"errors"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/trust-net/dag-lib-go/stack/dto"
-	"github.com/trust-net/dag-lib-go/common"
+//	"github.com/trust-net/dag-lib-go/common"
 	"math/big"
 	"sync"
 )
@@ -51,15 +51,16 @@ func (l *layerDEVp2p) Anchor(a *dto.Anchor) error {
 	}
 	// update anchor's node ID with this node
 	a.NodeId = l.Id()
-	// sign the anchor using SHA512 hash and ECDSA private key
+	// sign the anchor using SHA256 hash and ECDSA private key
 	s := signature{}
-	hash := sha512.Sum512(a.Bytes())
+	hash := sha256.Sum256(a.Bytes())
 	s.R, s.S, _ = ecdsa.Sign(rand.Reader, l.key, hash[:])
-	if sign, err := common.Serialize(s); err != nil {
-		return err
-	} else {
-		a.Signature = sign
-	}
+//	if sign, err := common.Serialize(s); err != nil {
+//		return err
+//	} else {
+//		a.Signature = sign
+//	}
+	a.Signature = append(s.R.Bytes(), s.S.Bytes()...)
 	return nil
 }
 
@@ -94,16 +95,17 @@ func (l *layerDEVp2p) Id() []byte {
 func (l *layerDEVp2p) Sign(data []byte) ([]byte, error) {
 	s := signature{}
 	var err error
-	// sign the payload using SHA512 hash and ECDSA signature
-	hash := sha512.Sum512(data)
+	// sign the payload using SHA256 hash and ECDSA signature
+	hash := sha256.Sum256(data)
 	if s.R, s.S, err = ecdsa.Sign(rand.Reader, l.key, hash[:]); err != nil {
 		return nil, err
 	}
-	if signature, err := common.Serialize(s); err != nil {
-		return nil, err
-	} else {
-		return signature, nil
-	}
+//	if signature, err := common.Serialize(s); err != nil {
+//		return nil, err
+//	} else {
+//		return signature, nil
+//	}
+	return append(s.R.Bytes(), s.S.Bytes()...), nil
 }
 
 func (l *layerDEVp2p) Verify(payload, sign, id []byte) bool {
@@ -114,13 +116,26 @@ func (l *layerDEVp2p) Verify(payload, sign, id []byte) bool {
 	}
 
 	// regenerate signature parameters
-	s := signature{}
-	if err := common.Deserialize(sign, &s); err != nil {
-		// Failed to parse signature
+//	s := signature{}
+//	if err := common.Deserialize(sign, &s); err != nil {
+//		// Failed to parse signature
+//		return false
+//	}
+	s := signature{
+		R: &big.Int{},
+		S: &big.Int{},
+	}
+	if len(sign) == 65 {
+		sign = sign[1:]
+	}
+	if len(sign) != 64 {
 		return false
 	}
+	s.R.SetBytes(sign[0:32])
+	s.S.SetBytes(sign[32:64])
+	
 	// we want to validate the hash of the payload
-	hash := sha512.Sum512(payload)
+	hash := sha256.Sum256(payload)
 	// validate signature of payload
 	return ecdsa.Verify(key, hash[:], s.R, s.S)
 }

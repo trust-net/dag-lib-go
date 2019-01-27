@@ -25,6 +25,8 @@ type Endorser interface {
 	Replace(tx dto.Transaction) error
 	// Approve submitted transaction
 	Approve(tx dto.Transaction) error
+	// Update submitter history for transaction
+	Update(tx dto.Transaction) error
 	// Provide all known shard/tx pairs for a submitter/seq
 	KnownShardsTxs(submitter []byte, seq uint64) (shards [][]byte, txs [][64]byte)
 }
@@ -111,10 +113,10 @@ func (e *endorser) Handle(tx dto.Transaction) (int, error) {
 		return ERR_DUPLICATE, err
 	}
 
-	// update submitter's DAG
-	if err := e.db.UpdateSubmitter(tx); err != nil {
-		return ERR_DOUBLE_SPEND, err
-	}
+//	// update submitter's DAG
+//	if err := e.db.UpdateSubmitter(tx); err != nil {
+//		return ERR_DOUBLE_SPEND, err
+//	}
 
 	// broadcast transaction
 	// ^^^ this will be done by the controller if there is no error
@@ -146,6 +148,25 @@ func (e *endorser) Approve(tx dto.Transaction) error {
 	if _, err := e.isValid(tx.Anchor(), tx); err != nil {
 		return err
 	}
+
+//	// update submitter's history (fails if this is double spending transaction)
+//	if err := e.db.UpdateSubmitter(tx); err != nil {
+//		return err
+//	}
+
+	return nil
+}
+
+func (e *endorser) Update(tx dto.Transaction) error {
+//	// validate transaction
+//	if tx == nil || tx.Anchor() == nil || tx.Anchor().SubmitterSeq < 1 {
+//		return fmt.Errorf("invalid transaction")
+//	}
+//
+//	// check transaction against submitter history
+//	if _, err := e.isValid(tx.Anchor(), tx); err != nil {
+//		return err
+//	}
 
 	// update submitter's history (fails if this is double spending transaction)
 	if err := e.db.UpdateSubmitter(tx); err != nil {

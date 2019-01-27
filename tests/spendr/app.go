@@ -6,7 +6,7 @@ import (
 	"bufio"
 	"crypto/ecdsa"
 	"crypto/rand"
-	"crypto/sha512"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -89,10 +89,11 @@ func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
 		S *big.Int
 	}
 	s := signature{}
-	hash := sha512.Sum512(append(common.Uint64ToBytes(tx.Anchor().SubmitterSeq), txPayload...))
+	hash := sha256.Sum256(append(common.Uint64ToBytes(tx.Anchor().SubmitterSeq), txPayload...))
 	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
 	tx.Self().Payload = txPayload
-	tx.Self().Signature, _ = common.Serialize(s)
+//	tx.Self().Signature, _ = common.Serialize(s)
+	tx.Self().Signature = append(s.R.Bytes(), s.S.Bytes()...)
 	return tx
 }
 
