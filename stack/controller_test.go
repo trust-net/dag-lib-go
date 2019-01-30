@@ -3208,6 +3208,11 @@ func TestRECV_NewTxBlockMsg_UnknownTxParent(t *testing.T) {
 		t.Errorf("did not fetch sync anchor from sharder")
 	}
 
+	// confirm that we did not update the shard DAG
+	if sharder.CommitStateCalled {
+		t.Errorf("must not commit state")
+	}
+
 	// we should set the peer state to expect ancestors response for requested hash
 	if state := peer.GetState(int(RECV_ShardAncestorResponseMsg)); state == nil || state.([64]byte) != tx.Anchor().ShardParent {
 		t.Errorf("controller set expected state to incorrect hash:\n%x\nExpected:\n%x", state, tx.Anchor().ShardParent)

@@ -435,6 +435,7 @@ func TestHandlerRegistered(t *testing.T) {
 	called := false
 	txHandler := func(tx dto.Transaction, state state.State) error { called = true; return nil }
 	s.Register(tx.Anchor().ShardId, txHandler)
+	testDb.Reset()
 
 	// send the mock network transaction to sharder with app registered
 	if err := s.Handle(tx); err != nil {
@@ -444,6 +445,11 @@ func TestHandlerRegistered(t *testing.T) {
 	// verify that callback got called
 	if !called {
 		t.Errorf("Sharder did not invoke transaction call back")
+	}
+
+	// confirm the shard DAG update is not called yet (moved to commit stage)
+	if testDb.UpdateShardCount != 0 {
+		t.Errorf("Unexpected shard DAG update")
 	}
 }
 
@@ -526,26 +532,19 @@ func TestApproverHappyPath(t *testing.T) {
 	s.Register(tx.Anchor().ShardId, txHandler)
 	testDb.Reset()
 
-	// lock the world state before approving
-	s.LockState()
-
 	// send the transaction to sharder for approval
 	if err := s.Approve(tx); err != nil {
 		t.Errorf("Transaction approval failed: %s", err)
 	}
-
-	// commit world state and DAG update after approving
-	s.CommitState(tx)
-	s.UnlockState()
 
 	// verify that callback did get called for submitted transaction
 	if !called {
 		t.Errorf("Callback not done for application submitted transaction")
 	}
 
-	// verify that DLT DB's shard was updated for submitted transaction
-	if testDb.UpdateShardCount != 1 {
-		t.Errorf("DLT DB's shard was NOT updated for submitted transaction: %d", testDb.UpdateShardCount)
+	// confirm the shard DAG update is not called yet (moved to commit stage)
+	if testDb.UpdateShardCount != 0 {
+		t.Errorf("Unexpected shard DAG update")
 	}
 
 	// verify that submitted transaction was saved in DB
@@ -959,5 +958,33 @@ func TestFlush_UnregisteredShard(t *testing.T) {
 		t.Errorf("Failed to get state: %s", err)
 	} else if string(read.Value) != "test data to validate" {
 		t.Errorf("Incorrect data from get state: %s", read.Value)
+	}
+}
+
+func TestCommitState_WithTransaction(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
+	tx, _ := SignedShardTransaction("test payload")
+
+	// call commit state with a transaction (e.g. after submitted transaction approval
+	// or after network transaction handling)
+	s.CommitState(tx)
+
+	// confirm that shard DAG was updated
+	if testDb.UpdateShardCount != 1 {
+		t.Errorf("Commit state did not update shard DAG")
+	}
+}
+
+func TestCommitState_NilTransaction(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
+
+	// call commit state with nil transaction (e.g. after app registration replay)
+	s.CommitState(nil)
+
+	// confirm that shard DAG was not updated
+	if testDb.UpdateShardCount != 0 {
+		t.Errorf("Commit state should not update shard DAG")
 	}
 }
