@@ -25,6 +25,8 @@ type Endorser interface {
 	Replace(tx dto.Transaction) error
 	// Approve submitted transaction
 	Approve(tx dto.Transaction) error
+	// Update submitter history for transaction
+	Update(tx dto.Transaction) error
 	// Provide all known shard/tx pairs for a submitter/seq
 	KnownShardsTxs(submitter []byte, seq uint64) (shards [][]byte, txs [][64]byte)
 }
@@ -112,9 +114,10 @@ func (e *endorser) Handle(tx dto.Transaction) (int, error) {
 	}
 
 	// update submitter's DAG
-	if err := e.db.UpdateSubmitter(tx); err != nil {
-		return ERR_DOUBLE_SPEND, err
-	}
+	// Below got deffered to a second stage as part of world state commit
+	//	if err := e.db.UpdateSubmitter(tx); err != nil {
+	//		return ERR_DOUBLE_SPEND, err
+	//	}
 
 	// broadcast transaction
 	// ^^^ this will be done by the controller if there is no error
@@ -147,6 +150,16 @@ func (e *endorser) Approve(tx dto.Transaction) error {
 		return err
 	}
 
+	// update submitter's DAG
+	// Below got deffered to a second stage as part of world state commit
+	//	if err := e.db.UpdateSubmitter(tx); err != nil {
+	//		return ERR_DOUBLE_SPEND, err
+	//	}
+
+	return nil
+}
+
+func (e *endorser) Update(tx dto.Transaction) error {
 	// update submitter's history (fails if this is double spending transaction)
 	if err := e.db.UpdateSubmitter(tx); err != nil {
 		return err

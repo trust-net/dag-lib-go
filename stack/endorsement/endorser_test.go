@@ -38,8 +38,8 @@ func TestTxHandler(t *testing.T) {
 		t.Errorf("Incorrect method call count: %d", testDb.AddTxCallCount)
 	}
 
-	// validate the DLT DB's submitter was updated
-	if testDb.UpdateSubmitterCount != 1 {
+	// validate the DLT DB's submitter was not updated (deffered to later as part of committing world state)
+	if testDb.UpdateSubmitterCount != 0 {
 		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
 	}
 }
@@ -58,8 +58,8 @@ func TestTxApprover(t *testing.T) {
 		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
 	}
 
-	// validate the DLT DB's submitter was updated
-	if testDb.UpdateSubmitterCount != 1 {
+	// validate the DLT DB's submitter was not updated (deffered to later as part of committing world state)
+	if testDb.UpdateSubmitterCount != 0 {
 		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
 	}
 
@@ -87,6 +87,11 @@ func TestTxApprover_DoubleSpending(t *testing.T) {
 		t.Errorf("Transacton approval failed: %s", err)
 	}
 
+	// commit the submitter history
+	if err := e.Update(tx1); err != nil {
+		t.Errorf("Transacton update failed: %s", err)
+	}
+
 	// send second transaction to endorser
 	if err := e.Approve(tx2); err == nil {
 		t.Errorf("Transacton approval did not fail for double spending")
@@ -97,7 +102,7 @@ func TestTxApprover_DoubleSpending(t *testing.T) {
 		t.Errorf("Incorrect method call count: %d", testDb.GetSubmitterHistoryCount)
 	}
 
-	// validate the DLT DB's submitter update was called only once
+	// validate the DLT DB's submitter update was called once
 	if testDb.UpdateSubmitterCount != 1 {
 		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
 	}
@@ -121,9 +126,19 @@ func TestTxApprover_RelaxedSequenceRequirements(t *testing.T) {
 		t.Errorf("Transacton approval failed: %s", err)
 	}
 
+	// commit the submitter history
+	if err := e.Update(tx1); err != nil {
+		t.Errorf("Transacton update failed: %s", err)
+	}
+
 	// send second transaction to endorser
 	if err := e.Approve(tx2); err != nil {
 		t.Errorf("Transacton approval failed: %s", err)
+	}
+
+	// commit the submitter history
+	if err := e.Update(tx2); err != nil {
+		t.Errorf("Transacton update failed: %s", err)
 	}
 
 	// validate the DLT DB's submitter update was called twice
@@ -167,8 +182,8 @@ func TestTxHandlerBadTransaction(t *testing.T) {
 		t.Errorf("Incorrect method call count: %d", testDb.AddTxCallCount)
 	}
 
-	// validate the DLT DB's submitter update was called only once
-	if testDb.UpdateSubmitterCount != 1 {
+	// validate the DLT DB's submitter was not updated (deffered to later as part of committing world state)
+	if testDb.UpdateSubmitterCount != 0 {
 		t.Errorf("Incorrect method call count: %d", testDb.UpdateSubmitterCount)
 	}
 }
@@ -189,6 +204,11 @@ func TestTxHandler_DoubleSpending(t *testing.T) {
 	// send first transaction to endorser
 	if _, err := e.Handle(tx1); err != nil {
 		t.Errorf("Transacton handler failed: %s", err)
+	}
+
+	// commit the submitter history
+	if err := e.Update(tx1); err != nil {
+		t.Errorf("Transacton update failed: %s", err)
 	}
 
 	// send second transaction to endorser
@@ -230,9 +250,19 @@ func TestTxHandler_RelaxedSequenceRequirements(t *testing.T) {
 		t.Errorf("Transacton approval failed: %s", err)
 	}
 
+	// commit the submitter history
+	if err := e.Update(tx1); err != nil {
+		t.Errorf("Transacton update failed: %s", err)
+	}
+
 	// send second transaction to endorser
 	if _, err := e.Handle(tx2); err != nil {
 		t.Errorf("Transacton approval failed: %s", err)
+	}
+
+	// commit the submitter history
+	if err := e.Update(tx2); err != nil {
+		t.Errorf("Transacton update failed: %s", err)
 	}
 
 	// validate that DltDb's AddTx method was called two times
@@ -255,6 +285,11 @@ func TestTxHandler_OrphanTx(t *testing.T) {
 	tx1 := dto.TestSignedTransaction("test data")
 	if _, err := e.Handle(tx1); err != nil {
 		t.Errorf("Transacton handler failed: %s", err)
+	}
+
+	// commit the submitter history
+	if err := e.Update(tx1); err != nil {
+		t.Errorf("Transacton update failed: %s", err)
 	}
 	// reset all counters from saving above transaction
 	testDb.Reset()

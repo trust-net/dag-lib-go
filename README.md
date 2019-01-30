@@ -21,6 +21,7 @@ Go library for [DAG protocol](https://github.com/trust-net/dag-documentation#dag
     * [Process transactions from network peers](https://github.com/trust-net/dag-lib-go#Process-transactions-from-network-peers)
     * [Stop DLT Stack](https://github.com/trust-net/dag-lib-go#Stop-DLT-Stack)
 * [Release Notes](https://github.com/trust-net/dag-lib-go#Release-Notes)
+    * [Iteration 7](#Iteration-7)
     * [Iteration 6](https://github.com/trust-net/dag-lib-go#Iteration-6)
     * [Iteration 5](https://github.com/trust-net/dag-lib-go#Iteration-5)
     * [Iteration 4](https://github.com/trust-net/dag-lib-go#Iteration-4)
@@ -186,8 +187,14 @@ Once application execution completes (either due to application shutdown, or any
 
 ## Release Notes
 
+### Iteration 7
+* Made protocol's hashing and encryption compatible with ethereumJ based [Java client](https://github.com/trust-net/dag-lib-java)
+* Extended Spendr test application to support [REST API](https://github.com/trust-net/dag-lib-go/issues/46) for a submitter/client access
+* Built a companion [Android App](https://github.com/trust-net/SpendrClient) as sample submitter/client to work with Spendr's REST API
+* Details of the changes are captured in the [Iteration 7](https://github.com/trust-net/dag-lib-go/issues/45).
+
 ### Iteration 6
-Details of the changes are captured in the [Issue #42](https://github.com/trust-net/dag-lib-go/issues/42).
+Details of the changes are captured in the [Iteration 6](https://github.com/trust-net/dag-lib-go/issues/42).
 
 ### Iteration 5
 
