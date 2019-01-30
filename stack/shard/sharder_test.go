@@ -87,7 +87,10 @@ func TestRegistrationReplay(t *testing.T) {
 	// send a mock network transaction with shard seq 1 to sharder before app is registered
 	tx, _ := SignedShardTransaction("test payload")
 	s.db.AddTx(tx)
+	s.LockState()
 	s.Handle(tx)
+	s.CommitState(tx)
+	s.UnlockState()
 
 	// register an app using same shard as network transaction
 	cbCalled := false
@@ -319,20 +322,17 @@ func TestAnchorMultiTip(t *testing.T) {
 	// add 2 child network transactions nodes for same parent as genesis
 	child1, _ := SignedShardTransaction("child1")
 	child2, _ := SignedShardTransaction("child2")
-	if err := s.db.AddTx(child1); err != nil {
-		t.Errorf("Failed to add child1: %s", err)
-	}
+	s.db.AddTx(child1)
+	s.LockState()
+	s.Handle(child1)
+	s.CommitState(child1)
+	s.UnlockState()
 
-	if err := s.Handle(child1); err != nil {
-		t.Errorf("Failed to handle child1: %s", err)
-	}
-	if err := s.db.AddTx(child2); err != nil {
-		t.Errorf("Failed to add child2: %s", err)
-	}
-
-	if err := s.Handle(child2); err != nil {
-		t.Errorf("Failed to handle child2: %s", err)
-	}
+	s.db.AddTx(child2)
+	s.LockState()
+	s.Handle(child2)
+	s.CommitState(child2)
+	s.UnlockState()
 
 	// call sharder's anchor update
 	a := dto.Anchor{}
@@ -526,10 +526,17 @@ func TestApproverHappyPath(t *testing.T) {
 	s.Register(tx.Anchor().ShardId, txHandler)
 	testDb.Reset()
 
+	// lock the world state before approving
+	s.LockState()
+
 	// send the transaction to sharder for approval
 	if err := s.Approve(tx); err != nil {
 		t.Errorf("Transaction approval failed: %s", err)
 	}
+
+	// commit world state and DAG update after approving
+	s.CommitState(tx)
+	s.UnlockState()
 
 	// verify that callback did get called for submitted transaction
 	if !called {
@@ -560,12 +567,19 @@ func TestAncestorsKnownStartHash(t *testing.T) {
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
+	s.LockState()
 	if err := s.Handle(tx1); err != nil {
 		t.Errorf("Failed to add 1st transaction: %s", err)
 	}
+	s.CommitState(tx1)
+	s.UnlockState()
+
+	s.LockState()
 	if err := s.Handle(tx2); err != nil {
 		t.Errorf("Failed to add 2nd transaction: %s", err)
 	}
+	s.CommitState(tx2)
+	s.UnlockState()
 
 	// now fetch ancestors from tx2 as starting hash
 	ancestors := s.Ancestors(tx2.Id(), 5)
@@ -593,12 +607,19 @@ func TestAncestorsUnknownStartHash(t *testing.T) {
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
+	s.LockState()
 	if err := s.Handle(tx1); err != nil {
 		t.Errorf("Failed to add 1st transaction: %s", err)
 	}
+	s.CommitState(tx1)
+	s.UnlockState()
+
+	s.LockState()
 	if err := s.Handle(tx2); err != nil {
 		t.Errorf("Failed to add 2nd transaction: %s", err)
 	}
+	s.CommitState(tx2)
+	s.UnlockState()
 
 	// now fetch ancestors from an unknown starting hash
 	hash := tx2.Id()
@@ -626,12 +647,19 @@ func TestChildrenKnownParent(t *testing.T) {
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
+	s.LockState()
 	if err := s.Handle(tx1); err != nil {
 		t.Errorf("Failed to add 1st transaction: %s", err)
 	}
+	s.CommitState(tx1)
+	s.UnlockState()
+
+	s.LockState()
 	if err := s.Handle(tx2); err != nil {
 		t.Errorf("Failed to add 2nd transaction: %s", err)
 	}
+	s.CommitState(tx2)
+	s.UnlockState()
 
 	// now fetch children for tx1 as parent
 	children := s.Children(tx1.Id())
@@ -657,12 +685,19 @@ func TestChildrenUnknownParent(t *testing.T) {
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
+	s.LockState()
 	if err := s.Handle(tx1); err != nil {
 		t.Errorf("Failed to add 1st transaction: %s", err)
 	}
+	s.CommitState(tx1)
+	s.UnlockState()
+
+	s.LockState()
 	if err := s.Handle(tx2); err != nil {
 		t.Errorf("Failed to add 2nd transaction: %s", err)
 	}
+	s.CommitState(tx2)
+	s.UnlockState()
 
 	// now fetch children from an unknown parent
 	hash := tx1.Id()

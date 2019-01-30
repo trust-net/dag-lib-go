@@ -85,7 +85,13 @@ func TestRegister(t *testing.T) {
 	// register a transaction with sharder to be replayed upon app registration
 	tx, _ := shard.SignedShardTransaction("test payload")
 	endorser.Handle(tx)
+	// lock the shard
+	sharder.LockState()
+	// handle transaction
 	sharder.Handle(tx)
+	// commit the shard
+	sharder.CommitState(tx)
+	sharder.UnlockState()
 
 	// reset mocks to start tracking what we expect
 	sharder.Reset()
@@ -148,7 +154,13 @@ func TestRegisterReplayFailure(t *testing.T) {
 	// register a transaction with sharder to be replayed upon app registration
 	tx, _ := shard.SignedShardTransaction("test payload")
 	endorser.Handle(tx)
+	// lock the shard
+	sharder.LockState()
+	// handle transaction
 	sharder.Handle(tx)
+	// commit the shard
+	sharder.CommitState(tx)
+	sharder.UnlockState()
 
 	// unregister default app and register a new app that rejects replay transaction
 	stack.Unregister()

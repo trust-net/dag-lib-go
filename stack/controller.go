@@ -171,7 +171,11 @@ func (d *dlt) Submit(tx dto.Transaction) error {
 			d.logger.Debug("Submitted transaction failed to update submitter history at endorser: %s\ntransaction: %x", err, tx.Id())
 			return err
 		}
-		d.sharder.CommitState()
+
+		if err := d.sharder.CommitState(tx); err != nil {
+			d.logger.Debug("Submitted transaction failed to commit world state and update shard DAG: %s\ntransaction: %x", err, tx.Id())
+			return err
+		}
 	}
 
 	// finally send it to p2p layer, to broadcase to others
@@ -305,7 +309,10 @@ func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx d
 			d.logger.Debug("Failed to update submitter history at endorser: %s\ntransaction: %x", err, tx.Id())
 			return err
 		}
-		d.sharder.CommitState()
+		if err := d.sharder.CommitState(tx); err != nil {
+			d.logger.Debug("Failed to commit world state and update shard DAG: %s\ntransaction: %x", err, tx.Id())
+			return err
+		}
 	}
 
 	// mark sender of the message as seen
@@ -317,6 +324,8 @@ func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx d
 }
 
 func (d *dlt) toWalkUpStage(a *dto.Anchor, peer p2p.Peer) error {
+	// reset the seen set at peer to prepare for sync (and retransmissions)
+	peer.ResetSeen()
 	// make sure that sharder has genesis for unknown transaction's shard
 	d.sharder.SyncAnchor(a.ShardId)
 	// build shard ancestor walk up request
@@ -389,6 +398,9 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 
 		case RECV_ShardAncestorRequestMsg:
 			msg := e.data.(*ShardAncestorRequestMsg)
+
+			// reset the seen set at peer to prepare for sync (and retransmissions)
+			peer.ResetSeen()
 
 			// fetch the ancestors for specified shard at the starting hash
 			ancestors := d.sharder.Ancestors(msg.StartHash, msg.MaxAncestors)
@@ -632,6 +644,8 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 }
 
 func (d *dlt) handleRECV_ForceShardSyncMsg(peer p2p.Peer, msg *ForceShardSyncMsg) error {
+	// reset the seen set at peer to prepare for sync (and retransmissions)
+	peer.ResetSeen()
 	// lock sharder
 	d.sharder.LockState()
 	defer d.sharder.UnlockState()
@@ -670,6 +684,8 @@ func (d *dlt) handleRECV_ForceShardSyncMsg(peer p2p.Peer, msg *ForceShardSyncMsg
 }
 
 func (d *dlt) handleRECV_SubmitterWalkUpRequestMsg(peer p2p.Peer, msg *SubmitterWalkUpRequestMsg) error {
+	// reset the seen set at peer to prepare for sync (and retransmissions)
+	peer.ResetSeen()
 	// fetch the submitter/seq's history for known shard/transaction pairs
 	req := NewSubmitterWalkUpResponseMsg(msg)
 	req.Shards, req.Transactions = d.endorser.KnownShardsTxs(msg.Submitter, msg.Seq)
@@ -867,7 +883,7 @@ func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent
 		// local corruption, abort everything
 		return errors.New("local DB corruption")
 	}
-	peer.Logger().Error("Local Double Spending Tx: %x\nRemot Double Spending Tx: %x", localTx.Id(), remoteTx.Id())
+	peer.Logger().Error("Local Double Spending Tx: %x\nRemote Double Spending Tx: %x", localTx.Id(), remoteTx.Id())
 	// compare local with remote
 	// first compare weights, if equal then compare numeric hash
 	if localId, remoteId := localTx.Id(), remoteTx.Id(); localTx.Anchor().Weight > remoteTx.Anchor().Weight ||
@@ -943,7 +959,9 @@ func (d *dlt) handleRECV_ForceShardFlushMsg(peer p2p.Peer, events chan controlle
 		if err := d.sharder.Flush(remoteTx.Anchor().ShardId); err != nil {
 			return err
 		} else {
-			peer.Logger().Debug("flushed local shard")
+			// reset the seen set at peer to prepare for sync (and retransmissions)
+			peer.ResetSeen()
+			peer.Logger().Debug("flushed local shard and reset seen set")
 			// initiate a force shard sync for the flushed shard with peer
 			// we need to force the shard sync because if peer is headless
 			// then regular handshake will not result in sync
@@ -1168,7 +1186,8 @@ func (d *dlt) runner(peer p2p.Peer) error {
 	if peer.RemoteAddr() != nil {
 		remoteAddr = peer.RemoteAddr().String()
 	}
-	peer.SetLogger(log.NewLogger(d.conf.Name + " | " + localAddr + " | " + remoteAddr))
+	peer.SetLogger(log.NewLogger(d.conf.Name + "/" + localAddr + " | " + peer.Name() + "/" + remoteAddr))
+	peer.Logger().Info("Connected with remote node: %s", peer.Name())
 
 	// initiate handshake with peer's sharding layer
 	if err := d.handshake(peer); err != nil {

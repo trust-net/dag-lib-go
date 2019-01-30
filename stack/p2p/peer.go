@@ -3,14 +3,14 @@
 package p2p
 
 import (
+	"errors"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/trust-net/dag-lib-go/common"
+	"github.com/trust-net/dag-lib-go/log"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/repo"
-	"github.com/trust-net/dag-lib-go/log"
 	"net"
-	"errors"
 	"sync"
 )
 
@@ -34,6 +34,8 @@ type Peer interface {
 	Send(msgId []byte, msgcode uint64, data interface{}) error
 	// mark a message as seen for this peer
 	Seen(msgId []byte)
+	// reset seen set due to a sync
+	ResetSeen()
 	// read a message from peer node
 	ReadMsg() (Msg, error)
 	// save state during sync
@@ -153,6 +155,10 @@ func (p *peerDEVp2p) Seen(msgId []byte) {
 		}
 	}
 	p.seen.Add(string(msgId))
+}
+
+func (p *peerDEVp2p) ResetSeen() {
+	p.seen = common.NewSet()
 }
 
 func (p *peerDEVp2p) ReadMsg() (Msg, error) {

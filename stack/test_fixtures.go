@@ -129,10 +129,10 @@ func (s *mockSharder) UnlockState() {
 	s.orig.UnlockState()
 }
 
-func (s *mockSharder) CommitState() error {
+func (s *mockSharder) CommitState(tx dto.Transaction) error {
 	s.CommitStateCalled = true
 	// transaction processed successfully, persist world state
-	return s.orig.CommitState()
+	return s.orig.CommitState(tx)
 }
 
 func (s *mockSharder) Register(shardId []byte, txHandler func(tx dto.Transaction, state state.State) error) error {
@@ -212,6 +212,7 @@ type mockPeer struct {
 	SendMsg          interface{}
 	SeenCalled       bool
 	ReadMsgCalled    bool
+	ResetSeenCalled  bool
 	//	states           map[int]interface{}
 	GetStateCalled            bool
 	SetStateCalled            bool
@@ -289,6 +290,11 @@ func (p *mockPeer) Send(msgId []byte, msgcode uint64, data interface{}) error {
 func (p *mockPeer) Seen(msgId []byte) {
 	p.SeenCalled = true
 	p.peer.Seen(msgId)
+}
+
+func (p *mockPeer) ResetSeen() {
+	p.ResetSeenCalled = true
+	p.peer.ResetSeen()
 }
 
 func (p *mockPeer) ReadMsg() (p2p.Msg, error) {
