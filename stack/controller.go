@@ -864,6 +864,8 @@ func (d *dlt) handleRECV_SubmitterProcessDownResponseMsg(peer p2p.Peer, events c
 }
 
 func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent, remoteTx dto.Transaction) error {
+	// reset the seen set at peer to prepare for sync (and retransmissions)
+	peer.ResetSeen()
 	// lock sharder
 	d.sharder.LockState()
 	defer d.sharder.UnlockState()
@@ -1195,6 +1197,7 @@ func (d *dlt) runner(peer p2p.Peer) error {
 		return err
 	} else {
 		defer func() {
+			peer.Logger().Info("Disconnecting with remote node: %s", peer.Name())
 			// TODO: perform any cleanup here upon exit
 		}()
 	}
