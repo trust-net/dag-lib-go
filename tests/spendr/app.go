@@ -35,6 +35,7 @@ var commands = map[string][2]string{
 	"double": {"usage: double <owned counter name> <xfer value> <recipient 1 counter> <recipient 2 countr>", "submit two double spending transactions on local node"},
 	"multi":  {"usage: multi <owned resource name> <xfer value> <recipient resource name>", "submit a redundant transactions on two different nodes"},
 	"split":  {"usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>", "submit two double spending transactions on two different nodes"},
+	"sign":   {"usage: sign <nonce> <base64 encoded payload>", "submit a payload and nonce to sign using CLI's submitter keys"},
 }
 
 var (
@@ -92,7 +93,7 @@ func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
 	hash := sha256.Sum256(append(common.Uint64ToBytes(tx.Anchor().SubmitterSeq), txPayload...))
 	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
 	tx.Self().Payload = txPayload
-//	tx.Self().Signature, _ = common.Serialize(s)
+	//	tx.Self().Signature, _ = common.Serialize(s)
 	tx.Self().Signature = append(s.R.Bytes(), s.S.Bytes()...)
 	return tx
 }
@@ -445,6 +446,8 @@ func cli(local, remote stack.DLT) error {
 							dest2 = wordScanner.Text()
 						}
 						if len(arg.Source) != 0 && len(dest1) != 0 && len(dest2) != 0 && arg.Value > 0 {
+							// save original last seq
+							origLastSeq := lastSeq
 							arg.Destination = dest1
 							anchor1 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
@@ -453,6 +456,8 @@ func cli(local, remote stack.DLT) error {
 							arg.Destination = dest2
 							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
 							makeTransaction(dlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
+							// correct last sequence (it may have moved up extra due to 2 submissions)
+							lastSeq = origLastSeq + 1
 						} else {
 							fmt.Printf("usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
 						}
@@ -473,6 +478,8 @@ func cli(local, remote stack.DLT) error {
 							dest2 = wordScanner.Text()
 						}
 						if len(arg.Source) != 0 && len(dest1) != 0 && len(dest2) != 0 && arg.Value > 0 {
+							// save original last seq
+							origLastSeq := lastSeq
 							arg.Destination = dest1
 							anchor1 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
@@ -482,6 +489,8 @@ func cli(local, remote stack.DLT) error {
 							//							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
 							makeTransaction(dlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
+							// correct last sequence (it may have moved up extra due to 2 submissions)
+							lastSeq = origLastSeq + 1
 						} else {
 							fmt.Printf("usage: double <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
 						}
@@ -516,12 +525,16 @@ func cli(local, remote stack.DLT) error {
 							arg.Destination = wordScanner.Text()
 						}
 						if len(arg.Source) != 0 && len(arg.Destination) != 0 && arg.Value > 0 {
+							// save original last seq
+							origLastSeq := lastSeq
 							anchor1 := localDlt.Anchor(submitter, lastSeq+1, lastTx)
 							anchor2 := remoteDlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding local transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
 							makeTransaction(localDlt, anchor1, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 							fmt.Printf("adding remote transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
 							makeTransaction(remoteDlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
+							// correct last sequence (it may have moved up extra due to 2 submissions)
+							lastSeq = origLastSeq + 1
 						} else {
 							fmt.Printf("usage: multi <owned resource name> <xfer value> <recipient resource name>\n")
 						}
@@ -543,6 +556,8 @@ func cli(local, remote stack.DLT) error {
 						}
 						if len(arg.Source) != 0 && len(dest1) != 0 && len(dest2) != 0 && arg.Value > 0 {
 							arg.Destination = dest1
+							// save the last sequence
+							origLastSeq := lastSeq
 							anchor1 := localDlt.Anchor(submitter, lastSeq+1, lastTx)
 							anchor2 := remoteDlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding local transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
@@ -551,6 +566,8 @@ func cli(local, remote stack.DLT) error {
 							//							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding remote transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
 							makeTransaction(remoteDlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
+							// correct last sequence (it may have moved up extra due to 2 submissions)
+							lastSeq = origLastSeq + 1
 						} else {
 							fmt.Printf("usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
 						}
@@ -559,10 +576,17 @@ func cli(local, remote stack.DLT) error {
 						for wordScanner.Scan() {
 							fmt.Printf(" %s", wordScanner.Text())
 						}
-						fmt.Printf("\nUsages...\n")
-						for k, v := range commands {
-							fmt.Printf("\"%s\": %s\n%s\n", k, v[1], v[0])
+						fmt.Printf("\n\nAccepted commands...\n")
+						isFirst := true
+						for k, _ := range commands {
+							if !isFirst {
+								fmt.Printf(", ")
+							} else {
+								isFirst = false
+							}
+							fmt.Printf("\"%s\"", k)
 						}
+						fmt.Printf("\n")
 						break
 					}
 				}
