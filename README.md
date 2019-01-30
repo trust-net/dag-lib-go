@@ -140,7 +140,9 @@ A test driver application is provided to demonstrate and validate the double spe
 * support to simulate a "dishonest" client that submits double spending transaction on two different nodes across the network
 
 
-Refer to documentation for double spender application CLI at [documentation link](https://github.com/trust-net/dag-lib-go/issues/36)
+Refer to documentation for double spender application CLI at [documentation link](https://github.com/trust-net/dag-lib-go/issues/36) for testing double spending scenarios.
+
+Alternatively, use companion [Android App](https://github.com/trust-net/SpendrClient) as sample submitter/client to test Spendr's REST API.
 
 ### Network Counter Application CLI
 A test driver application is provided that implements simple network counters isolated within specific name space, to demonstrate and validate support for multiple shards with proper isolation and sync across the shared network.
