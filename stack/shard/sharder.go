@@ -54,10 +54,12 @@ type sharder struct {
 }
 
 func GenesisShardTx(shardId []byte) dto.Transaction {
-	tx := dto.NewTransaction(&dto.Anchor{
+	tx := dto.NewTransaction(&dto.TxRequest{
 		ShardId: shardId,
+		Signature: shardId,
+	}, &dto.Anchor{
+		Signature: shardId,
 	})
-	tx.Self().Signature = shardId
 	return tx
 }
 
@@ -218,8 +220,9 @@ func (s *sharder) SyncAnchor(shardId []byte) *dto.Anchor {
 
 func (s *sharder) updateAnchor(shardId []byte, a *dto.Anchor) error {
 
-	// assign shard ID of specified shard
-	a.ShardId = shardId
+	// shard ID is in transaction request now, not in anchor anymore
+//	// assign shard ID of specified shard
+//	a.ShardId = shardId
 
 	// get tips of the shard's DAG
 	tips := s.db.ShardTips(shardId)
@@ -292,9 +295,9 @@ func (s *sharder) Approve(tx dto.Transaction) error {
 	}
 
 	// validate transaction
-	if len(tx.Anchor().ShardId) == 0 {
+	if len(tx.Request().ShardId) == 0 {
 		return fmt.Errorf("missing shard id in transaction")
-	} else if string(s.shardId) != string(tx.Anchor().ShardId) {
+	} else if string(s.shardId) != string(tx.Request().ShardId) {
 		return fmt.Errorf("incorrect shard Id")
 	}
 
@@ -324,7 +327,7 @@ func (s *sharder) Approve(tx dto.Transaction) error {
 
 func (s *sharder) Handle(tx dto.Transaction) error {
 	// validate transaction
-	if len(tx.Anchor().ShardId) == 0 {
+	if len(tx.Request().ShardId) == 0 {
 		return fmt.Errorf("missing shard id in transaction")
 	}
 
@@ -332,7 +335,7 @@ func (s *sharder) Handle(tx dto.Transaction) error {
 
 	// check for first network transactions of a new shard
 	if tx.Anchor().ShardSeq == ShardSeqOne {
-		genesis := GenesisShardTx(tx.Anchor().ShardId)
+		genesis := GenesisShardTx(tx.Request().ShardId)
 		// ensure that transaction's parent is really genesis
 		if genesis.Id() != tx.Anchor().ShardParent {
 			return fmt.Errorf("genesis mismatch for 1st shard transaction")
@@ -361,7 +364,7 @@ func (s *sharder) Handle(tx dto.Transaction) error {
 	}
 
 	// if an app is registered, call app's transaction handler
-	if s.txHandler != nil && string(s.shardId) == string(tx.Anchor().ShardId) {
+	if s.txHandler != nil && string(s.shardId) == string(tx.Request().ShardId) {
 		if err := s.txHandler(tx, s.worldState); err != nil {
 			return err
 		}

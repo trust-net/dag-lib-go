@@ -25,9 +25,9 @@ import (
 )
 
 var commands = map[string][2]string{
-	"show":   {"usage: show <countr name> ...", "show one or more counter's value"},
-	"create": {"usage: create <resource name> [<initial value>] ...", "create one or more counters with optional initial credits"},
-	"xfer":   {"usage: xfer <owned counter name> <xfer value> <recipient counter name>...", "transfer credits from one counter to another"},
+	"show":   {"usage: show <resource name> ...", "show one or more resource's value"},
+	"create": {"usage: create <resource name> [<initial value>] ...", "create one or more resource with optional initial credits"},
+	"xfer":   {"usage: xfer <owned resource name> <xfer value> <recipient resource name>...", "transfer credits from one resource to another"},
 	"info":   {"usage: info", "get current shard tips from local and remote nodes"},
 	"xover":  {"usage: xover <owned resource name> <xfer value> <recipient resource name>", "submit a transaction that has anchor from one node, but is submitted to another node"},
 	"quit":   {"usage: quit", "leave application and shutdown"},
@@ -354,14 +354,16 @@ func cli(local, remote stack.DLT) error {
 							hasNext = wordScanner.Scan()
 						}
 						if !oneDone {
-							fmt.Printf("usage: value <name> ...\n")
+							fmt.Printf("%s\n", commands["show"][1])
+							fmt.Printf("%s\n", commands["show"][0])
 						}
 					case "create":
 						fallthrough
 					case "c":
 						args := scanCreateArgs(wordScanner)
 						if len(args) == 0 {
-							fmt.Printf("usage: create <resource name> [<initial value>] ...\n")
+							fmt.Printf("%s\n", commands["create"][1])
+							fmt.Printf("%s\n", commands["create"][0])
 						} else {
 							for _, arg := range args {
 								fmt.Printf("adding transaction: create %s %d\n", arg.Name, arg.Value)
@@ -404,7 +406,8 @@ func cli(local, remote stack.DLT) error {
 							fmt.Printf("adding transaction: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
 							makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 						} else {
-							fmt.Printf("usage: xfer <owned resource name> <xfer value> <recipient resource name>\n")
+							fmt.Printf("%s\n", commands["xfer"][1])
+							fmt.Printf("%s\n", commands["xfer"][0])
 						}
 					case "sign":
 						var payload string
@@ -427,7 +430,8 @@ func cli(local, remote stack.DLT) error {
 								fmt.Printf("Signature: %s\n", base64.StdEncoding.EncodeToString(tx.Self().Signature))
 							}
 						} else {
-							fmt.Printf("usage: sign <nonce> <base64 encoded payload>\n")
+							fmt.Printf("%s\n", commands["sign"][1])
+							fmt.Printf("%s\n", commands["sign"][0])
 						}
 					case "dupe":
 						arg := ArgsXferValue{}
@@ -459,7 +463,8 @@ func cli(local, remote stack.DLT) error {
 							// correct last sequence (it may have moved up extra due to 2 submissions)
 							lastSeq = origLastSeq + 1
 						} else {
-							fmt.Printf("usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
+							fmt.Printf("%s\n", commands["dupe"][1])
+							fmt.Printf("%s\n", commands["dupe"][0])
 						}
 					case "double":
 						arg := ArgsXferValue{}
@@ -492,7 +497,8 @@ func cli(local, remote stack.DLT) error {
 							// correct last sequence (it may have moved up extra due to 2 submissions)
 							lastSeq = origLastSeq + 1
 						} else {
-							fmt.Printf("usage: double <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
+							fmt.Printf("%s\n", commands["double"][1])
+							fmt.Printf("%s\n", commands["double"][0])
 						}
 					case "xover":
 						arg := ArgsXferValue{}
@@ -510,7 +516,8 @@ func cli(local, remote stack.DLT) error {
 							fmt.Printf("adding transaction: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
 							makeTransaction(remoteDlt, localDlt.Anchor(submitter, lastSeq+1, lastTx), makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
 						} else {
-							fmt.Printf("usage: xover <owned resource name> <xfer value> <recipient resource name>\n")
+							fmt.Printf("%s\n", commands["xover"][1])
+							fmt.Printf("%s\n", commands["xover"][0])
 						}
 					case "multi":
 						arg := ArgsXferValue{}
@@ -536,7 +543,8 @@ func cli(local, remote stack.DLT) error {
 							// correct last sequence (it may have moved up extra due to 2 submissions)
 							lastSeq = origLastSeq + 1
 						} else {
-							fmt.Printf("usage: multi <owned resource name> <xfer value> <recipient resource name>\n")
+							fmt.Printf("%s\n", commands["multi"][1])
+							fmt.Printf("%s\n", commands["multi"][0])
 						}
 					case "split":
 						arg := ArgsXferValue{}
@@ -569,7 +577,8 @@ func cli(local, remote stack.DLT) error {
 							// correct last sequence (it may have moved up extra due to 2 submissions)
 							lastSeq = origLastSeq + 1
 						} else {
-							fmt.Printf("usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
+							fmt.Printf("%s\n", commands["split"][1])
+							fmt.Printf("%s\n", commands["split"][0])
 						}
 					default:
 						fmt.Printf("Unknown Command: %s", cmd)

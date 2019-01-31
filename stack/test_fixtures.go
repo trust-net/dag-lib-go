@@ -43,15 +43,15 @@ type mockEndorser struct {
 	TxUpdateCalled       bool
 	KnownShardsTxsCalled bool
 	ReplaceCalled        bool
-	AnchorCalled         bool
+	ValidateCalled         bool
 	ApproverCalled       bool
 	HandlerReturn        error
 	orig                 endorsement.Endorser
 }
 
-func (e *mockEndorser) Anchor(a *dto.Anchor) error {
-	e.AnchorCalled = true
-	return e.orig.Anchor(a)
+func (e *mockEndorser) Validate(r *dto.TxRequest) error {
+	e.ValidateCalled = true
+	return e.orig.Validate(r)
 }
 
 func (e *mockEndorser) Approve(tx dto.Transaction) error {

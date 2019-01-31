@@ -21,8 +21,8 @@ type DLT interface {
 	Register(shardId []byte, name string, txHandler func(tx dto.Transaction, state state.State) error) error
 	// unregister application shard from DLT stack
 	Unregister() error
-	// submit a transaction to the network
-	Submit(tx dto.Transaction) error
+	// submit a transaction request to the network
+	Submit(req *dto.TxRequest) (dto.Transaction, error)
 	// get a transaction Anchor for specified submitter id
 	Anchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor
 	// start the controller
@@ -72,10 +72,11 @@ func (d *dlt) Register(shardId []byte, name string, txHandler func(tx dto.Transa
 	}
 
 	// initiate app registration sync protocol
-	if anchor := d.anchor(append([]byte("ForceShardSync"), shardId...), 0x00, [64]byte{}); anchor != nil {
-		d.endorser.Anchor(anchor)
-		d.p2p.Anchor(anchor)
-		msg := NewForceShardSyncMsg(anchor)
+	if anchor, err := d.anchor(); err != nil {
+		d.logger.Error("Failed to get anchor for sync: %s", err)
+		return err
+	} else {
+		msg := NewForceShardSyncMsg(shardId, anchor)
 		d.logger.Debug("Broadcasting ForceShardSync: %x", msg.Id())
 		d.p2p.Broadcast(msg.Id(), msg.Code(), msg)
 	}
@@ -101,87 +102,99 @@ func (d *dlt) validateSignatures(tx dto.Transaction) error {
 		return errors.New("Anchor signature invalid")
 	}
 
-	// use submitter's sequence as nonce in the payload signature
-	payload := tx.Self().Payload
-	// validate transaction paylaoad signature using transaction submitter's ID
-	if !d.p2p.Verify(append(common.Uint64ToBytes(tx.Anchor().SubmitterSeq), payload...), tx.Self().Signature, tx.Anchor().Submitter) {
+	// validate transaction request signature using transaction submitter's ID
+	if !d.p2p.Verify(tx.Request().Bytes(), tx.Request().Signature, tx.Request().SubmitterId) {
 		return errors.New("Payload signature invalid")
 	}
 	return nil
 }
 
-func (d *dlt) Submit(tx dto.Transaction) error {
-	if d.app == nil {
-		return errors.New("app not registered")
-	}
-	// validate transaction
-	if tx == nil {
-		return errors.New("nil transaction")
-	}
-	if string(tx.Anchor().ShardId) != string(d.app.ShardId) {
-		return errors.New("incorrect shard id")
-	}
-	// check for TxAnchor
+// protection against spam submissions
+func (d *dlt) isPoW(req *dto.TxRequest) bool {
+	// make sure submitter did some work
 	// TBD
+	
+	return true
+}
 
-	// set NodeId for transaction
-	// TBD: this will be part of TxAnchor later
-	tx.Anchor().NodeId = d.p2p.Id()
-
+func (d *dlt) Submit(req *dto.TxRequest) (dto.Transaction, error) {
+	// node needs to host a registered app for accepting transaction request
+	if d.app == nil {
+		return nil, errors.New("app not registered")
+	}
+	// validate transaction request
 	switch {
-	case tx.Self().Payload == nil:
-		return errors.New("nil transaction payload")
-	case tx.Self().Signature == nil:
-		return errors.New("nil transaction signature")
-	case tx.Anchor().Submitter == nil:
-		return errors.New("nil transaction submitter ID")
+	case req == nil:
+		return nil, errors.New("nil transaction")
+	case string(req.ShardId) != string(d.app.ShardId):
+		return nil, errors.New("incorrect shard id")
+	case req.Payload == nil:
+		return nil, errors.New("nil transaction payload")
+	case req.SubmitterId == nil:
+		return nil, errors.New("nil transaction submitter ID")
+	case req.Signature == nil:
+		return nil, errors.New("nil transaction signature")
+	case !d.isPoW(req):
+		return nil, errors.New("insufficient proof of work")
 	}
 
-	// validate signatures
-	if err := d.validateSignatures(tx); err != nil {
-		d.logger.Debug("Submitted transaction failed signature verification: %s", err)
-		return err
+	// validate transaction request signature using transaction submitter's ID
+	if !d.p2p.Verify(req.Bytes(), req.Signature, req.SubmitterId) {
+		return nil, errors.New("Request signature invalid")
 	}
-
+	
+	// lock shard
+	if err := d.sharder.LockState(); err != nil {
+		d.logger.Error("Failed to get world state lock: %s", err)
+		return nil, err
+	}
+	defer d.sharder.UnlockState()
+	
+	// build a transaction
+	var tx dto.Transaction
+	if a, err := d.anchor(); err != nil {
+		return nil, err 
+	} else {
+		tx = dto.NewTransaction(req, a)
+	}
+	
 	// check if message was already seen by stack
 	if d.isSeen(tx.Id()) {
 		d.logger.Debug("Discarding submission of seen transaction: %x", tx.Id())
-		return errors.New("seen transaction")
+		return nil, errors.New("seen transaction")
 	}
 
-	// next in line process with endorsement layer
-	// will check whether transaction has correct TxAnchor in the submitted transaction
+	// check whether transaction has correct submitter sequencing
 	if err := d.endorser.Approve(tx); err != nil {
 		d.logger.Debug("Submitted transaction failed to approve at endorser: %s\ntransaction: %x", err, tx.Id())
-		return err
+		return nil, err
 	}
 
-	// send the submitted transaction for approval to sharding layer
-	if err := d.sharder.LockState(); err != nil {
-		d.logger.Error("Failed to get world state lock: %s\ntransaction: %x", err, tx.Id())
-		return err
-	}
-	defer d.sharder.UnlockState()
+	// process transaction and get approval from registered shard application instance
 	if err := d.sharder.Approve(tx); err != nil {
 		d.logger.Debug("Submitted transaction failed to approve at sharder: %s\ntransaction: %x", err, tx.Id())
-		return err
+		return nil, err
 	} else {
-		d.logger.Debug("Commiting world state after successful transaction: %x", tx.Id())
+		d.logger.Debug("Committing world state after successful transaction: %x", tx.Id())
 		if err := d.endorser.Update(tx); err != nil {
 			d.logger.Debug("Submitted transaction failed to update submitter history at endorser: %s\ntransaction: %x", err, tx.Id())
-			return err
+			return nil, err
 		}
 
 		if err := d.sharder.CommitState(tx); err != nil {
 			d.logger.Debug("Submitted transaction failed to commit world state and update shard DAG: %s\ntransaction: %x", err, tx.Id())
-			return err
+			return nil, err
 		}
 	}
 
 	// finally send it to p2p layer, to broadcase to others
 	id := tx.Id()
-	d.logger.Debug("Submitted transaction accepted, broadcasting: %x", id)
-	return d.p2p.Broadcast(id[:], TransactionMsgCode, tx)
+	if err := d.p2p.Broadcast(id[:], TransactionMsgCode, tx); err != nil {
+		d.logger.Error("Submitted transaction failed to broadcast: %s", err)
+	} else {
+		d.logger.Debug("Submitted transaction accepted, broadcasting: %x", id)
+	}
+	return tx, nil
 }
 
 func (d *dlt) Anchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
@@ -193,7 +206,11 @@ func (d *dlt) Anchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
 
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	return d.anchor(id, seq, lastTx)
+	if a, err := d.anchor(); err != nil {
+		return nil
+	} else {
+		return a
+	}
 }
 
 func (d *dlt) GetState(key []byte) (*state.Resource, error) {
@@ -201,29 +218,25 @@ func (d *dlt) GetState(key []byte) (*state.Resource, error) {
 	return d.sharder.GetState(key)
 }
 
-func (d *dlt) anchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
-	a := &dto.Anchor{
-		Submitter:       id,
-		SubmitterLastTx: lastTx,
-		SubmitterSeq:    seq,
-	}
+func (d *dlt) anchor() (*dto.Anchor, error) {
+	a := &dto.Anchor{}
 	if err := d.sharder.Anchor(a); err != nil {
 		d.logger.Debug("Failed to get sharder's anchor: %s", err)
-		return nil
+		return nil, err
 	}
 
-	// get endorser's update on anchor
-	if err := d.endorser.Anchor(a); err != nil {
-		d.logger.Debug("Failed to get endorser's anchor: %s", err)
-		return nil
-	}
+//	// get endorser's update on anchor
+//	if err := d.endorser.Anchor(a); err != nil {
+//		d.logger.Debug("Failed to get endorser's anchor: %s", err)
+//		return nil, err
+//	}
 
 	// get p2p layer's update on anchor
 	if err := d.p2p.Anchor(a); err != nil {
 		d.logger.Debug("Failed to get p2p layer's anchor: %s", err)
-		return nil
+		return nil, err
 	}
-	return a
+	return a, nil
 }
 
 func (d *dlt) Start() error {
@@ -240,12 +253,10 @@ func (d *dlt) handshake(peer p2p.Peer) error {
 	//   1) ask sharding layer for the current shard's Anchor
 	//   2) ask endorsing layer for the current Anchor's update
 	//   3) send the ShardSyncMsg message to peer
-	if anchor := d.anchor([]byte("ShardSyncMsg"), 0x00, [64]byte{}); anchor == nil {
-		d.logger.Debug("Cannot run handshake")
+	if anchor, err := d.anchor(); err != nil {
+		d.logger.Debug("Cannot run handshake: %s", err)
 	} else {
-		d.endorser.Anchor(anchor)
-		d.p2p.Anchor(anchor)
-		msg := NewShardSyncMsg(anchor)
+		msg := NewShardSyncMsg(d.app.ShardId, anchor)
 		return peer.Send(msg.Id(), msg.Code(), msg)
 	}
 	return nil
@@ -258,7 +269,7 @@ func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx d
 		switch res {
 		case endorsement.ERR_DOUBLE_SPEND:
 			// trigger double spending resolution
-			peer.Logger().Error("Detected double spending for submitter/seq/shard: %x / %d / %x", tx.Anchor().Submitter, tx.Anchor().SubmitterSeq, tx.Anchor().ShardId)
+			peer.Logger().Error("Detected double spending for submitter/seq/shard: %x / %d / %x", tx.Request().SubmitterId, tx.Request().SubmitterSeq, tx.Request().ShardId)
 			peer.Logger().Error("Remote peer: %s / %s", peer.Name(), peer.RemoteAddr())
 			events <- newControllerEvent(ALERT_DoubleSpend, tx)
 			return err
@@ -276,7 +287,7 @@ func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx d
 				return err
 			}
 			// trigger submitter sync
-			req := NewSubmitterWalkUpRequestMsg(tx.Anchor())
+			req := NewSubmitterWalkUpRequestMsg(tx.Request())
 			peer.Logger().Debug("Initiating submitter sync for Submitter/Seq: %x/%d\nIgnoring transaction: %x", req.Submitter, req.Seq, tx.Id())
 
 			// not saving/checking peer state because ID for request is different response, and
@@ -319,21 +330,23 @@ func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx d
 	id := tx.Id()
 	peer.Seen(id[:])
 	peer.Logger().Debug("Network transaction accepted, broadcasting: %x", id)
-	d.p2p.Broadcast(id[:], TransactionMsgCode, tx)
+	if err := d.p2p.Broadcast(id[:], TransactionMsgCode, tx); err != nil {
+		d.logger.Error("Failed to broadcast message: %s", err)
+	}
 	return nil
 }
 
-func (d *dlt) toWalkUpStage(a *dto.Anchor, peer p2p.Peer) error {
+func (d *dlt) toWalkUpStage(shardId []byte, shardParent [64]byte, peer p2p.Peer) error {
 	// reset the seen set at peer to prepare for sync (and retransmissions)
 	peer.ResetSeen()
 	// make sure that sharder has genesis for unknown transaction's shard
-	d.sharder.SyncAnchor(a.ShardId)
+	d.sharder.SyncAnchor(shardId)
 	// build shard ancestor walk up request
 	req := &ShardAncestorRequestMsg{
-		StartHash:    a.ShardParent,
+		StartHash:    shardParent,
 		MaxAncestors: 10,
 	}
-	peer.Logger().Debug("Initiating shard sync for unknown transaction: %x", a.ShardParent)
+	peer.Logger().Debug("Initiating shard sync for unknown transaction: %x", shardParent)
 	// save the last hash into peer's state to validate ancestors response
 	peer.SetState(int(RECV_ShardAncestorResponseMsg), req.StartHash)
 	// send the ancestors request to peer
@@ -360,7 +373,7 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			} else {
 				// parent is unknown, so initiate sync with peer
 				peer.Logger().Debug("Shard parent unknown for transaction: %x", tx.Id())
-				if err := d.toWalkUpStage(tx.Anchor(), peer); err != nil {
+				if err := d.toWalkUpStage(tx.Request().ShardId, tx.Anchor().ShardParent, peer); err != nil {
 					peer.Logger().Debug("Failed to transition to WalkUpStage: %s", err)
 					peer.Disconnect()
 					done = true
@@ -375,7 +388,7 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			// since our local shard maybe different, but we may have more recent data
 			// due to network updates from other nodes,
 			// or if local sharder knows nothing about remot shard (sync anchor will be nil)
-			myAnchor := d.sharder.SyncAnchor(msg.Anchor.ShardId)
+			myAnchor := d.sharder.SyncAnchor(msg.ShardId)
 
 			if myAnchor == nil || msg.Anchor.Weight > myAnchor.Weight ||
 				(msg.Anchor.Weight == myAnchor.Weight &&
@@ -535,7 +548,10 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 			msg := e.data.(*TxShardChildResponseMsg)
 
 			// deserialize the transaction message from payload
-			tx := dto.NewTransaction(&dto.Anchor{})
+			tx := dto.NewTransaction(&dto.TxRequest{}, &dto.Anchor{})
+			d.logger.Debug("#####################################################")
+			d.logger.Debug("// TBD: need to change dto.Transaction from interface to concrete type, so that p2p layer can provide rlp decoded transaction")
+			d.logger.Debug("#####################################################")
 			if err := tx.DeSerialize(msg.Bytes); err != nil {
 				peer.Logger().Debug("Failed to decode message: %s", err)
 				// EndOfSync
@@ -654,8 +670,7 @@ func (d *dlt) handleRECV_ForceShardSyncMsg(peer p2p.Peer, msg *ForceShardSyncMsg
 	// since our local shard maybe different, but we may have more recent data
 	// due to network updates from other nodes,
 	// or if local sharder knows nothing about remot shard (sync anchor will be nil)
-	myAnchor := d.sharder.SyncAnchor(msg.Anchor.ShardId)
-	d.endorser.Anchor(myAnchor)
+	myAnchor := d.sharder.SyncAnchor(msg.ShardId)
 	d.p2p.Anchor(myAnchor)
 
 	if myAnchor == nil || msg.Anchor.Weight > myAnchor.Weight ||
@@ -674,7 +689,7 @@ func (d *dlt) handleRECV_ForceShardSyncMsg(peer p2p.Peer, msg *ForceShardSyncMsg
 	} else if myAnchor != nil && (myAnchor.Weight > msg.Anchor.Weight ||
 		(myAnchor.Weight == msg.Anchor.Weight && shard.Numeric(myAnchor.ShardParent[:]) > shard.Numeric(msg.Anchor.ShardParent[:]))) {
 		// remote shard's anchor is behind, ask remote to initiate sync
-		msg := NewShardSyncMsg(myAnchor)
+		msg := NewShardSyncMsg(msg.ShardId, myAnchor)
 		peer.Logger().Debug("Notifying peer to initiate sync: %s", peer.String())
 		peer.Send(msg.Id(), msg.Code(), msg)
 	} else {
@@ -811,21 +826,24 @@ func (d *dlt) handleRECV_SubmitterProcessDownResponseMsg(peer p2p.Peer, events c
 	// process each transaction in the response
 	for _, bytes := range msg.TxBytes {
 		// deserialize the transaction message from bytes
-		tx := dto.NewTransaction(&dto.Anchor{})
+		d.logger.Debug("#####################################################")
+		d.logger.Debug("// TBD: need to change dto.Transaction from interface to concrete type, so that p2p layer can provide rlp decoded transaction")
+		d.logger.Debug("#####################################################")
+		tx := dto.NewTransaction(&dto.TxRequest{}, &dto.Anchor{})
 		if err := tx.DeSerialize(bytes); err != nil {
 			peer.Logger().Error("Failed to decode transaction from SubmitterProcessDownResponseMsg: %s", err)
 			return err
 		}
 
-		// validate transaction signature using transaction submitter's ID
-		if !d.p2p.Verify(tx.Self().Payload, tx.Self().Signature, tx.Anchor().Submitter) {
-			peer.Logger().Error("recieved a transaction with invalid signature in SubmitterProcessDownResponseMsg")
-			return errors.New("Transaction signature invalid")
+		// validate transaction signatures using transaction submitter's ID
+		if err := d.validateSignatures(tx); err != nil {
+			peer.Logger().Error("SubmitterProcessDownResponseMsg failed signature validation: %s", err)
+			return err
 		}
 
 		// if transaction's submitter/seq does not match response's submitter/seq -- disconnect peer and abort
-		if string(tx.Anchor().Submitter) != string(msg.Submitter) || tx.Anchor().SubmitterSeq != msg.Seq {
-			peer.Logger().Error("Included transaction: %x / %d does not match SubmitterProcessDownResponseMsg: %x / %d", tx.Anchor().Submitter, tx.Anchor().SubmitterSeq, msg.Submitter, msg.Seq)
+		if string(tx.Request().SubmitterId) != string(msg.Submitter) || tx.Request().SubmitterSeq != msg.Seq {
+			peer.Logger().Error("Included transaction: %x / %d does not match SubmitterProcessDownResponseMsg: %x / %d", tx.Request().SubmitterId, tx.Request().SubmitterSeq, msg.Submitter, msg.Seq)
 			return errors.New("transaction mismatch")
 		}
 
@@ -844,7 +862,7 @@ func (d *dlt) handleRECV_SubmitterProcessDownResponseMsg(peer p2p.Peer, events c
 			}
 		} else {
 			// parent is unknown, so initiate sync with peer
-			if err := d.toWalkUpStage(tx.Anchor(), peer); err != nil {
+			if err := d.toWalkUpStage(tx.Request().ShardId, tx.Anchor().ShardParent, peer); err != nil {
 				peer.Logger().Debug("Failed to transition to WalkUpStage: %s", err)
 				return errors.New("transition to WalkUpStage failed")
 			} else {
@@ -871,14 +889,14 @@ func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent
 	defer d.sharder.UnlockState()
 
 	// fetch local transaction for same submitter/seq/shard
-	shards, transactions := d.endorser.KnownShardsTxs(remoteTx.Anchor().Submitter, remoteTx.Anchor().SubmitterSeq)
+	shards, transactions := d.endorser.KnownShardsTxs(remoteTx.Request().SubmitterId, remoteTx.Request().SubmitterSeq)
 	shardMap := make(map[string]int)
 	for i, shard := range shards {
 		shardMap[string(shard)] = i
 	}
 	var localTx dto.Transaction
-	if indx, found := shardMap[string(remoteTx.Anchor().ShardId)]; !found {
-		peer.Logger().Error("did not find local shard for submitter/seq: %x / %d", remoteTx.Anchor().Submitter, remoteTx.Anchor().SubmitterSeq)
+	if indx, found := shardMap[string(remoteTx.Request().ShardId)]; !found {
+		peer.Logger().Error("did not find local shard for submitter/seq: %x / %d", remoteTx.Request().SubmitterId, remoteTx.Request().SubmitterSeq)
 		return nil
 	} else if localTx = d.db.GetTx(transactions[indx]); localTx == nil {
 		peer.Logger().Error("did not find my own local transaction: %x", transactions[indx])
@@ -898,21 +916,16 @@ func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent
 			peer.Logger().Error("Failed to update local submitter history: %s", err)
 			return err
 		}
-		if err := d.sharder.Flush(remoteTx.Anchor().ShardId); err != nil {
+		if err := d.sharder.Flush(remoteTx.Request().ShardId); err != nil {
 			return err
 		} else {
 			peer.Logger().Debug("flushed local shard")
 			// initiate a force shard sync for the flushed shard with peer
 			// we need to force the shard sync because if peer is headless
 			// then regular handshake will not result in sync
-			anchor := &dto.Anchor{
-				ShardId:  remoteTx.Anchor().ShardId,
-				ShardSeq: 0x00,
-				Weight:   0x00,
-			}
-			d.endorser.Anchor(anchor)
-			d.p2p.Anchor(anchor)
-			msg := NewForceShardSyncMsg(anchor)
+			myAnchor := d.sharder.SyncAnchor(remoteTx.Request().ShardId)
+			d.p2p.Anchor(myAnchor)
+			msg := NewForceShardSyncMsg(remoteTx.Request().ShardId, myAnchor)
 			peer.Logger().Debug("sending ForceShardSync: %x", msg.Id())
 			peer.Send(msg.Id(), msg.Code(), msg)
 		}
@@ -931,21 +944,24 @@ func (d *dlt) handleRECV_ForceShardFlushMsg(peer p2p.Peer, events chan controlle
 	defer d.sharder.UnlockState()
 
 	// deserialize remote transaction from message
-	remoteTx := dto.NewTransaction(&dto.Anchor{})
+	d.logger.Debug("#####################################################")
+	d.logger.Debug("// TBD: need to change dto.Transaction from interface to concrete type, so that p2p layer can provide rlp decoded transaction")
+	d.logger.Debug("#####################################################")
+	remoteTx := dto.NewTransaction(&dto.TxRequest{}, &dto.Anchor{})
 	if err := remoteTx.DeSerialize(msg.Bytes); err != nil {
 		peer.Logger().Debug("Failed to decode remote message: %s", err)
 		return err
 	}
 
 	// fetch local transaction for same submitter/seq/shard
-	shards, transactions := d.endorser.KnownShardsTxs(remoteTx.Anchor().Submitter, remoteTx.Anchor().SubmitterSeq)
+	shards, transactions := d.endorser.KnownShardsTxs(remoteTx.Request().SubmitterId, remoteTx.Request().SubmitterSeq)
 	shardMap := make(map[string]int)
 	for i, shard := range shards {
 		shardMap[string(shard)] = i
 	}
 	var localTx dto.Transaction
-	if indx, found := shardMap[string(remoteTx.Anchor().ShardId)]; !found {
-		peer.Logger().Error("did not find local shard for submitter/seq: %x / %d", remoteTx.Anchor().Submitter, remoteTx.Anchor().SubmitterSeq)
+	if indx, found := shardMap[string(remoteTx.Request().ShardId)]; !found {
+		peer.Logger().Error("did not find local shard for submitter/seq: %x / %d", remoteTx.Request().SubmitterId, remoteTx.Request().SubmitterSeq)
 		// we received incorrect request, disconnect
 		return errors.New("incorred request to flush shard")
 	} else if localTx = d.db.GetTx(transactions[indx]); localTx == nil {
@@ -958,7 +974,7 @@ func (d *dlt) handleRECV_ForceShardFlushMsg(peer p2p.Peer, events chan controlle
 	if localId, remoteId := localTx.Id(), remoteTx.Id(); localTx.Anchor().Weight > remoteTx.Anchor().Weight ||
 		(localTx.Anchor().Weight == remoteTx.Anchor().Weight &&
 			shard.Numeric(localId[:]) > shard.Numeric(remoteId[:])) {
-		if err := d.sharder.Flush(remoteTx.Anchor().ShardId); err != nil {
+		if err := d.sharder.Flush(remoteTx.Request().ShardId); err != nil {
 			return err
 		} else {
 			// reset the seen set at peer to prepare for sync (and retransmissions)
@@ -967,14 +983,9 @@ func (d *dlt) handleRECV_ForceShardFlushMsg(peer p2p.Peer, events chan controlle
 			// initiate a force shard sync for the flushed shard with peer
 			// we need to force the shard sync because if peer is headless
 			// then regular handshake will not result in sync
-			anchor := &dto.Anchor{
-				ShardId:  remoteTx.Anchor().ShardId,
-				ShardSeq: 0x00,
-				Weight:   0x00,
-			}
-			d.endorser.Anchor(anchor)
-			d.p2p.Anchor(anchor)
-			msg := NewForceShardSyncMsg(anchor)
+			myAnchor := d.sharder.SyncAnchor(remoteTx.Request().ShardId)
+			d.p2p.Anchor(myAnchor)
+			msg := NewForceShardSyncMsg(remoteTx.Request().ShardId, myAnchor)
 			peer.Logger().Debug("sending ForceShardSync: %x", msg.Id())
 			peer.Send(msg.Id(), msg.Code(), msg)
 		}
@@ -1002,7 +1013,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 
 		case TransactionMsgCode:
 			// deserialize the transaction message from payload
-			tx := dto.NewTransaction(&dto.Anchor{})
+			tx := dto.NewTransaction(&dto.TxRequest{}, &dto.Anchor{})
 			if err := msg.Decode(tx); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
 				return err
@@ -1189,7 +1200,7 @@ func (d *dlt) runner(peer p2p.Peer) error {
 		remoteAddr = peer.RemoteAddr().String()
 	}
 	peer.SetLogger(log.NewLogger(d.conf.Name + "/" + localAddr + " | " + peer.Name() + "/" + remoteAddr))
-	peer.Logger().Info("Connected with remote node: %s", peer.Name())
+	peer.Logger().Info("Connected with remote node: %s [%s]", peer.Name(), peer.String())
 
 	// initiate handshake with peer's sharding layer
 	if err := d.handshake(peer); err != nil {

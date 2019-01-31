@@ -15,7 +15,7 @@ import (
 )
 
 type Layer interface {
-	// populate a transaction Anchor
+	// sign a transaction Anchor
 	Anchor(a *dto.Anchor) error
 	Start() error
 	Stop()

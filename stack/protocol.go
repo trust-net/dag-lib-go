@@ -10,11 +10,11 @@ import (
 // protocol specs
 const (
 	// Name should contain the official protocol name
-	ProtocolName = "smithy/iter_7"
+	ProtocolName = "smithy/iter_8"
 
 	// Version should contain the version number of the protocol
 	// 2MSB Major . 2LSB Minor
-	ProtocolVersion = uint(0x00000007)
+	ProtocolVersion = uint(0x00000008)
 )
 
 // protocol messages
@@ -123,11 +123,13 @@ func (m *ShardChildrenResponseMsg) Code() uint64 {
 }
 
 type ShardSyncMsg struct {
+	ShardId []byte
 	Anchor *dto.Anchor
 }
 
 func (m *ShardSyncMsg) Id() []byte {
 	id := []byte("ShardSyncMsg")
+	id = append(id, m.ShardId...)
 	return append(id, m.Anchor.Signature...)
 }
 
@@ -135,8 +137,9 @@ func (m *ShardSyncMsg) Code() uint64 {
 	return ShardSyncMsgCode
 }
 
-func NewShardSyncMsg(anchor *dto.Anchor) *ShardSyncMsg {
+func NewShardSyncMsg(shardId []byte, anchor *dto.Anchor) *ShardSyncMsg {
 	return &ShardSyncMsg{
+		ShardId: shardId,
 		Anchor: anchor,
 	}
 }
@@ -156,10 +159,10 @@ func (m *SubmitterWalkUpRequestMsg) Code() uint64 {
 	return SubmitterWalkUpRequestMsgCode
 }
 
-func NewSubmitterWalkUpRequestMsg(anchor *dto.Anchor) *SubmitterWalkUpRequestMsg {
+func NewSubmitterWalkUpRequestMsg(req *dto.TxRequest) *SubmitterWalkUpRequestMsg {
 	return &SubmitterWalkUpRequestMsg{
-		Submitter: anchor.Submitter,
-		Seq:       anchor.SubmitterSeq - 1,
+		Submitter: req.SubmitterId,
+		Seq:       req.SubmitterSeq - 1,
 	}
 }
 
@@ -244,19 +247,23 @@ func NewSubmitterProcessDownResponseMsg(req *SubmitterProcessDownRequestMsg, txs
 }
 
 type ForceShardSyncMsg struct {
+	ShardId []byte
 	Anchor *dto.Anchor
 }
 
 func (m *ForceShardSyncMsg) Id() []byte {
-	return m.Anchor.Signature
+	id := []byte("ForceShardSyncMsg")
+	id = append(id, m.ShardId...)
+	return append(id, m.Anchor.Signature...)
 }
 
 func (m *ForceShardSyncMsg) Code() uint64 {
 	return ForceShardSyncMsgCode
 }
 
-func NewForceShardSyncMsg(anchor *dto.Anchor) *ForceShardSyncMsg {
+func NewForceShardSyncMsg(shardId []byte, anchor *dto.Anchor) *ForceShardSyncMsg {
 	return &ForceShardSyncMsg{
+		ShardId: shardId,
 		Anchor: anchor,
 	}
 }

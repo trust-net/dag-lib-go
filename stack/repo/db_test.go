@@ -70,7 +70,7 @@ func TestUpdateShard(t *testing.T) {
 	}
 
 	// validate that shard tips was updated for the transaction correctly
-	if _, err := repo.shardTipsDb.Get(tx.Anchor().ShardId); err != nil {
+	if _, err := repo.shardTipsDb.Get(tx.Request().ShardId); err != nil {
 		t.Errorf("Error in checking shard tips: %s", err)
 	}
 }
@@ -127,7 +127,7 @@ func TestFlushShard(t *testing.T) {
 	}
 
 	// now flush the shard
-	if err := repo.FlushShard(tx1.Anchor().ShardId); err != nil {
+	if err := repo.FlushShard(tx1.Request().ShardId); err != nil {
 		t.Errorf("Failed to flush shard: %s", err)
 	}
 
@@ -138,7 +138,7 @@ func TestFlushShard(t *testing.T) {
 	if node := repo.GetShardDagNode(tx2.Id()); node != nil {
 		t.Errorf("Did not flush DAG node in shard DB for 2nd transaction")
 	}
-	if tips := repo.ShardTips(tx1.Anchor().ShardId); len(tips) != 0 {
+	if tips := repo.ShardTips(tx1.Request().ShardId); len(tips) != 0 {
 		t.Errorf("Did not flush tips for the shard")
 	}
 }
@@ -191,7 +191,7 @@ func TestAddTxShardTipsUpdate(t *testing.T) {
 	repo.AddTx(parent)
 	repo.UpdateShard(parent)
 	// validate that shard tip was added for the transactions correctly
-	tips := repo.ShardTips(parent.Anchor().ShardId)
+	tips := repo.ShardTips(parent.Request().ShardId)
 	if len(tips) != 1 {
 		t.Errorf("Incorrect number of tips: %d", len(tips))
 	} else if tips[0] != parent.Id() {
@@ -205,7 +205,7 @@ func TestAddTxShardTipsUpdate(t *testing.T) {
 	repo.UpdateShard(child2)
 
 	// validate that shard tip was updated for the transactions correctly
-	tips = repo.ShardTips(parent.Anchor().ShardId)
+	tips = repo.ShardTips(parent.Request().ShardId)
 	if len(tips) != 2 {
 		t.Errorf("Incorrect number of tips: %d", len(tips))
 	} else {
@@ -234,7 +234,7 @@ func TestAddTxShardTipsCoalesce(t *testing.T) {
 	repo.AddTx(uncle)
 	repo.UpdateShard(uncle)
 	// validate that shard tip was added for the transactions correctly
-	tips := repo.ShardTips(parent.Anchor().ShardId)
+	tips := repo.ShardTips(parent.Request().ShardId)
 	if len(tips) != 2 {
 		t.Errorf("Incorrect number of tips: %d", len(tips))
 	}
@@ -244,7 +244,7 @@ func TestAddTxShardTipsCoalesce(t *testing.T) {
 	repo.UpdateShard(child)
 
 	// validate that shard tip was updated for the transactions correctly
-	tips = repo.ShardTips(parent.Anchor().ShardId)
+	tips = repo.ShardTips(parent.Request().ShardId)
 	if len(tips) != 1 {
 		t.Errorf("Incorrect number of tips: %d", len(tips))
 	} else if tips[0] != child.Id() {
@@ -349,22 +349,22 @@ func TestUpdateSubmitter(t *testing.T) {
 
 	// validate that submitter history was updated for the transaction correctly
 	key := []byte{}
-	key = append(key, tx.Anchor().Submitter...)
+	key = append(key, tx.Request().SubmitterId...)
 	key = append(key, ':')
-	key = append(key, common.Uint64ToBytes(tx.Anchor().SubmitterSeq)...)
+	key = append(key, common.Uint64ToBytes(tx.Request().SubmitterSeq)...)
 	if data, err := repo.submitterHistoryDb.Get(key); err != nil {
 		t.Errorf("Did not update submitter history in shard DB")
 	} else {
 		history := SubmitterHistory{}
 		if err := common.Deserialize(data, &history); err != nil {
 			t.Errorf("Wrong type of submitter history in shard DB")
-		} else if string(history.Submitter) != string(tx.Anchor().Submitter) {
+		} else if string(history.Submitter) != string(tx.Request().SubmitterId) {
 			t.Errorf("Incorrect submitter ID in history")
-		} else if history.Seq != tx.Anchor().SubmitterSeq {
+		} else if history.Seq != tx.Request().SubmitterSeq {
 			t.Errorf("Incorrect submitter seq in history")
 		} else if len(history.ShardTxPairs) != 1 {
 			t.Errorf("Incorrect number of pairs in history")
-		} else if string(history.ShardTxPairs[0].ShardId) != string(tx.Anchor().ShardId) {
+		} else if string(history.ShardTxPairs[0].ShardId) != string(tx.Request().ShardId) {
 			t.Errorf("Incorrect shard ID in the pairs in history")
 		} else if history.ShardTxPairs[0].TxId != tx.Id() {
 			t.Errorf("Incorrect tx ID in the pairs in history")
@@ -377,10 +377,10 @@ func TestUpdateSubmitter_RelaxedSequenceRequirements(t *testing.T) {
 	repo, _ := NewDltDb(db.NewInMemDbProvider())
 	tx1 := dto.TestSignedTransaction("test data")
 	tx2 := dto.TestSignedTransaction("test data")
-	tx2.Anchor().Submitter = tx1.Anchor().Submitter
-	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	tx2.Request().SubmitterId = tx1.Request().SubmitterId
+	tx2.Request().SubmitterSeq = tx1.Request().SubmitterSeq
 	// make sure shard ID is different, for relaxed requirement
-	tx2.Anchor().ShardId = []byte("a different shard ID")
+	tx2.Request().ShardId = []byte("a different shard ID")
 
 	// update submitter with transaction sequence
 	if err := repo.UpdateSubmitter(tx1); err != nil {
@@ -391,7 +391,7 @@ func TestUpdateSubmitter_RelaxedSequenceRequirements(t *testing.T) {
 	}
 
 	// validate that both transactions are added in submitter history
-	if history := repo.GetSubmitterHistory(tx1.Anchor().Submitter, tx1.Anchor().SubmitterSeq); history == nil {
+	if history := repo.GetSubmitterHistory(tx1.Request().SubmitterId, tx1.Request().SubmitterSeq); history == nil {
 		t.Errorf("Did not update history for 2 parallel transactions")
 	} else if len(history.ShardTxPairs) != 2 {
 		t.Errorf("Incorrect number of pairs: %d", len(history.ShardTxPairs))
@@ -407,10 +407,10 @@ func TestUpdateSubmitter_DoubleSpending(t *testing.T) {
 	repo, _ := NewDltDb(db.NewInMemDbProvider())
 	tx1 := dto.TestSignedTransaction("test data")
 	tx2 := dto.TestSignedTransaction("test data")
-	tx2.Anchor().Submitter = tx1.Anchor().Submitter
-	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	tx2.Request().SubmitterId = tx1.Request().SubmitterId
+	tx2.Request().SubmitterSeq = tx1.Request().SubmitterSeq
 	// make sure shard ID is same, for double spending
-	tx2.Anchor().ShardId = tx1.Anchor().ShardId
+	tx2.Request().ShardId = tx1.Request().ShardId
 
 	// update submitter with 1st transaction sequence
 	if err := repo.UpdateSubmitter(tx1); err != nil {
@@ -422,7 +422,7 @@ func TestUpdateSubmitter_DoubleSpending(t *testing.T) {
 	}
 
 	// validate that only 1st transactions is added in submitter history
-	if history := repo.GetSubmitterHistory(tx1.Anchor().Submitter, tx1.Anchor().SubmitterSeq); history == nil {
+	if history := repo.GetSubmitterHistory(tx1.Request().SubmitterId, tx1.Request().SubmitterSeq); history == nil {
 		t.Errorf("Did not update history")
 	} else if len(history.ShardTxPairs) != 1 {
 		t.Errorf("Incorrect number of pairs: %d", len(history.ShardTxPairs))

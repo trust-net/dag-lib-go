@@ -18,9 +18,7 @@ func TestValidateSignature_ValidPayload(t *testing.T) {
 	}
 
 	// create a transaction with correct submitter sequence as "nonce" value
-	submitter := dto.TestSubmitter()
-	newTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "test")
-	if err := stack.Submit(newTx); err != nil {
+	if _, err := stack.Submit(dto.TestSubmitter().NewRequest("test")); err != nil {
 		t.Errorf("Failed to submit transaction: %s", err)
 	}
 }
@@ -37,25 +35,44 @@ func TestValidateSignature_PayloadReplayInjection(t *testing.T) {
 	}
 	// submit a valid transaction with original submitter
 	submitter := dto.TestSubmitter()
-	origTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "test")
-	if err := stack.Submit(origTx); err != nil {
+	var origTx dto.Transaction
+	var err error
+	if origTx, err = stack.Submit(submitter.NewRequest("test")); err != nil {
 		t.Errorf("Failed to submit transaction: %s", err)
+	} else {
+		submitter.LastTx = origTx.Id()
+		submitter.Seq += 1
 	}
 
 	log.SetLogLevel(log.DEBUG)
 	defer log.SetLogLevel(log.NONE)
 
-	// now create a new transaction using a new anchor for submitter
-	fakeTx := dto.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq+1, origTx.Id()))
+	// now create a new transaction on a dishonest remote host that uses same request from original transaction for replay attack
+	remote, _, _, _, _ := initMocksAndDb()
+	replayTx, _ := remote.Submit(dto.TestSubmitter().NewRequest("random data"))
+	*replayTx.Request() = *origTx.Request()
 
-	// copy original transaction's payload to new transaction
-	fakeTx.Self().Payload = origTx.Self().Payload
+	// build a mock peer
+	mockConn := p2p.TestConn()
+	peer := NewMockPeer(mockConn)
 
-	// copy original transaction's payload signature to new transaction
-	fakeTx.Self().Signature = origTx.Self().Signature
+	// setup mock connection to send the replay transaction followed by clean shutdown
+	mockConn.NextMsg(TransactionMsgCode, replayTx)
+	mockConn.NextMsg(NodeShutdownMsgCode, &NodeShutdown{})
 
-	// submit transaction, it should fail at payload signature validation
-	if err := stack.Submit(fakeTx); err == nil {
-		t.Errorf("Failed to detect payload replay attack")
+	// setup a test event listener
+	events := make(chan controllerEvent, 10)
+	finished := checkForEventCode(RECV_NewTxBlockMsg, events)
+
+	// now call stack's listener
+	if err := stack.listener(peer, events); err == nil {
+		t.Errorf("Transaction processing did not detect replay attack in validation")
+	}
+	// wait for event listener to process
+	result := <-finished
+
+	// listener should not have generated RECV_NewTxBlockMsg
+	if result.seenMsgEvent {
+		t.Errorf("Event listener should not generate RECV_NewTxBlockMsg event!!!")
 	}
 }

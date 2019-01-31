@@ -17,8 +17,8 @@ const (
 )
 
 type Endorser interface {
-	// populate a transaction Anchor
-	Anchor(*dto.Anchor) error
+	// validate submitter's transaction request details
+	Validate(req *dto.TxRequest) error
 	// Handle network transaction
 	Handle(tx dto.Transaction) (int, error)
 	// Replace submitter history
@@ -36,42 +36,44 @@ type endorser struct {
 }
 
 func GenesisSubmitterTx(submitterId []byte) dto.Transaction {
-	tx := dto.NewTransaction(&dto.Anchor{
-		Submitter:    submitterId,
+	tx := dto.NewTransaction(&dto.TxRequest{
+		SubmitterId: submitterId,
 		SubmitterSeq: 0x0,
+		Signature: submitterId,
+	}, &dto.Anchor{
+		Signature: submitterId,
 	})
-	tx.Self().Signature = submitterId
 	return tx
 }
 
-// validate an anchor against submitter history
-func (e *endorser) isValid(a *dto.Anchor, tx dto.Transaction) (int, error) {
+// validate a transaction request against submitter history
+func (e *endorser) isValid(req *dto.TxRequest, tx dto.Transaction) (int, error) {
 	// fetch submitter history for submitter's parent
-	if a.SubmitterSeq > 1 {
-		if parent := e.db.GetSubmitterHistory(a.Submitter, a.SubmitterSeq-1); parent == nil {
-			return ERR_ORPHAN, fmt.Errorf("Unexpected submitter sequence: %d", a.SubmitterSeq)
+	if req.SubmitterSeq > 1 {
+		if parent := e.db.GetSubmitterHistory(req.SubmitterId, req.SubmitterSeq-1); parent == nil {
+			return ERR_ORPHAN, fmt.Errorf("Unexpected submitter sequence: %d", req.SubmitterSeq)
 		} else {
 			// walk through known shard/tx pairs to check if parent is there
 			found := false
 			for _, pair := range parent.ShardTxPairs {
-				if pair.TxId == a.SubmitterLastTx {
+				if pair.TxId == req.LastTx {
 					found = true
 					break
 				}
 			}
 			if !found {
-				return ERR_ORPHAN, fmt.Errorf("Unknown submitter parent: %x", a.SubmitterLastTx)
+				return ERR_ORPHAN, fmt.Errorf("Unknown submitter parent: %x", req.LastTx)
 			}
 		}
 	}
 
 	// ensure this is not a double spending transaction (i.e. no other transaction with same seq and shard)
-	if current := e.db.GetSubmitterHistory(a.Submitter, a.SubmitterSeq); current != nil {
+	if current := e.db.GetSubmitterHistory(req.SubmitterId, req.SubmitterSeq); current != nil {
 		// walk through known shard/tx pairs to check for double spending
 		for _, pair := range current.ShardTxPairs {
-			if string(pair.ShardId) == string(a.ShardId) {
+			if string(pair.ShardId) == string(req.ShardId) {
 				if tx == nil || tx.Id() != pair.TxId {
-					return ERR_DOUBLE_SPEND, fmt.Errorf("Double spending attempt for seq: %d, shardId: %x", a.SubmitterSeq, a.ShardId)
+					return ERR_DOUBLE_SPEND, fmt.Errorf("Double spending attempt for seq: %d, shardId: %x", req.SubmitterSeq, req.ShardId)
 				}
 			}
 		}
@@ -81,15 +83,15 @@ func (e *endorser) isValid(a *dto.Anchor, tx dto.Transaction) (int, error) {
 	return SUCCESS, nil
 }
 
-// validate submitter's anchor request details
-func (e *endorser) Anchor(a *dto.Anchor) error {
+// validate submitter's transaction request details
+func (e *endorser) Validate(req *dto.TxRequest) error {
 	// TBD: lock and unlock
 
 	// submitter sequence should be 1 or higher
-	if a == nil || a.SubmitterSeq < 1 {
+	if req == nil || req.SubmitterSeq < 1 {
 		// this must be special anchor for sync
 		return nil
-	} else if _, err := e.isValid(a, nil); err != nil {
+	} else if _, err := e.isValid(req, nil); err != nil {
 		return err
 	} else {
 		return nil
@@ -99,12 +101,12 @@ func (e *endorser) Anchor(a *dto.Anchor) error {
 func (e *endorser) Handle(tx dto.Transaction) (int, error) {
 	// validate transaction
 	// TBD
-	if tx == nil || tx.Anchor() == nil || tx.Anchor().SubmitterSeq < 1 {
+	if tx == nil || tx.Request() == nil || tx.Request().SubmitterSeq < 1 {
 		return ERR_INVALID, fmt.Errorf("invalid transaction")
 	}
 
 	// check transaction against submitter history
-	if res, err := e.isValid(tx.Anchor(), tx); err != nil {
+	if res, err := e.isValid(tx.Request(), tx); err != nil {
 		return res, err
 	}
 
@@ -127,7 +129,7 @@ func (e *endorser) Handle(tx dto.Transaction) (int, error) {
 
 func (e *endorser) Replace(tx dto.Transaction) error {
 	// validate transaction
-	if tx == nil || tx.Anchor() == nil || tx.Anchor().SubmitterSeq < 1 {
+	if tx == nil || tx.Request() == nil || tx.Request().SubmitterSeq < 1 {
 		return fmt.Errorf("invalid transaction")
 	}
 
@@ -141,12 +143,12 @@ func (e *endorser) Replace(tx dto.Transaction) error {
 
 func (e *endorser) Approve(tx dto.Transaction) error {
 	// validate transaction
-	if tx == nil || tx.Anchor() == nil || tx.Anchor().SubmitterSeq < 1 {
+	if tx == nil || tx.Request() == nil || tx.Request().SubmitterSeq < 1 {
 		return fmt.Errorf("invalid transaction")
 	}
 
 	// check transaction against submitter history
-	if _, err := e.isValid(tx.Anchor(), tx); err != nil {
+	if _, err := e.isValid(tx.Request(), tx); err != nil {
 		return err
 	}
 
