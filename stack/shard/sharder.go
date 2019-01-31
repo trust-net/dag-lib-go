@@ -19,7 +19,7 @@ type Sharder interface {
 	// unlock the world state at the end of transaction processing
 	UnlockState()
 	// commit world state once transaction has been successfully processed
-	CommitState() error
+	CommitState(tx dto.Transaction) error
 	// register application shard with the DLT stack
 	Register(shardId []byte, txHandler func(tx dto.Transaction, state state.State) error) error
 	// unregister application shard from DLT stack
@@ -82,14 +82,22 @@ func (s *sharder) UnlockState() {
 	s.useWorldState.Unlock()
 }
 
-func (s *sharder) CommitState() error {
+func (s *sharder) CommitState(tx dto.Transaction) error {
 	// transaction processed successfully, persist world state
 	if s.worldState != nil {
-		return s.worldState.Persist()
-	} else {
+		if err := s.worldState.Persist(); err != nil {
+			return err
+		}
+	}
+	// update shard's DAG and Tips in DB
+	if tx == nil {
+		// this must be during app registration replay
 		return nil
 	}
-
+	if err := s.db.UpdateShard(tx); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *sharder) Register(shardId []byte, txHandler func(tx dto.Transaction, state state.State) error) error {
@@ -164,7 +172,7 @@ func (s *sharder) Register(shardId []byte, txHandler func(tx dto.Transaction, st
 		}
 	}
 	// transaction replay successful, persist world state
-	s.CommitState()
+	s.CommitState(nil)
 	return nil
 }
 
@@ -304,10 +312,12 @@ func (s *sharder) Approve(tx dto.Transaction) error {
 		if err := s.db.AddTx(tx); err != nil {
 			return err
 		}
-		// update the shard's DAG and Tips
-		if err := s.db.UpdateShard(tx); err != nil {
-			return err
-		}
+
+		// moved this to shard commit step
+		//		// update the shard's DAG and Tips
+		//		if err := s.db.UpdateShard(tx); err != nil {
+		//			return err
+		//		}
 	}
 	return nil
 }
@@ -343,10 +353,11 @@ func (s *sharder) Handle(tx dto.Transaction) error {
 		// should we add transaction here, or should we expect that transaction has already been added by lower layer?
 		// for network transactions we'll assume that it has already been added by endorsement layer
 
-		// update shard's DAG and Tips in DB
-		if err := s.db.UpdateShard(tx); err != nil {
-			return err
-		}
+		// moved this to shard commit step
+		//		// update shard's DAG and Tips in DB
+		//		if err := s.db.UpdateShard(tx); err != nil {
+		//			return err
+		//		}
 	}
 
 	// if an app is registered, call app's transaction handler

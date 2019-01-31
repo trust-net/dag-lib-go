@@ -87,7 +87,10 @@ func TestRegistrationReplay(t *testing.T) {
 	// send a mock network transaction with shard seq 1 to sharder before app is registered
 	tx, _ := SignedShardTransaction("test payload")
 	s.db.AddTx(tx)
+	s.LockState()
 	s.Handle(tx)
+	s.CommitState(tx)
+	s.UnlockState()
 
 	// register an app using same shard as network transaction
 	cbCalled := false
@@ -319,20 +322,17 @@ func TestAnchorMultiTip(t *testing.T) {
 	// add 2 child network transactions nodes for same parent as genesis
 	child1, _ := SignedShardTransaction("child1")
 	child2, _ := SignedShardTransaction("child2")
-	if err := s.db.AddTx(child1); err != nil {
-		t.Errorf("Failed to add child1: %s", err)
-	}
+	s.db.AddTx(child1)
+	s.LockState()
+	s.Handle(child1)
+	s.CommitState(child1)
+	s.UnlockState()
 
-	if err := s.Handle(child1); err != nil {
-		t.Errorf("Failed to handle child1: %s", err)
-	}
-	if err := s.db.AddTx(child2); err != nil {
-		t.Errorf("Failed to add child2: %s", err)
-	}
-
-	if err := s.Handle(child2); err != nil {
-		t.Errorf("Failed to handle child2: %s", err)
-	}
+	s.db.AddTx(child2)
+	s.LockState()
+	s.Handle(child2)
+	s.CommitState(child2)
+	s.UnlockState()
 
 	// call sharder's anchor update
 	a := dto.Anchor{}
@@ -435,6 +435,7 @@ func TestHandlerRegistered(t *testing.T) {
 	called := false
 	txHandler := func(tx dto.Transaction, state state.State) error { called = true; return nil }
 	s.Register(tx.Anchor().ShardId, txHandler)
+	testDb.Reset()
 
 	// send the mock network transaction to sharder with app registered
 	if err := s.Handle(tx); err != nil {
@@ -444,6 +445,11 @@ func TestHandlerRegistered(t *testing.T) {
 	// verify that callback got called
 	if !called {
 		t.Errorf("Sharder did not invoke transaction call back")
+	}
+
+	// confirm the shard DAG update is not called yet (moved to commit stage)
+	if testDb.UpdateShardCount != 0 {
+		t.Errorf("Unexpected shard DAG update")
 	}
 }
 
@@ -536,9 +542,9 @@ func TestApproverHappyPath(t *testing.T) {
 		t.Errorf("Callback not done for application submitted transaction")
 	}
 
-	// verify that DLT DB's shard was updated for submitted transaction
-	if testDb.UpdateShardCount != 1 {
-		t.Errorf("DLT DB's shard was NOT updated for submitted transaction: %d", testDb.UpdateShardCount)
+	// confirm the shard DAG update is not called yet (moved to commit stage)
+	if testDb.UpdateShardCount != 0 {
+		t.Errorf("Unexpected shard DAG update")
 	}
 
 	// verify that submitted transaction was saved in DB
@@ -560,12 +566,19 @@ func TestAncestorsKnownStartHash(t *testing.T) {
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
+	s.LockState()
 	if err := s.Handle(tx1); err != nil {
 		t.Errorf("Failed to add 1st transaction: %s", err)
 	}
+	s.CommitState(tx1)
+	s.UnlockState()
+
+	s.LockState()
 	if err := s.Handle(tx2); err != nil {
 		t.Errorf("Failed to add 2nd transaction: %s", err)
 	}
+	s.CommitState(tx2)
+	s.UnlockState()
 
 	// now fetch ancestors from tx2 as starting hash
 	ancestors := s.Ancestors(tx2.Id(), 5)
@@ -593,12 +606,19 @@ func TestAncestorsUnknownStartHash(t *testing.T) {
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
+	s.LockState()
 	if err := s.Handle(tx1); err != nil {
 		t.Errorf("Failed to add 1st transaction: %s", err)
 	}
+	s.CommitState(tx1)
+	s.UnlockState()
+
+	s.LockState()
 	if err := s.Handle(tx2); err != nil {
 		t.Errorf("Failed to add 2nd transaction: %s", err)
 	}
+	s.CommitState(tx2)
+	s.UnlockState()
 
 	// now fetch ancestors from an unknown starting hash
 	hash := tx2.Id()
@@ -626,12 +646,19 @@ func TestChildrenKnownParent(t *testing.T) {
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
+	s.LockState()
 	if err := s.Handle(tx1); err != nil {
 		t.Errorf("Failed to add 1st transaction: %s", err)
 	}
+	s.CommitState(tx1)
+	s.UnlockState()
+
+	s.LockState()
 	if err := s.Handle(tx2); err != nil {
 		t.Errorf("Failed to add 2nd transaction: %s", err)
 	}
+	s.CommitState(tx2)
+	s.UnlockState()
 
 	// now fetch children for tx1 as parent
 	children := s.Children(tx1.Id())
@@ -657,12 +684,19 @@ func TestChildrenUnknownParent(t *testing.T) {
 	s.Register(tx1.Anchor().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
+	s.LockState()
 	if err := s.Handle(tx1); err != nil {
 		t.Errorf("Failed to add 1st transaction: %s", err)
 	}
+	s.CommitState(tx1)
+	s.UnlockState()
+
+	s.LockState()
 	if err := s.Handle(tx2); err != nil {
 		t.Errorf("Failed to add 2nd transaction: %s", err)
 	}
+	s.CommitState(tx2)
+	s.UnlockState()
 
 	// now fetch children from an unknown parent
 	hash := tx1.Id()
@@ -924,5 +958,33 @@ func TestFlush_UnregisteredShard(t *testing.T) {
 		t.Errorf("Failed to get state: %s", err)
 	} else if string(read.Value) != "test data to validate" {
 		t.Errorf("Incorrect data from get state: %s", read.Value)
+	}
+}
+
+func TestCommitState_WithTransaction(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
+	tx, _ := SignedShardTransaction("test payload")
+
+	// call commit state with a transaction (e.g. after submitted transaction approval
+	// or after network transaction handling)
+	s.CommitState(tx)
+
+	// confirm that shard DAG was updated
+	if testDb.UpdateShardCount != 1 {
+		t.Errorf("Commit state did not update shard DAG")
+	}
+}
+
+func TestCommitState_NilTransaction(t *testing.T) {
+	testDb := repo.NewMockDltDb()
+	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
+
+	// call commit state with nil transaction (e.g. after app registration replay)
+	s.CommitState(nil)
+
+	// confirm that shard DAG was not updated
+	if testDb.UpdateShardCount != 0 {
+		t.Errorf("Commit state should not update shard DAG")
 	}
 }

@@ -85,7 +85,13 @@ func TestRegister(t *testing.T) {
 	// register a transaction with sharder to be replayed upon app registration
 	tx, _ := shard.SignedShardTransaction("test payload")
 	endorser.Handle(tx)
+	// lock the shard
+	sharder.LockState()
+	// handle transaction
 	sharder.Handle(tx)
+	// commit the shard
+	sharder.CommitState(tx)
+	sharder.UnlockState()
 
 	// reset mocks to start tracking what we expect
 	sharder.Reset()
@@ -148,7 +154,13 @@ func TestRegisterReplayFailure(t *testing.T) {
 	// register a transaction with sharder to be replayed upon app registration
 	tx, _ := shard.SignedShardTransaction("test payload")
 	endorser.Handle(tx)
+	// lock the shard
+	sharder.LockState()
+	// handle transaction
 	sharder.Handle(tx)
+	// commit the shard
+	sharder.CommitState(tx)
+	sharder.UnlockState()
 
 	// unregister default app and register a new app that rejects replay transaction
 	stack.Unregister()
@@ -3194,6 +3206,11 @@ func TestRECV_NewTxBlockMsg_UnknownTxParent(t *testing.T) {
 	// we should have fetched anchor from sharder for requested shard
 	if !sharder.SyncAnchorCalled {
 		t.Errorf("did not fetch sync anchor from sharder")
+	}
+
+	// confirm that we did not update the shard DAG
+	if sharder.CommitStateCalled {
+		t.Errorf("must not commit state")
 	}
 
 	// we should set the peer state to expect ancestors response for requested hash
