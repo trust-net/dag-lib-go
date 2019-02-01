@@ -205,7 +205,7 @@ POST /opCode/create
 }
 ```
 
-<a id="#opcode"></a>Successful response for a payload request will return following `OpCode` response:
+<a id="opcode"></a>Successful response for a payload request will return following `OpCode` response:
 
 ```
 {
