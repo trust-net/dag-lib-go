@@ -4,9 +4,6 @@ package main
 
 import (
 	"bufio"
-	"crypto/ecdsa"
-	"crypto/rand"
-	"crypto/sha512"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,7 +13,6 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/state"
 	"github.com/trust-net/dag-lib-go/common"
-	"math/big"
 	"os"
 	"strconv"
 	"strings"
@@ -43,44 +39,24 @@ type testTx struct {
 	Delta  int64
 }
 
-func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
-	// sign the test payload using SHA512 hash and ECDSA private key
-	type signature struct {
-		R *big.Int
-		S *big.Int
-	}
-	s := signature{}
-	hash := sha512.Sum512(append(common.Uint64ToBytes(tx.Anchor().SubmitterSeq), txPayload...))
-	s.R, s.S, _ = ecdsa.Sign(rand.Reader, submitter.Key, hash[:])
-	tx.Self().Payload = txPayload
-	tx.Self().Signature, _ = common.Serialize(s)
-	return tx
-}
-
-func incrementTx(a *dto.Anchor, name string, delta int) dto.Transaction {
-	if a == nil {
-		return nil
-	}
+func incrementTx(name string, delta int) *dto.TxRequest {
 	op := testTx{
 		Op:     "incr",
 		Target: name,
 		Delta:  int64(delta),
 	}
 	txPayload, _ := common.Serialize(op)
-	return sign(dto.NewTransaction(a), txPayload)
+	return submitter.NewRequest(string(txPayload))
 }
 
-func decrementTx(a *dto.Anchor, name string, delta int) dto.Transaction {
-	if a == nil {
-		return nil
-	}
+func decrementTx(name string, delta int) *dto.TxRequest {
 	op := testTx{
 		Op:     "decr",
 		Target: name,
 		Delta:  int64(delta),
 	}
 	txPayload, _ := common.Serialize(op)
-	return sign(dto.NewTransaction(a), txPayload)
+	return submitter.NewRequest(string(txPayload))
 }
 
 type op struct {
@@ -150,7 +126,7 @@ func applyDelta(name string, delta int, s state.State) int64 {
 func txHandler(tx dto.Transaction, state state.State) error {
 	fmt.Printf("\n")
 	op := testTx{}
-	if err := common.Deserialize(tx.Self().Payload, &op); err != nil {
+	if err := common.Deserialize(tx.Request().Payload, &op); err != nil {
 		fmt.Printf("Invalid TX from %x\n%s", tx.Anchor().NodeId, cmdPrompt)
 		return err
 	}
@@ -210,17 +186,18 @@ func cli(dlt stack.DLT) error {
 							hasNext = wordScanner.Scan()
 						}
 						if !oneDone {
-							fmt.Printf("usage: countr <countr name> ...\n")
+							fmt.Printf("%s\n", commands["countr"][1])
+							fmt.Printf("%s\n", commands["countr"][0])
 						}
 					case "incr":
 						ops := scanOps(wordScanner)
 						if len(ops) == 0 {
-							fmt.Printf("usage: incr <countr name> [<integer>] ...\n")
+							fmt.Printf("%s\n", commands[cmd][1])
+							fmt.Printf("%s\n", commands[cmd][0])
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: incr %s %d\n", op.name, op.delta)
-								tx := incrementTx(dlt.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), op.name, op.delta)
-								if err := dlt.Submit(tx); err != nil {
+								if tx, err := dlt.Submit(incrementTx(op.name, op.delta)); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
 								} else {
 									submitter.Seq += 1
@@ -231,12 +208,12 @@ func cli(dlt stack.DLT) error {
 					case "decr":
 						ops := scanOps(wordScanner)
 						if len(ops) == 0 {
-							fmt.Printf("usage: decr <countr name> [<integer>] ...\n")
+							fmt.Printf("%s\n", commands[cmd][1])
+							fmt.Printf("%s\n", commands[cmd][0])
 						} else {
 							for _, op := range ops {
 								fmt.Printf("adding transaction: decr %s %d\n", op.name, op.delta)
-								tx := decrementTx(dlt.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), op.name, op.delta)
-								if err := dlt.Submit(tx); err != nil {
+								if tx, err := dlt.Submit(decrementTx(op.name, op.delta)); err != nil {
 									fmt.Printf("Error submitting transaction: %s\n", err)
 								} else {
 									submitter.Seq += 1
@@ -251,14 +228,14 @@ func cli(dlt stack.DLT) error {
 						if a := dlt.Anchor(submitter.Id, submitter.Seq, submitter.LastTx); a == nil {
 							fmt.Printf("failed to get any info...\n")
 						} else {
-							fmt.Printf("ShardId: %s\n", a.ShardId)
 							fmt.Printf("Next Seq: %d\n", a.ShardSeq)
 							fmt.Printf("Parent: %x\n", a.ShardParent)
 							fmt.Printf("NodeId: %x\n", a.NodeId)
 						}
 					case "join":
 						if !wordScanner.Scan() {
-							fmt.Printf("usage: join <shard id> [<name>]\n")
+							fmt.Printf("%s\n", commands[cmd][1])
+							fmt.Printf("%s\n", commands[cmd][0])
 							break
 						}
 						name := wordScanner.Text()
@@ -270,6 +247,7 @@ func cli(dlt stack.DLT) error {
 							fmt.Printf("Error registering app: %s\n", err)
 						} else {
 							cmdPrompt = "<" + name + ">: "
+							submitter.ShardId = shardId
 						}
 					case "leave":
 						for wordScanner.Scan() {
@@ -279,15 +257,23 @@ func cli(dlt stack.DLT) error {
 							fmt.Printf("Error during un-registering app: %s\n", err)
 						}
 						cmdPrompt = "<headless>: "
+						submitter.ShardId = nil
 					default:
 						fmt.Printf("Unknown Command: %s", cmd)
 						for wordScanner.Scan() {
 							fmt.Printf(" %s", wordScanner.Text())
 						}
-						fmt.Printf("\nUsages...\n")
-						for k, v := range commands {
-							fmt.Printf("\"%s\": %s\n%s\n", k, v[1], v[0])
+						fmt.Printf("\n\nAccepted commands...\n")
+						isFirst := true
+						for k, _ := range commands {
+							if !isFirst {
+								fmt.Printf(", ")
+							} else {
+								isFirst = false
+							}
+							fmt.Printf("\"%s\"", k)
 						}
+						fmt.Printf("\n")
 						break
 					}
 				}

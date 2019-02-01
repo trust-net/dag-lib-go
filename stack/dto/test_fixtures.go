@@ -12,7 +12,7 @@ import (
 func TestTransaction() *transaction {
 	return &transaction{
 		TxRequest: TestRequest(),
-		TxAnchor: TestAnchor(),
+		TxAnchor:  TestAnchor(),
 	}
 }
 
@@ -37,23 +37,24 @@ func TestRequest() *TxRequest {
 
 func TestAnchor() *Anchor {
 	return &Anchor{
-		NodeId:          []byte("test node ID"),
-		ShardSeq:        0x01,
-		Weight:          0x01,
+		NodeId:   []byte("test node ID"),
+		ShardSeq: 0x01,
+		Weight:   0x01,
 	}
 }
 
 type Submitter struct {
-	Key    *ecdsa.PrivateKey
-	Id     []byte
-	Seq    uint64
-	LastTx [64]byte
+	Key     *ecdsa.PrivateKey
+	ShardId []byte
+	Id      []byte
+	Seq     uint64
+	LastTx  [64]byte
 }
 
 func (s *Submitter) NewTransaction(txAnchor *Anchor, data string) *transaction {
 	return &transaction{
-		TxRequest:  s.NewRequest(data),
-		TxAnchor: txAnchor,
+		TxRequest: s.NewRequest(data),
+		TxAnchor:  txAnchor,
 	}
 }
 
@@ -62,7 +63,7 @@ func (s *Submitter) NewRequest(data string) *TxRequest {
 		// payload for transaction's operations
 		Payload: []byte(data),
 		// shard id for the transaction
-		ShardId: []byte("test shard"),
+		ShardId: s.ShardId,
 		// submitter's last transaction
 		LastTx: s.LastTx,
 		// Submitter's public ID
@@ -91,10 +92,11 @@ func TestSubmitter() *Submitter {
 	key, _ := crypto.GenerateKey()
 	id := crypto.FromECDSAPub(&key.PublicKey)
 	return &Submitter{
-		Key:    key,
-		Id:     id,
-		Seq:    1,
-		LastTx: [64]byte{},
+		Key:     key,
+		Id:      id,
+		ShardId: []byte("test shard"),
+		Seq:     1,
+		LastTx:  [64]byte{},
 	}
 
 }
