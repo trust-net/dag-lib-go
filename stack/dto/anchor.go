@@ -10,7 +10,6 @@ import (
 type Anchor struct {
 	// transaction approver application instance node ID
 	NodeId []byte
-	// moved below to transaction request from submitter
 	// sequence of this transaction within the shard
 	ShardSeq uint64
 	// weight of this transaction withing shard DAG (sum of all ancestor's weight + 1)
@@ -19,8 +18,6 @@ type Anchor struct {
 	ShardParent [64]byte
 	// uncle transactions within the shard
 	ShardUncles [][64]byte
-	// transaction request signature (lock this anchor to specific request)
-	RequestSignature []byte
 	// anchor signature from DLT stack
 	Signature []byte
 }
@@ -46,6 +43,5 @@ func (a *Anchor) Bytes() []byte {
 	for _, uncle := range a.ShardUncles {
 		payload = append(payload, uncle[:]...)
 	}
-	payload = append(payload, a.RequestSignature[:]...)
 	return payload
 }

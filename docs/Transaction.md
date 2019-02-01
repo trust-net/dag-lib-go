@@ -1,51 +1,127 @@
 ## Contents
 
-* [Transaction Schema](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Transaction-Schema)
-    * [Payload](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Payload)
-    * [Signature](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Signature)
-    * [TxAnchor](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#TxAnchor)
-    * [Transaction ID](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Transaction-ID)
-* [Anchor Schema](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Anchor-Schema)
-    * [Node Id](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Node-Id)
-    * [Shard Id](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Shard-Id)
-    * [Shard Sequence](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Shard-Sequence)
-    * [Shard Parent](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Shard-Parent)
-    * [Shard Uncles](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Shard-Uncles)
-    * [Weight](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Weight)
-    * [Submitter Id](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Submitter-Id)
-    * [Submitter Sequence](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Submitter-Sequence)
-    * [Submitter Last Transaction](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Submitter-Last-Transaction)
-    * [Anchor Signature](https://github.com/trust-net/dag-lib-go/tree/master/docs/Transaction.md#Anchor-Signature)
+* [Transaction Schema](#Transaction-Schema)
+    * [TxRequest](#TxRequest)
+    * [TxAnchor](#TxAnchor)
+    * [Transaction ID](#Transaction-ID)
+* [Transaction Request Schema](#Transaction-Request-Schema)
+    * [Payload](#Payload)
+    * [Shard Id](#Shard-Id)
+    * [Submitter Id](#Submitter-Id)
+    * [Last Transaction](#Last-Transaction)
+    * [Submitter Sequence](#Submitter-Sequence)
+    * [Padding](#Padding)
+    * [Request Signature](#Request-Signature)
+* [Anchor Schema](#Anchor-Schema)
+    * [Node Id](#Node-Id)
+    * [Shard Sequence](#Shard-Sequence)
+    * [Shard Parent](#Shard-Parent)
+    * [Shard Uncles](#Shard-Uncles)
+    * [Weight](#Weight)
+    * [Anchor Signature](#Anchor-Signature)
 
 ## Transaction Schema
 A transaction consists of the following fields:
 
 ```
-// serialized transaction payload
-Payload []byte
-// transaction payload signature by the submitter
-Signature []byte
+// transaction request from submitter
+TxRequest *TxRequest
 // transaction anchor from DLT stack
 TxAnchor *Anchor
 ```
-### Payload
-`Payload` is the serialized transaction data as per application/shard's schema. It is opaque to the DLT stack. Application instances for each shard determine their own schema and semantics for handling this data.
+### TxRequest
+`TxRequest` is the transaction request from a submitter. It contains meta data necessary to order transaction correctly in right submitter's history sequence.
 
+### TxAnchor
+The `TxAnchor` is a signed meta data about the transaction's place in the shard DAG, as seen by the transaction approving application instance node. It contains meta data necessary to order transaction correctly in application's shard DAG.
 
-### Signature
-`Signature` is a 64 byte array of the ECDSA signature (`bytes[:32] == R, bytes[32:] == S`) using submitter's private key over SHA256 digest of submitter's sequence and the transaction payload. Assuming that payload is serialized in a byte array `payload` and reference to transaction is in `tx`, then the signature can be calculated as following:
+### Transaction ID
+The transaction's ID is a `[64]byte` unique identifier computed from a SHA512 hash of transaction's contents as following:
 
 ```
-// use the submitter's sequence in transaction's anchor as nonce value
-nonce := tx.Anchor().SubmitterSeq
+data := make([]byte, 0)
+// start with submitter's request signature
+data = append(data, tx.Request().Signature...)
+// append anchor's signature
+data = append(data, tx.Anchor().Signature...)
+tx.id = sha512.Sum512(data)
 
-// append the nonce value in bytes with the payload bytes
-noncedBytes := append(common.Uint64ToBytes(nonce), payload...)
+```
+
+> Due to the trust-less nature of network, the transaction Id is not included with transaction bytes exchanged over the network, rather its computed locally by each node when it receives a transaction's bytes from a peer.
+
+
+## Transaction Request Schema
+A transaction request has following schema:
+
+```
+// payload for transaction's operations
+Payload []byte
+// shard id for the transaction
+ShardId []byte
+// Submitter's public ID
+SubmitterId []byte
+// submitter's last transaction
+LastTx [64]byte
+// submitter's transaction sequence
+SubmitterSeq uint64
+// a padding to meet challenge for network's DoS protection
+Padding uint64
+// signature of the transaction request's contents using submitter's private key
+Signature []byte
+```
+
+### Payload
+`Payload` is the serialized transaction data as per application/shard's schema. It is opaque to the DLT stack. Application instances of a shard determine and agree on their own schema and semantics for handling this data.
+
+> This data element could be encrypted by application instances using an off-the-chain encryption mechanism.
+
+### Shard Id
+`ShardId` is the byte array uniquely identifying the application shard for an anchor (and its transaction).
+
+### Submitter Id
+`SubmitterId` is the ECDSA public key of the transaction requester. This value will be used in validating the signature of transation payload later. Also, protocol uses full length of the public key as Id of submitter.
+
+### Last Transaction
+`LastTx` is the reference to last transaction from submitter's history, provided by the submitter as a parameter for transaction request. 
+
+### Submitter Sequence
+`SubmitterSeq` is a monotonically increasing number to track the number of transactions submitted by the transaction requestor. This value is also used as "nonce" for transaction payload signature, to protect against replay attacks. Also, this value is used for double spending detection, as described in more details with [DAG protocol documentation](https://github.com/trust-net/dag-documentation#Submitter-Sequencing-Rules).
+
+### Padding
+`Padding` is an unsigned 8 byte integer, used for meeting proof of work requirements by the network. This minimal PoW scheme is used as a deterrent against denial of service or spam attack by submitters.
+
+> Current implementation does not enforce any PoW, so this is kept at 0x0 
+
+### Request Signature
+`Signature` is a 64 byte array of the ECDSA signature (`bytes[:32] == R, bytes[32:] == S`) using submitter's private key over SHA256 digest of transaction reauest parameters. Assuming that reference to transaction request is in `r`, then the signature can be calculated as following:
+
+```
+// create a place holder for request's bytes
+bytes := make([]byte, 0, len(r.Payload)+len(r.ShardId)+144)
+
+// start with payload of the request
+bytes = append(bytes, r.Payload...)
+
+// follow that with shard ID for this request
+bytes = append(bytes, r.ShardId...)
+
+// add submitter's last transaction ID
+bytes = append(bytes, r.LastTx[:]...)
+
+// then the submitter's public ID itself
+bytes = append(bytes, r.SubmitterId...)
+
+// add submiter's sequence for this transaction request
+bytes = append(bytes, common.Uint64ToBytes(r.SubmitterSeq)...)
+
+// finally the padding to meet PoW needs
+bytes = append(bytes, common.Uint64ToBytes(r.Padding)...)
 
 // compute SHA256 digest of the bytes
-hash := sha256.Sum256(noncedBytes)
+hash := sha256.Sum256(bytes)
 
-// sign the hash using ECDS private key of the submitter
+// sign the hash using ECDSA private key of the submitter
 type signature struct {
 	R *big.Int
 	S *big.Int
@@ -57,32 +133,12 @@ s.R, s.S, _ = ecdsa.Sign(rand.Reader, submitterKey, hash[:])
 serializedSignature := append(sig.R.Bytes(), sig.S.Bytes()...)
 ```
 
-### TxAnchor
-The `TxAnchor` is a signed artifact requested by the transaction submitter from an application instance node, and it contains proof of the transaction's meta data to help place transaction in right application shard and submitter's history sequence.
-
-### Transaction ID
-The transaction's ID is a `[64]byte` unique identifier computed from a SHA512 hash of transaction's contents as following:
-
-```
-data := make([]byte, 0)
-// signature should be sufficient to capture payload and submitter ID
-data = append(data, tx.Signature...)
-// append anchor's signature
-data = append(data, tx.TxAnchor.Signature...)
-tx.id = sha512.Sum512(data)
-
-```
-
-> Due to the trust-less nature of network, the transaction Id is not included with transaction structure exchanged over the network, rather its computed locally by each node when it receives a transaction's contents from a peer.
-
 ## Anchor Schema
-Following are the contents of an Anchor:
+Following are the contents of an Anchor in a transaction:
 
 ```
 // transaction approver application instance node ID
 NodeId []byte
-// transaction approver application's shard ID
-ShardId []byte
 // sequence of this transaction within the shard
 ShardSeq uint64
 // weight of this transaction withing shard DAG (sum of all ancestor's weight + 1)
@@ -91,21 +147,12 @@ Weight uint64
 ShardParent [64]byte
 // uncle transactions within the shard
 ShardUncles [][64]byte
-// transaction submitter's public ID
-Submitter []byte
-// submitter's last transaction ID
-SubmitterLastTx [64]byte
-// submitter's transaction sequence number
-SubmitterSeq uint64
 // anchor signature from DLT stack
 Signature []byte
 ```
 
 ### Node Id
 `NodeId` is the public key (full length) of the node's ECDSA key. It's included in the anchor to validate the anchor signature when a transaction is received/processed at each node in the network. Also, Protocol uses the full length of the key for node's ID.
-
-### Shard Id
-`ShardId` is the byte array uniquely identifying the application shard for an anchor (and its transaction).
 
 ### Shard Sequence
 `ShardSeq` is the depth of shard's DAG at the time of anchor request.
@@ -122,39 +169,26 @@ Signature []byte
 ### Weight
 `Weight` is the combined weight of all known tips of shard's DAG, at the time of anchor request, plus `1` for the new anchor. Essentially, this is a measure of how much value this new transaction anchor adds by cryptographically linking with other tips in the shard's DAG.
 
-### Submitter Id
-`Submitter` is the ECDSA public key of the anchor requester. This value will be used in validating the signature of transation payload later. Also, protocol uses full length of the public key as Id of submitter.
-
-### Submitter Sequence
-`SubmitterSeq` is a monotonically increasing number to track the number of transactions submitted by the anchor requestor. This value is also used as "nonce" for transaction payload signature. Also, this value is used for double spending detection, as described in more details with [DAG protocol documentation](https://github.com/trust-net/dag-documentation#Submitter-Sequencing-Rules).
-
-### Submitter Last Transaction
-`SubmitterLastTx` is the reference to last transaction from submitter's history, provided by the submitter as a parameter for anchor request. 
-
 ### Anchor Signature
-The `Signature` in an anchor is a 64 byte array of the ECDSA signature (`bytes[:32] == R, bytes[32:] == S`) using node's private key over SHA256 digest of Anchor's parameters in order as following:
+The `Signature` in an anchor is a 64 byte array of the ECDSA signature (`bytes[:32] == R, bytes[32:] == S`) using node's private key over SHA256 digest of Anchor's parameters in order as following (assuming reference to anchor is in `a`):
 
 ```
 // initialize a byte array to collect anchor parameters in order
 payload := make([]byte, 0, 1024)
 
-// append anchor's parameters in following order
-payload = append(payload, a.ShardId...)
+// append parameters from "a" in following order
 payload = append(payload, a.NodeId...)
-payload = append(payload, a.Submitter...)
+payload = append(payload, common.Uint64ToBytes(a.ShardSeq)...)
+payload = append(payload, common.Uint64ToBytes(a.Weight)...)
 payload = append(payload, a.ShardParent[:]...)
 for _, uncle := range a.ShardUncles {
 	payload = append(payload, uncle[:]...)
 }
-payload = append(payload, common.Uint64ToBytes(a.ShardSeq)...)
-payload = append(payload, common.Uint64ToBytes(a.Weight)...)
-payload = append(payload, a.SubmitterLastTx[:]...)
-payload = append(payload, common.Uint64ToBytes(a.SubmitterSeq)...)
 
-// compute SHA512 hash of the bytes
+// compute SHA256 hash of the bytes
 hash := sha256.Sum256(payload)
 
-// sign the hash using ECDS private key of the node
+// sign the hash using ECDSA private key of the node
 type signature struct {
 	R *big.Int
 	S *big.Int
@@ -163,5 +197,5 @@ s := signature{}
 s.R, s.S, _ = ecdsa.Sign(rand.Reader, nodeKey, hash[:])
 
 // serialize the signature to add to the anchor
-serializedSignature := append(s.R.Bytes(), s.S.Bytes()...)
+a.Signature := append(s.R.Bytes(), s.S.Bytes()...)
 ```
