@@ -4,9 +4,6 @@ package main
 
 import (
 	"bufio"
-	"crypto/ecdsa"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -17,7 +14,6 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/state"
-	"math/big"
 	"os"
 	"strconv"
 	"strings"
@@ -34,7 +30,7 @@ var commands = map[string][2]string{
 	"double": {"usage: double <owned counter name> <xfer value> <recipient 1 counter> <recipient 2 countr>", "submit two double spending transactions on local node"},
 	"multi":  {"usage: multi <owned resource name> <xfer value> <recipient resource name>", "submit a redundant transactions on two different nodes"},
 	"split":  {"usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>", "submit two double spending transactions on two different nodes"},
-	"sign":   {"usage: sign <nonce> <base64 encoded payload>", "submit a payload and nonce to sign using CLI's submitter keys"},
+	"sign":   {"usage: sign <base64 encoded payload>", "submit a payload to sign using CLI's submitter keys"},
 }
 
 var (
@@ -75,18 +71,6 @@ type ArgsXferValue struct {
 	Destination string
 	// xfer value
 	Value int64
-}
-
-func sign(nonce int, txPayload []byte) []byte {
-	// sign the test payload using SHA512 hash and ECDSA private key
-	type signature struct {
-		R *big.Int
-		S *big.Int
-	}
-	s := signature{}
-	hash := sha256.Sum256(append(common.Uint64ToBytes(uint64(nonce)), txPayload...))
-	s.R, s.S, _ = ecdsa.Sign(rand.Reader, submitter.Key, hash[:])
-	return append(s.R.Bytes(), s.S.Bytes()...)
 }
 
 func scanCreateArgs(scanner *bufio.Scanner) (args []ArgsCreate) {
@@ -392,21 +376,17 @@ func cli(local, remote stack.DLT) error {
 						}
 					case "sign":
 						var payload string
-						var nonce int
-						if wordScanner.Scan() {
-							nonce, _ = strconv.Atoi(wordScanner.Text())
-						}
 						if wordScanner.Scan() {
 							payload = wordScanner.Text()
 						}
-						if nonce > 0 && len(payload) != 0 {
+						if len(payload) != 0 {
 							if bytes, err := base64.StdEncoding.DecodeString(payload); err != nil {
 								fmt.Printf("Invalid base64 payload: %s\n", err)
 							} else {
 								// sign payload using CLI's submitter
-
+								fmt.Printf("Submitter Id: %x\nLastTx: %x\nSequence: %d\nShard Id: %x\n", submitter.Id, submitter.LastTx, submitter.Seq, submitter.ShardId)
 								// print the base64 encoded signature
-								fmt.Printf("Signature: %s\n", base64.StdEncoding.EncodeToString(sign(nonce, bytes)))
+								fmt.Printf("Signature: %s\n", base64.StdEncoding.EncodeToString(submitter.NewRequest(string(bytes)).Signature))
 							}
 						} else {
 							fmt.Printf("%s\n", commands["sign"][1])

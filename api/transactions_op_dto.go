@@ -55,7 +55,7 @@ func ParseSubmitRequest(r *http.Request) (*SubmitRequest, error) {
 		return nil, fmt.Errorf("invalid shard_id")
 	}
 	if bytes, _ := hex.DecodeString(req.LastTx); len(bytes) != 64 {
-		return nil, fmt.Errorf("invalid shard_parent")
+		return nil, fmt.Errorf("invalid last_tx")
 	} else {
 		copy(txReq.LastTx[:], bytes)
 	}
