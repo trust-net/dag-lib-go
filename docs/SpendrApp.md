@@ -11,11 +11,11 @@
     * [Local Double Spend](#Local-Double-Spend)
     * [Multiple Node Submission](#Multiple-Node-Submission)
     * [Split Shard Submission](#Split-Shard-Submission)
-* [REST Endpoints](#REST-Endpoints)
-    * [Get Resource](#Get-Resource)
-    * [Resource Creation Payload](#Resource-Creation-Payload)
-    * [Transfer Value Payload](#Transfer-Value-Payload)
-    * [Submit Transaction](#Submit-Transaction)
+* [API Specifications](#API-Specifications)
+    * [Op: Query Resource Value](#Op-Query-Resource-Value)
+    * [Op: Resource Creation Payload](#Op-Resource-Creation-Payload)
+    * [Op: Value Transfer Payload](#Op-Value-Transfer-Payload)
+    * [Op: Submit Transaction](#Op-Submit-Transaction)
 
 ## Application Architecture
 A test driver application is provided to demonstrate and validate the double spending resolution protocol of the DLT stack protocol. Application implements following capabilities:
@@ -137,12 +137,174 @@ CLI> usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>
 ```
 Above command will submit 2 different value transfer operations as 2 separate transaction requests in parallel to two different nodes using the same submitter seq. Network should eventually detect this double spending attempt and consistently converge on only one of the value transfer operation while rejecting the other operation on all nodes. World state on all nodes should show consistent and correct values for all recipients.
 
-## REST Endpoints
-### Get Resource
-tbd
-### Resource Creation Payload
-tbd
-### Transfer Value Payload
-tbd
-### Submit Transaction
-tbd
+## API Specifications
+Application provides REST API to perform following operations from a remote client:
+* Create Resource
+  * Fetch the payload for "Create Resource" operation from Spendr's `Op: Resource Creation Payload`
+  * Create a signed transaction request using provided payload and submitter's meta data
+  * Submit transaction request using Spendr's `Op: Submit Transaction`
+* Value Transfer
+  * Fetch the payload for "Value Transfer" operation from Spendr's `Op: Value Transfer Payload`
+  * Create a signed transaction request using provided payload and submitter's meta data
+  * Submit transaction request using Spendr's `Op: Submit Transaction`
+
+### Op: Query Resource Value
+This is a simple GET of specific resource by its key:
+
+```
+GET /resources/{key}
+```
+And response would consist of resource information as following:
+
+```
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Resource",
+  "description": "A world state resource for spendr application",
+  "type": "object",
+  "properties": {
+    "key": {
+      "description": "The unique identifier for a resource within spendr application",
+      "type": "string"
+    },
+    "owner": {
+      "description": "130 char hex encoded identity of the owner of resource",
+      "type": "string"
+    },
+    "value": {
+      "description": "64 bit unsigned integer value for resource at the time of query",
+      "type": "integer"
+    }
+  },
+  "required": [ "key", "owner", "value" ]
+}
+```
+
+### Op: Resource Creation Payload
+Request payload as per application's syntax/semantics for transaction payloads, for creating a new resource:
+
+```
+POST /opCode/create
+
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Resource",
+  "description": "A world state resource for spendr application",
+  "type": "object",
+  "properties": {
+    "key": {
+      "description": "The unique identifier for a resource within spendr application",
+      "type": "string"
+    },
+    "value": {
+      "description": "64 bit unsigned integer value for resource at creation",
+      "type": "integer"
+    }
+  },
+  "required": [ "key", "value" ]
+}
+```
+
+Successful response for above will return following:
+
+```
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Payload",
+  "description": "a base64 encoded string for serialized (and optionally encrypted) payload as per application syntax/semantics",
+  "type": "string"
+}
+```
+
+### Op: Value Transfer Payload
+Request payload as per application's syntax/semantics for transaction payloads, for transferring value from owned resource to another resource:
+
+```
+POST /opcode/xfer
+
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OpCodeXferValueRequest",
+  "description": "A spendr application OpCode request to transfer value from owned resource",
+  "type": "object",
+  "properties": {
+    "source": {
+      "description": "The unique identifier for an owned resource within spendr application",
+      "type": "string"
+    },
+    "destination": {
+      "description": "The unique identifier for destination resource within spendr application",
+      "type": "string"
+    },
+    "value": {
+      "description": "64 bit unsigned integer value to transfer from owned resource to destination resource",
+      "type": "integer"
+    }
+  },
+  "required": [ "source", "destination", "value" ]
+}
+```
+Successful response for above will return the _**Payload**_ as defined in [Op: Resource Creation Payload](#Op-Resource-Creation-Payload)
+
+### Op: Submit Transaction
+Submit a new application transaction request using submitter's history and payload provided by application:
+
+```
+POST /transactions
+
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SubmitRequest",
+  "description": "Request to submit a new transaction",
+  "type": "object",
+  "properties": {
+    "payload": {
+      "description": "a base64 encoded payload for application",
+      "type": "string"
+    },
+    "shard_id": {
+      "description": "a hex encoded string uniquely identifying the shard of the application",
+      "type": "string"
+    },
+    "submitter_id": {
+      "description": "130 char hex encoded public id of the submitter",
+      "type": "string"
+    },
+    "last_tx": {
+      "description": "130 char hex encoded id of the last transaction from submitter",
+      "type": "string"
+    },
+    "submitter_seq": {
+      "description": "64 bit unsigned integer value for transaction sequence from submitter",
+      "type": "integer"
+    },
+    "padding": {
+      "description": "64 bit unsigned integer value for padding request hash for PoW",
+      "type": "integer"
+    },
+    "signature": {
+      "description": "a base64 encoded ECDSA secpk256 signature of request using private key of submitter",
+      "type": "string"
+    }
+  },
+  "required": [ "payload", "shard_id", "submitter_id", "last_tx", "submitter_seq", "padding", "signature" ]
+}
+```
+
+Above request should return a success response for transaction submission as following:
+
+```
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SubmitResponse",
+  "description": "Response to successful transaction submission",
+  "type": "object",
+  "properties": {
+    "tx_id": {
+      "description": "130 char hex encoded id of the submitted transaction",
+      "type": "string"
+    }
+  },
+  "required": [ "tx_id"]
+}
+```

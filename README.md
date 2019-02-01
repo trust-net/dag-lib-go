@@ -193,7 +193,7 @@ Once application execution completes (either due to application shutdown, or any
 ### Iteration 8
 * changed the transaction submission flow to a single step request from submitter
 * moved the shard's DAG tip "coalescing" inside critical stage after the shard world state is locked
-* protocol implementation bug fixes, as per Issue [#52]
+* protocol implementation bug fixes, as per [Iteration 8](https://github.com/trust-net/dag-lib-go/issues/52)
 
 ### Iteration 7
 * Made protocol's hashing and encryption compatible with ethereumJ based [Java client](https://github.com/trust-net/dag-lib-java)
