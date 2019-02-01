@@ -205,14 +205,25 @@ POST /opCode/create
 }
 ```
 
-Successful response for above will return following:
+<a name="#opcode"></a>Successful response for a payload request will return following `OpCode` response:
 
 ```
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Payload",
-  "description": "a base64 encoded string for serialized (and optionally encrypted) payload as per application syntax/semantics",
-  "type": "string"
+  "title": "OpCode",
+  "description": "application's opcode for requested operation",
+  "type": "object",
+  "properties": {
+    "payload": {
+      "description": "a base64 encoded string for serialized (and optionally encrypted) payload as per application syntax/semantics for requested operation",
+      "type": "string"
+    },
+    "description": {
+      "description": "a user friendly description of the payload operation",
+      "type": "string"
+    }
+  },
+  "required": [ "payload", "description"]
 }
 ```
 
@@ -244,7 +255,7 @@ POST /opcode/xfer
   "required": [ "source", "destination", "value" ]
 }
 ```
-Successful response for above will return the _**Payload**_ as defined in [Op: Resource Creation Payload](#Op-Resource-Creation-Payload)
+Successful response for above will return the _**OpCode**_ as defined [above](#opcode).
 
 ### Op: Submit Transaction
 Submit a new application transaction request using submitter's history and payload provided by application:
