@@ -72,6 +72,9 @@ type MockP2P struct {
 
 func (p2p *MockP2P) Anchor(a *dto.Anchor) error {
 	p2p.IsAnchored = true
+	if a != nil {
+		a.NodeId = p2p.Id()
+	}
 	return nil
 }
 
