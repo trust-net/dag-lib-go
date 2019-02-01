@@ -129,7 +129,6 @@ func (l *layerDEVp2p) Broadcast(msgId []byte, msgcode uint64, data interface{}) 
 	for _, peer := range l.peers {
 		if err := peer.Send(msgId, msgcode, data); err != nil {
 			// skip
-//			return err
 		}
 	}
 	return nil

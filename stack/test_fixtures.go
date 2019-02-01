@@ -1,3 +1,4 @@
+// Copyright 2018-2019 The trust-net Authors
 package stack
 
 import (
@@ -43,7 +44,7 @@ type mockEndorser struct {
 	TxUpdateCalled       bool
 	KnownShardsTxsCalled bool
 	ReplaceCalled        bool
-	ValidateCalled         bool
+	ValidateCalled       bool
 	ApproverCalled       bool
 	HandlerReturn        error
 	orig                 endorsement.Endorser

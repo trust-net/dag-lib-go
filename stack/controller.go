@@ -113,7 +113,7 @@ func (d *dlt) validateSignatures(tx dto.Transaction) error {
 func (d *dlt) isPoW(req *dto.TxRequest) bool {
 	// make sure submitter did some work
 	// TBD
-	
+
 	return true
 }
 
@@ -142,22 +142,22 @@ func (d *dlt) Submit(req *dto.TxRequest) (dto.Transaction, error) {
 	if !d.p2p.Verify(req.Bytes(), req.Signature, req.SubmitterId) {
 		return nil, errors.New("Request signature invalid")
 	}
-	
+
 	// lock shard
 	if err := d.sharder.LockState(); err != nil {
 		d.logger.Error("Failed to get world state lock: %s", err)
 		return nil, err
 	}
 	defer d.sharder.UnlockState()
-	
+
 	// build a transaction
 	var tx dto.Transaction
 	if a, err := d.anchor(); err != nil {
-		return nil, err 
+		return nil, err
 	} else {
 		tx = dto.NewTransaction(req, a)
 	}
-	
+
 	// check if message was already seen by stack
 	if d.isSeen(tx.Id()) {
 		d.logger.Debug("Discarding submission of seen transaction: %x", tx.Id())
@@ -224,12 +224,6 @@ func (d *dlt) anchor() (*dto.Anchor, error) {
 		d.logger.Debug("Failed to get sharder's anchor: %s", err)
 		return nil, err
 	}
-
-//	// get endorser's update on anchor
-//	if err := d.endorser.Anchor(a); err != nil {
-//		d.logger.Debug("Failed to get endorser's anchor: %s", err)
-//		return nil, err
-//	}
 
 	// get p2p layer's update on anchor
 	if err := d.p2p.Anchor(a); err != nil {
@@ -723,7 +717,6 @@ func (d *dlt) handleRECV_SubmitterWalkUpResponseMsg(peer p2p.Peer, events chan c
 	// not saving/checking peer state because ID for request is different response, and
 	// we possibly want to run multiple sync's in parallel with same peer, so just do validation
 	// on actual response message contents
-
 	//	// confirm that message id matches expected peer state
 	//	if data := peer.GetState(int(RECV_SubmitterWalkUpResponseMsg)); data == nil || string(data.([]byte)) != string(msg.Id()) {
 	//		d.logger.Error("Recieved unexpected SubmitterWalkUpResponseMsg for submmiter/seq: %x / %d", msg.Submitter, msg.Seq)

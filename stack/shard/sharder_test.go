@@ -1,8 +1,8 @@
+// Copyright 2018-2019 The trust-net Authors
 package shard
 
 import (
 	"fmt"
-	//	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/repo"
@@ -193,10 +193,10 @@ func TestAnchorRegistered(t *testing.T) {
 	}
 
 	// anchor does not have shard Id anymore
-//	// anchor should have registered app's ID
-//	if string(a.ShardId) != "test shard" {
-//		t.Errorf("Incorrect shard ID: %s", a.ShardId)
-//	}
+	//	// anchor should have registered app's ID
+	//	if string(a.ShardId) != "test shard" {
+	//		t.Errorf("Incorrect shard ID: %s", a.ShardId)
+	//	}
 
 	// anchor should have shard's 1st sequence (since no other transaction after genesis)
 	if a.ShardSeq != 0x01 {

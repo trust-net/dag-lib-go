@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// Transaction request schema
 package dto
 
 import (

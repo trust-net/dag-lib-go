@@ -1,3 +1,4 @@
+// Copyright 2018-2019 The trust-net Authors
 package endorsement
 
 import (
@@ -337,9 +338,9 @@ func TestAnchor_ValidSubmitterRequest(t *testing.T) {
 
 	// create a new transaction request with pre-populated transaction as parent
 	req := &dto.TxRequest{
-		SubmitterId:       parent.Request().SubmitterId,
-		SubmitterSeq:    parent.Request().SubmitterSeq + 1,
-		LastTx: parent.Id(),
+		SubmitterId:  parent.Request().SubmitterId,
+		SubmitterSeq: parent.Request().SubmitterSeq + 1,
+		LastTx:       parent.Id(),
 	}
 
 	// send request for validation to endorser
@@ -367,9 +368,9 @@ func TestAnchor_InvalidParent(t *testing.T) {
 
 	// create a new transaction request with pre-populated transaction as parent, but incorrect parent hash
 	req := &dto.TxRequest{
-		SubmitterId:       parent.Request().SubmitterId,
-		SubmitterSeq:    parent.Request().SubmitterSeq + 1,
-		LastTx: dto.RandomHash(),
+		SubmitterId:  parent.Request().SubmitterId,
+		SubmitterSeq: parent.Request().SubmitterSeq + 1,
+		LastTx:       dto.RandomHash(),
 	}
 
 	// send request for validation to endorser
@@ -397,9 +398,9 @@ func TestAnchor_UnexpectedSequence(t *testing.T) {
 
 	// create a new transaction request with pre-populated transaction as parent, but incorrect sequence
 	req := &dto.TxRequest{
-		SubmitterId:       parent.Request().SubmitterId,
-		SubmitterSeq:    parent.Request().SubmitterSeq + 20,
-		LastTx: parent.Id(),
+		SubmitterId:  parent.Request().SubmitterId,
+		SubmitterSeq: parent.Request().SubmitterSeq + 20,
+		LastTx:       parent.Id(),
 	}
 
 	// send request for validation to endorser
@@ -434,10 +435,10 @@ func TestAnchor_DoubleSpending(t *testing.T) {
 
 	// create a new transaction request with same submitter ID, Seq and Shard ID
 	req := &dto.TxRequest{
-		SubmitterId:       child.Request().SubmitterId,
-		SubmitterSeq:    child.Request().SubmitterSeq,
-		LastTx: parent.Id(),
-		ShardId:         child.Request().ShardId,
+		SubmitterId:  child.Request().SubmitterId,
+		SubmitterSeq: child.Request().SubmitterSeq,
+		LastTx:       parent.Id(),
+		ShardId:      child.Request().ShardId,
 	}
 
 	// send request for validation to endorser
@@ -472,10 +473,10 @@ func TestAnchor_RelaxedSequenceRequirements(t *testing.T) {
 
 	// create a new transaction request with same submitter ID, Seq but a different Shard ID
 	req := &dto.TxRequest{
-		SubmitterId:       child.Request().SubmitterId,
-		SubmitterSeq:    child.Request().SubmitterSeq,
-		LastTx: parent.Id(),
-		ShardId:         []byte("a different shard"),
+		SubmitterId:  child.Request().SubmitterId,
+		SubmitterSeq: child.Request().SubmitterSeq,
+		LastTx:       parent.Id(),
+		ShardId:      []byte("a different shard"),
 	}
 
 	// send request for validation to endorser

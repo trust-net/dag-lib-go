@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// An anchor for transaction meta data
 package dto
 
 import (
@@ -9,8 +11,6 @@ type Anchor struct {
 	// transaction approver application instance node ID
 	NodeId []byte
 	// moved below to transaction request from submitter
-//	// transaction approver application's shard ID
-//	ShardId []byte
 	// sequence of this transaction within the shard
 	ShardSeq uint64
 	// weight of this transaction withing shard DAG (sum of all ancestor's weight + 1)
@@ -40,7 +40,6 @@ func (a *Anchor) DeSerialize(data []byte) error {
 func (a *Anchor) Bytes() []byte {
 	payload := make([]byte, 0, 1024)
 	payload = append(payload, a.NodeId...)
-//	payload = append(payload, a.ShardId...)
 	payload = append(payload, common.Uint64ToBytes(a.ShardSeq)...)
 	payload = append(payload, common.Uint64ToBytes(a.Weight)...)
 	payload = append(payload, a.ShardParent[:]...)

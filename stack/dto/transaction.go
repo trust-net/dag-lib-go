@@ -1,10 +1,9 @@
-// Copyright 2018 The trust-net Authors
+// Copyright 2018-2019 The trust-net Authors
 // Common DTO types used throughout DLT stack
 package dto
 
 import (
 	"crypto/sha512"
-	//	"encoding/binary"
 	"github.com/trust-net/dag-lib-go/common"
 )
 
@@ -79,6 +78,6 @@ func NewTransaction(r *TxRequest, a *Anchor) *transaction {
 	}
 	return &transaction{
 		TxRequest: r,
-		TxAnchor: a,
+		TxAnchor:  a,
 	}
 }

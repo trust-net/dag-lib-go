@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// a logger uitility method
 package log
 
 import (

@@ -1,3 +1,4 @@
+// Copyright 2018-2019 The trust-net Authors
 package p2p
 
 import (

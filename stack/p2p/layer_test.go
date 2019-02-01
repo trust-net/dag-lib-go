@@ -1,3 +1,4 @@
+// Copyright 2018-2019 The trust-net Authors
 package p2p
 
 import (
@@ -159,10 +160,10 @@ func TestAnchor(t *testing.T) {
 	parent := dto.RandomHash()
 	uncles := [][64]byte{dto.RandomHash(), dto.RandomHash()}
 	a := &dto.Anchor{
-		ShardSeq:        0x21,
-		Weight:          0xf1,
-		ShardParent:     parent,
-		ShardUncles:     uncles,
+		ShardSeq:    0x21,
+		Weight:      0xf1,
+		ShardParent: parent,
+		ShardUncles: uncles,
 	}
 
 	// send anchor for processing

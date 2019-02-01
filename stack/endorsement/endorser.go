@@ -1,4 +1,4 @@
-// Copyright 2018 The trust-net Authors
+// Copyright 2018-2019 The trust-net Authors
 // Endorsement Layer interface and implementation for DLT Statck
 package endorsement
 
@@ -37,9 +37,9 @@ type endorser struct {
 
 func GenesisSubmitterTx(submitterId []byte) dto.Transaction {
 	tx := dto.NewTransaction(&dto.TxRequest{
-		SubmitterId: submitterId,
+		SubmitterId:  submitterId,
 		SubmitterSeq: 0x0,
-		Signature: submitterId,
+		Signature:    submitterId,
 	}, &dto.Anchor{
 		Signature: submitterId,
 	})

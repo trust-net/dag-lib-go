@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// A database repo to handle DLT state and history
 package repo
 
 import (

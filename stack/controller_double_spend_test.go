@@ -1,3 +1,4 @@
+// Copyright 2018-2019 The trust-net Authors
 package stack
 
 import (
@@ -13,7 +14,7 @@ func TestRECV_ALERT_DoubleSpend_LocalWinner(t *testing.T) {
 	local, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 	// create another instance, as a remote stack
 	remote, _, _, _, _ := initMocksAndDb()
-	
+
 	// create two double spending transaction requests
 	var localTx, remoteTx dto.Transaction
 	var err error
@@ -59,7 +60,7 @@ func TestRECV_ALERT_DoubleSpend_LocalWinner(t *testing.T) {
 	if !endorser.KnownShardsTxsCalled {
 		t.Errorf("Endorser did not get called for submitter/seq history")
 	}
-	
+
 	// we should not flush the local shard
 	if sharder.FlushCalled {
 		t.Errorf("shard flush should not get called when local transaction wins")
@@ -86,31 +87,11 @@ func TestRECV_ALERT_DoubleSpend_LocalWinner(t *testing.T) {
 // test stack controller event listener handles ALERT_DoubleSpend correctly
 // when remote transaction is earlier
 func TestRECV_ALERT_DoubleSpend_RemoteWinner(t *testing.T) {
-//	// create a DLT stack instance with registered app and initialized mocks
-//	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
-//
-//	// build some transaction history
-//	submitter := dto.TestSubmitter()
-//	for i := 0; i < 10; i++ {
-//		newTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "test")
-//		stack.Submit(newTx)
-//		submitter.LastTx = newTx.Id()
-//		submitter.Seq += 1
-//	}
-//	// create two double spending transactions
-//	remoteTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "spend $10")
-//	// add some extra weight for remote transaction
-//	stack.Submit(TestSignedTransaction("dummy tx to add some weight"))
-//	localTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "spend same $10")
-//	if err := stack.Submit(localTx); err != nil {
-//		t.Errorf("Failed to submit local transaction: %s", err)
-//	}
-
 	// create a DLT stack instance with registered app and initialized mocks
 	local, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 	// create another instance, as a remote stack
 	remote, _, _, _, _ := initMocksAndDb()
-	
+
 	// create two double spending transaction requests
 	var remoteTx dto.Transaction
 	var err error
@@ -161,7 +142,7 @@ func TestRECV_ALERT_DoubleSpend_RemoteWinner(t *testing.T) {
 	if !sharder.FlushCalled {
 		t.Errorf("shard flush did not get called when remote transaction wins")
 	}
-	
+
 	// we should send force shard sync message to peer
 	if !peer.SendCalled {
 		t.Errorf("should send force shard sync message to peer")
@@ -205,33 +186,13 @@ func TestPeerListnerGeneratesEventForForceShardFlushMsg(t *testing.T) {
 }
 
 // test stack controller event listener handles RECV_ForceShardFlushMsg correctly
-// when validation to compare with local transaction shows local was earlier 
+// when validation to compare with local transaction shows local was earlier
 func TestRECV_ForceShardFlushMsg_LocalWasEarlier(t *testing.T) {
-//	// create a DLT stack instance with registered app and initialized mocks
-//	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
-//
-//	// build some transaction history
-//	submitter := dto.TestSubmitter()
-//	for i := 0; i < 10; i++ {
-//		newTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "test")
-//		stack.Submit(newTx)
-//		submitter.LastTx = newTx.Id()
-//		submitter.Seq += 1
-//	}
-//	// create two double spending transactions
-//	localTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "spend $10")
-//	// add some extra weight for remote transaction
-//	stack.Submit(TestSignedTransaction("dummy tx to add some weight"))
-//	remoteTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "spend same $10")
-//	if err := stack.Submit(localTx); err != nil {
-//		t.Errorf("Failed to submit local transaction: %s", err)
-//	}
-
 	// create a DLT stack instance with registered app and initialized mocks
 	local, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 	// create another instance, as a remote stack
 	remote, _, _, _, _ := initMocksAndDb()
-	
+
 	// create two double spending transaction requests
 	var remoteTx dto.Transaction
 	var err error
@@ -277,7 +238,7 @@ func TestRECV_ForceShardFlushMsg_LocalWasEarlier(t *testing.T) {
 	if !endorser.KnownShardsTxsCalled {
 		t.Errorf("Endorser did not get called for submitter/seq history")
 	}
-	
+
 	// we should not flush the local shard
 	if sharder.FlushCalled {
 		t.Errorf("shard flush should not get called when local transaction wins")
@@ -295,33 +256,13 @@ func TestRECV_ForceShardFlushMsg_LocalWasEarlier(t *testing.T) {
 }
 
 // test stack controller event listener handles RECV_ForceShardFlushMsg correctly
-// when validation to compare with local transaction shows remote was earlier 
+// when validation to compare with local transaction shows remote was earlier
 func TestRECV_ForceShardFlushMsg_RemoteWasEarlier(t *testing.T) {
-//	// create a DLT stack instance with registered app and initialized mocks
-//	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
-//
-//	// build some transaction history
-//	submitter := dto.TestSubmitter()
-//	for i := 0; i < 10; i++ {
-//		newTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "test")
-//		stack.Submit(newTx)
-//		submitter.LastTx = newTx.Id()
-//		submitter.Seq += 1
-//	}
-//	// create two double spending transactions
-//	remoteTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "spend $10")
-//	// add some extra weight for remote transaction
-//	stack.Submit(TestSignedTransaction("dummy tx to add some weight"))
-//	localTx := submitter.NewTransaction(stack.Anchor(submitter.Id, submitter.Seq, submitter.LastTx), "spend same $10")
-//	if err := stack.Submit(localTx); err != nil {
-//		t.Errorf("Failed to submit local transaction: %s", err)
-//	}
-
 	// create a DLT stack instance with registered app and initialized mocks
 	local, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 	// create another instance, as a remote stack
 	remote, _, _, _, _ := initMocksAndDb()
-	
+
 	// create two double spending transaction requests
 	var remoteTx dto.Transaction
 	var err error
@@ -372,7 +313,7 @@ func TestRECV_ForceShardFlushMsg_RemoteWasEarlier(t *testing.T) {
 	if !sharder.FlushCalled {
 		t.Errorf("shard flush did not get called when remote transaction wins")
 	}
-	
+
 	// we should send force shard sync message to peer
 	if !peer.SendCalled {
 		t.Errorf("should send force shard sync message to peer")

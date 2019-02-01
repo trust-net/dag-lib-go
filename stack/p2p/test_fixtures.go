@@ -1,4 +1,4 @@
-// Copyright 2018 The trust-net Authors
+// Copyright 2018-2019 The trust-net Authors
 // Mock DEVp2p implementations for use as test fixtures
 package p2p
 

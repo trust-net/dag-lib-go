@@ -1,4 +1,4 @@
-// Copyright 2018 The trust-net Authors
+// Copyright 2018-2019 The trust-net Authors
 // A network counter application to test DLT Stack library
 package main
 
@@ -7,12 +7,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/state"
-	"github.com/trust-net/dag-lib-go/common"
 	"os"
 	"strconv"
 	"strings"

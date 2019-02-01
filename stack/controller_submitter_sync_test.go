@@ -1,5 +1,4 @@
 // Copyright 2018-2019 The trust-net Authors
-// Controller interface and implementation for DLT Statck
 package stack
 
 import (
@@ -56,12 +55,7 @@ func TestRECV_SubmitterWalkUpRequestMsg_HasEntry(t *testing.T) {
 	tx, _ := stack.Submit(submitter.NewRequest("test payload1"))
 	submitter.LastTx = tx.Id()
 	submitter.Seq += 1
-	
-//	nextAnchor := stack.Anchor(tx.Request().SubmitterId, 0x02, tx.Id())
-//	nextAnchor := stack.anchor()
-//	if nextAnchor == nil {
-//		t.Errorf("Failed to get anchor for next sequence")
-//	}
+
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
@@ -151,11 +145,8 @@ func TestRECV_SubmitterWalkUpResponseMsg_UnknownShard(t *testing.T) {
 	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-//	tx := TestSignedTransaction("test payload1")
-//	stack.Submit(tx)
-    tx, _ := stack.Submit(dto.TestSubmitter().NewRequest("test payload1"))
+	tx, _ := stack.Submit(dto.TestSubmitter().NewRequest("test payload1"))
 	// build a SubmitterWalkUpResponseMsg that has same submitter, seq but different shard
-//	nextAnchor := stack.Anchor(tx.Anchor().Submitter, 0x02, tx.Id())
 	msg := NewSubmitterWalkUpResponseMsg(NewSubmitterWalkUpRequestMsg(tx.Request()))
 	msg.Transactions = [][64]byte{dto.RandomHash()}
 	msg.Shards = [][]byte{[]byte("a different shard")}
@@ -167,8 +158,6 @@ func TestRECV_SubmitterWalkUpResponseMsg_UnknownShard(t *testing.T) {
 	// build a mock peer
 	mockConn := p2p.TestConn()
 	peer := NewMockPeer(mockConn)
-	//	// set the peer state to expect the message ID
-	//	peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), msg.Id())
 
 	// start stack's event listener
 	events := make(chan controllerEvent, 10)
@@ -211,12 +200,9 @@ func TestRECV_SubmitterWalkUpResponseMsg_DoubleSpend(t *testing.T) {
 	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-//	tx := TestSignedTransaction("test payload1")
-//	stack.Submit(tx)
 	tx, _ := stack.Submit(dto.TestSubmitter().NewRequest("test payload1"))
 
 	// build a SubmitterWalkUpResponseMsg that has same submitter, seq, shard but different transaction
-//	nextAnchor := stack.Anchor(tx.Anchor().Submitter, 0x02, tx.Id())
 	msg := NewSubmitterWalkUpResponseMsg(NewSubmitterWalkUpRequestMsg(tx.Request()))
 	msg.Transactions = [][64]byte{dto.RandomHash()}
 	msg.Shards = [][]byte{tx.Request().ShardId}
@@ -271,7 +257,7 @@ func TestRECV_SubmitterWalkUpResponseMsg_DoubleSpend(t *testing.T) {
 func TestRECV_SubmitterWalkUpResponseMsg_ContinueWalkUp(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
-	
+
 	// setup DLT DB with submitter history using 1 shard/transaction pair for the submitter/seq
 	submitter := []byte("a test submitter")
 	seq := uint64(0x21)
@@ -345,15 +331,12 @@ func TestRECV_SubmitterWalkUpResponseMsg_AllKnownPairs(t *testing.T) {
 	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-//	tx := TestSignedTransaction("test payload1")
-//	stack.Submit(tx)
 	sub := dto.TestSubmitter()
-    tx, _ := stack.Submit(sub.NewRequest("test payload1"))
-    sub.LastTx = tx.Id()
-    sub.Seq += 1
+	tx, _ := stack.Submit(sub.NewRequest("test payload1"))
+	sub.LastTx = tx.Id()
+	sub.Seq += 1
 
 	// build a SubmitterWalkUpResponseMsg that has same submitter, seq, shard and transaction
-//	nextAnchor := stack.Anchor(tx.Anchor().Submitter, 0x02, tx.Id())
 	msg := NewSubmitterWalkUpResponseMsg(NewSubmitterWalkUpRequestMsg(sub.NewRequest("dummy")))
 	msg.Transactions = [][64]byte{tx.Id()}
 	msg.Shards = [][]byte{tx.Request().ShardId}
@@ -1132,12 +1115,7 @@ func TestRECV_SubmitterProcessDownResponseMsg_HappyPath(t *testing.T) {
 	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 
 	// setup DLT DB with submitter history using 1 shard/transaction pairs for the submitter/seq
-//	tx1 := TestSignedTransaction("test payload1")
-//	if err := stack.Submit(tx1); err != nil {
-//		t.Errorf("Failed to submit transaction 1: %s", err)
-//	}
 	stack.Submit(dto.TestSubmitter().NewRequest("test payload1"))
-
 
 	p2pLayer.Reset()
 	sharder.Reset()

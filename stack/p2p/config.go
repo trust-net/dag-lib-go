@@ -1,23 +1,23 @@
-// Copyright 2018 The trust-net Authors
+// Copyright 2018-2019 The trust-net Authors
 // Configuration for P2P Layer initialization for DAG protocol library
 package p2p
 
 import (
-	"os"
-	"errors"
-	"math/big"
 	"crypto/ecdsa"
 	"encoding/json"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/nat"
+	"errors"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/discover"
+	"github.com/ethereum/go-ethereum/p2p/nat"
+	"math/big"
+	"os"
 )
 
-type ECDSAKey struct{
+type ECDSAKey struct {
 	Curve string
-	X, Y []byte
-	D []byte
+	X, Y  []byte
+	D     []byte
 }
 
 type Config struct {
@@ -32,7 +32,7 @@ type Config struct {
 	MaxPeers int `json:"max_peers"       gencodec:"required"`
 
 	// Name sets the node name of this server.
-	Name string  `json:"node_name"       gencodec:"required"`
+	Name string `json:"node_name"       gencodec:"required"`
 
 	// Bootnodes are used to establish connectivity
 	// with the rest of the network.
@@ -67,52 +67,52 @@ func (c *Config) key() (*ecdsa.PrivateKey, error) {
 		return nil, errors.New("missing 'key_file' parameter")
 	}
 	switch c.KeyType {
-		case "ECDSA_S256":
-			// read the keyfile, if present, else create a new key and persist
-			if file, err := os.Open(c.KeyFile); err == nil {
-				// source the secret key from file
-				data := make([]byte, 1024)
-				if count, err := file.Read(data); err == nil && count <= 1024 {
-					data = data[:count]
-					ecdsaKey := ECDSAKey{}
-					if err := json.Unmarshal(data, &ecdsaKey); err != nil {
-						return nil, err
-					} else {
-						nodekey := new(ecdsa.PrivateKey)
-						nodekey.PublicKey.Curve = crypto.S256()
-						nodekey.D = new(big.Int)
-						nodekey.D.SetBytes(ecdsaKey.D) 
-						nodekey.PublicKey.X = new(big.Int)
-						nodekey.PublicKey.X.SetBytes(ecdsaKey.X)
-						nodekey.PublicKey.Y = new(big.Int)
-						nodekey.PublicKey.Y.SetBytes(ecdsaKey.Y)
-						return nodekey, nil
-					}
+	case "ECDSA_S256":
+		// read the keyfile, if present, else create a new key and persist
+		if file, err := os.Open(c.KeyFile); err == nil {
+			// source the secret key from file
+			data := make([]byte, 1024)
+			if count, err := file.Read(data); err == nil && count <= 1024 {
+				data = data[:count]
+				ecdsaKey := ECDSAKey{}
+				if err := json.Unmarshal(data, &ecdsaKey); err != nil {
+					return nil, err
 				} else {
-					return nil, errors.New("failed to read KeyFile")
+					nodekey := new(ecdsa.PrivateKey)
+					nodekey.PublicKey.Curve = crypto.S256()
+					nodekey.D = new(big.Int)
+					nodekey.D.SetBytes(ecdsaKey.D)
+					nodekey.PublicKey.X = new(big.Int)
+					nodekey.PublicKey.X.SetBytes(ecdsaKey.X)
+					nodekey.PublicKey.Y = new(big.Int)
+					nodekey.PublicKey.Y.SetBytes(ecdsaKey.Y)
+					return nodekey, nil
 				}
 			} else {
-				// generate new secret key and persist to file
-				nodekey, _ := crypto.GenerateKey()
-				ecdsaKey := ECDSAKey {
-					Curve: "S256",
-					X: nodekey.X.Bytes(),
-					Y: nodekey.Y.Bytes(),
-					D: nodekey.D.Bytes(),
-				}
-				if data, err := json.Marshal(ecdsaKey); err == nil {
-					if file, err := os.Create(c.KeyFile); err == nil {
-						file.Write(data)
-					} else {
-						return nil, errors.New("failed to save KeyFile")
-					}
-				} else {
-					return nil, err
-				}
-				return nodekey, nil
+				return nil, errors.New("failed to read KeyFile")
 			}
-		default:
-			return nil, errors.New("missing or unsupported 'key_type' parameter")
+		} else {
+			// generate new secret key and persist to file
+			nodekey, _ := crypto.GenerateKey()
+			ecdsaKey := ECDSAKey{
+				Curve: "S256",
+				X:     nodekey.X.Bytes(),
+				Y:     nodekey.Y.Bytes(),
+				D:     nodekey.D.Bytes(),
+			}
+			if data, err := json.Marshal(ecdsaKey); err == nil {
+				if file, err := os.Create(c.KeyFile); err == nil {
+					file.Write(data)
+				} else {
+					return nil, errors.New("failed to save KeyFile")
+				}
+			} else {
+				return nil, err
+			}
+			return nodekey, nil
+		}
+	default:
+		return nil, errors.New("missing or unsupported 'key_type' parameter")
 	}
 }
 
@@ -135,7 +135,7 @@ func (c *Config) listenAddr() string {
 func (c *Config) bootnodes() []*discover.Node {
 	// parse bootnodes from config, if present
 	if c.Bootnodes != nil {
-		bootnodes := make([]*discover.Node,0,len(c.Bootnodes))
+		bootnodes := make([]*discover.Node, 0, len(c.Bootnodes))
 		for _, bootnode := range c.Bootnodes {
 			if enode, err := discover.ParseNode(bootnode); err == nil {
 				bootnodes = append(bootnodes, enode)
@@ -152,16 +152,16 @@ func (c *Config) bootnodes() []*discover.Node {
 func (c *Config) toDEVp2pConfig() (*p2p.Config, error) {
 	key, err := c.key()
 	switch {
-		case key == nil:
-			return nil, err
-		case c.MaxPeers < 1:
-			return nil, errors.New("'max_peers' must be non zero")
-		case len(c.ProtocolName) == 0:
-			return nil, errors.New("missing 'proto_name' parameter")
-		case len(c.Name) == 0:
-			return nil, errors.New("missing 'node_name' parameter")
+	case key == nil:
+		return nil, err
+	case c.MaxPeers < 1:
+		return nil, errors.New("'max_peers' must be non zero")
+	case len(c.ProtocolName) == 0:
+		return nil, errors.New("missing 'proto_name' parameter")
+	case len(c.Name) == 0:
+		return nil, errors.New("missing 'node_name' parameter")
 	}
-	conf := p2p.Config {
+	conf := p2p.Config{
 		MaxPeers:       c.MaxPeers,
 		PrivateKey:     key,
 		Name:           c.Name,

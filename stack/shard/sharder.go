@@ -1,4 +1,4 @@
-// Copyright 2018 The trust-net Authors
+// Copyright 2018-2019 The trust-net Authors
 // Sharding Layer interface and implementation for DLT Statck
 package shard
 
@@ -55,7 +55,7 @@ type sharder struct {
 
 func GenesisShardTx(shardId []byte) dto.Transaction {
 	tx := dto.NewTransaction(&dto.TxRequest{
-		ShardId: shardId,
+		ShardId:   shardId,
 		Signature: shardId,
 	}, &dto.Anchor{
 		Signature: shardId,
@@ -221,8 +221,8 @@ func (s *sharder) SyncAnchor(shardId []byte) *dto.Anchor {
 func (s *sharder) updateAnchor(shardId []byte, a *dto.Anchor) error {
 
 	// shard ID is in transaction request now, not in anchor anymore
-//	// assign shard ID of specified shard
-//	a.ShardId = shardId
+	//	// assign shard ID of specified shard
+	//	a.ShardId = shardId
 
 	// get tips of the shard's DAG
 	tips := s.db.ShardTips(shardId)

@@ -28,9 +28,9 @@ var commands = map[string][2]string{
 	"create": {"usage: create <resource name> [<initial value>] ...", "create one or more resource with optional initial credits"},
 	"xfer":   {"usage: xfer <owned resource name> <xfer value> <recipient resource name>...", "transfer credits from one resource to another"},
 	"info":   {"usage: info", "get current shard tips from local and remote nodes"},
-//	"xover":  {"usage: xover <owned resource name> <xfer value> <recipient resource name>", "submit a transaction that has anchor from one node, but is submitted to another node"},
-	"quit":   {"usage: quit", "leave application and shutdown"},
-//	"dupe":   {"usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>", "submit two double spending transactions using same tip"},
+	//	"xover":  {"usage: xover <owned resource name> <xfer value> <recipient resource name>", "submit a transaction that has anchor from one node, but is submitted to another node"},
+	"quit": {"usage: quit", "leave application and shutdown"},
+	//	"dupe":   {"usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>", "submit two double spending transactions using same tip"},
 	"double": {"usage: double <owned counter name> <xfer value> <recipient 1 counter> <recipient 2 countr>", "submit two double spending transactions on local node"},
 	"multi":  {"usage: multi <owned resource name> <xfer value> <recipient resource name>", "submit a redundant transactions on two different nodes"},
 	"split":  {"usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>", "submit two double spending transactions on two different nodes"},
@@ -88,20 +88,6 @@ func sign(nonce int, txPayload []byte) []byte {
 	s.R, s.S, _ = ecdsa.Sign(rand.Reader, submitter.Key, hash[:])
 	return append(s.R.Bytes(), s.S.Bytes()...)
 }
-
-//func makeTransaction(dltStack stack.DLT, a *dto.Anchor, txPayload []byte) {
-//	if a == nil {
-//		fmt.Printf("Error submitting transaction: no anchor!!!\n")
-//		return
-//	}
-//	tx := sign(dto.NewTransaction(a), txPayload)
-//	if err := dltStack.Submit(tx); err != nil {
-//		fmt.Printf("Error submitting transaction: %s\n", err)
-//	} else {
-//		lastTx = tx.Id()
-//		lastSeq += 1
-//	}
-//}
 
 func scanCreateArgs(scanner *bufio.Scanner) (args []ArgsCreate) {
 	nextToken := func() (*string, int, bool) {
@@ -255,10 +241,6 @@ func doGetResource(key string) ([]byte, uint64, error) {
 		return nil, 0, err
 	}
 }
-
-//func doRequestAnchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
-//	return dlt.Anchor(id, seq, lastTx)
-//}
 
 func doSubmitTransaction(req *dto.TxRequest) (dto.Transaction, error) {
 	return dlt.Submit(req)
@@ -422,7 +404,7 @@ func cli(local, remote stack.DLT) error {
 								fmt.Printf("Invalid base64 payload: %s\n", err)
 							} else {
 								// sign payload using CLI's submitter
-								
+
 								// print the base64 encoded signature
 								fmt.Printf("Signature: %s\n", base64.StdEncoding.EncodeToString(sign(nonce, bytes)))
 							}
@@ -430,47 +412,6 @@ func cli(local, remote stack.DLT) error {
 							fmt.Printf("%s\n", commands["sign"][1])
 							fmt.Printf("%s\n", commands["sign"][0])
 						}
-//					case "dupe":
-//						arg := ArgsXferValue{}
-//						if wordScanner.Scan() {
-//							arg.Source = wordScanner.Text()
-//						}
-//						if wordScanner.Scan() {
-//							value, _ := strconv.Atoi(wordScanner.Text())
-//							arg.Value = int64(value)
-//						}
-//						var dest1, dest2 string
-//						if wordScanner.Scan() {
-//							dest1 = wordScanner.Text()
-//						}
-//						if wordScanner.Scan() {
-//							dest2 = wordScanner.Text()
-//						}
-//						if len(arg.Source) != 0 && len(dest1) != 0 && len(dest2) != 0 && arg.Value > 0 {
-//							// save original submitter state
-//							oldLastTx := submitter.LastTx
-//							oldLastSeq := submitter.Seq
-//							arg.Destination = dest1
-//							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-//							submitTx(dlt, submitter.NewRequest(makeXferValuePayload(arg.Source, arg.Destination, arg.Value)))
-//							// save new submitter state
-//							newLastTx := submitter.LastTx
-//							newLastSeq := submitter.Seq
-//							// switch submitter to old state to create double spending request
-//							submitter.LastTx = oldLastTx
-//							submitter.Seq = oldLastSeq
-//							arg.Destination = dest2
-//							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-//							newReq := submitter.NewRequest(makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
-//							// revert submitter back to state it was after last submission
-//							submitter.LastTx = newLastTx
-//							submitter.Seq = newLastSeq
-//							// submit new double spending request with same DLT stack
-//							submitTx(dlt, newReq)
-//						} else {
-//							fmt.Printf("%s\n", commands["dupe"][1])
-//							fmt.Printf("%s\n", commands["dupe"][0])
-//						}
 					case "double":
 						arg := ArgsXferValue{}
 						if wordScanner.Scan() {
@@ -512,25 +453,6 @@ func cli(local, remote stack.DLT) error {
 							fmt.Printf("%s\n", commands["double"][1])
 							fmt.Printf("%s\n", commands["double"][0])
 						}
-//					case "xover":
-//						arg := ArgsXferValue{}
-//						if wordScanner.Scan() {
-//							arg.Source = wordScanner.Text()
-//						}
-//						if wordScanner.Scan() {
-//							value, _ := strconv.Atoi(wordScanner.Text())
-//							arg.Value = int64(value)
-//						}
-//						if wordScanner.Scan() {
-//							arg.Destination = wordScanner.Text()
-//						}
-//						if len(arg.Source) != 0 && len(arg.Destination) != 0 && arg.Value > 0 {
-//							fmt.Printf("adding transaction: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-//							makeTransaction(remoteDlt, localDlt.Anchor(submitter, lastSeq+1, lastTx), makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
-//						} else {
-//							fmt.Printf("%s\n", commands["xover"][1])
-//							fmt.Printf("%s\n", commands["xover"][0])
-//						}
 					case "multi":
 						arg := ArgsXferValue{}
 						if wordScanner.Scan() {

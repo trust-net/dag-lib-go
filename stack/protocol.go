@@ -124,7 +124,7 @@ func (m *ShardChildrenResponseMsg) Code() uint64 {
 
 type ShardSyncMsg struct {
 	ShardId []byte
-	Anchor *dto.Anchor
+	Anchor  *dto.Anchor
 }
 
 func (m *ShardSyncMsg) Id() []byte {
@@ -140,7 +140,7 @@ func (m *ShardSyncMsg) Code() uint64 {
 func NewShardSyncMsg(shardId []byte, anchor *dto.Anchor) *ShardSyncMsg {
 	return &ShardSyncMsg{
 		ShardId: shardId,
-		Anchor: anchor,
+		Anchor:  anchor,
 	}
 }
 
@@ -248,7 +248,7 @@ func NewSubmitterProcessDownResponseMsg(req *SubmitterProcessDownRequestMsg, txs
 
 type ForceShardSyncMsg struct {
 	ShardId []byte
-	Anchor *dto.Anchor
+	Anchor  *dto.Anchor
 }
 
 func (m *ForceShardSyncMsg) Id() []byte {
@@ -264,7 +264,7 @@ func (m *ForceShardSyncMsg) Code() uint64 {
 func NewForceShardSyncMsg(shardId []byte, anchor *dto.Anchor) *ForceShardSyncMsg {
 	return &ForceShardSyncMsg{
 		ShardId: shardId,
-		Anchor: anchor,
+		Anchor:  anchor,
 	}
 }
 
