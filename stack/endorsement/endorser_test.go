@@ -1,3 +1,4 @@
+// Copyright 2018-2019 The trust-net Authors
 package endorsement
 
 import (
@@ -77,10 +78,10 @@ func TestTxApprover_DoubleSpending(t *testing.T) {
 	// create 2 double spending transactions using same submitter/seq/shard
 	tx1 := dto.TestSignedTransaction("test data")
 	tx2 := dto.TestSignedTransaction("test data")
-	tx2.Anchor().Submitter = tx1.Anchor().Submitter
-	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	tx2.Request().SubmitterId = tx1.Request().SubmitterId
+	tx2.Request().SubmitterSeq = tx1.Request().SubmitterSeq
 	// make sure shard ID is same, for double spending
-	tx2.Anchor().ShardId = tx1.Anchor().ShardId
+	tx2.Request().ShardId = tx1.Request().ShardId
 
 	// send first transaction to endorser
 	if err := e.Approve(tx1); err != nil {
@@ -116,10 +117,10 @@ func TestTxApprover_RelaxedSequenceRequirements(t *testing.T) {
 	// create 2 double spending transactions using same submitter/seq, but different shard
 	tx1 := dto.TestSignedTransaction("test data")
 	tx2 := dto.TestSignedTransaction("test data")
-	tx2.Anchor().Submitter = tx1.Anchor().Submitter
-	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	tx2.Request().SubmitterId = tx1.Request().SubmitterId
+	tx2.Request().SubmitterSeq = tx1.Request().SubmitterSeq
 	// make sure shard ID is different, for relaxed sequence requirement
-	tx2.Anchor().ShardId = []byte("a different shard")
+	tx2.Request().ShardId = []byte("a different shard")
 
 	// send first transaction to endorser
 	if err := e.Approve(tx1); err != nil {
@@ -196,10 +197,10 @@ func TestTxHandler_DoubleSpending(t *testing.T) {
 	// create 2 double spending transactions using same submitter/seq/shard
 	tx1 := dto.TestSignedTransaction("test data")
 	tx2 := dto.TestSignedTransaction("test data")
-	tx2.Anchor().Submitter = tx1.Anchor().Submitter
-	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	tx2.Request().SubmitterId = tx1.Request().SubmitterId
+	tx2.Request().SubmitterSeq = tx1.Request().SubmitterSeq
 	// make sure shard ID is same, for double spending
-	tx2.Anchor().ShardId = tx1.Anchor().ShardId
+	tx2.Request().ShardId = tx1.Request().ShardId
 
 	// send first transaction to endorser
 	if _, err := e.Handle(tx1); err != nil {
@@ -240,10 +241,10 @@ func TestTxHandler_RelaxedSequenceRequirements(t *testing.T) {
 	// create 2 double spending transactions using same submitter/seq, but different shard
 	tx1 := dto.TestSignedTransaction("test data")
 	tx2 := dto.TestSignedTransaction("test data")
-	tx2.Anchor().Submitter = tx1.Anchor().Submitter
-	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
+	tx2.Request().SubmitterId = tx1.Request().SubmitterId
+	tx2.Request().SubmitterSeq = tx1.Request().SubmitterSeq
 	// make sure shard ID is different, for relaxed sequence requirement
-	tx2.Anchor().ShardId = []byte("a different shard")
+	tx2.Request().ShardId = []byte("a different shard")
 
 	// send first transaction to endorser
 	if _, err := e.Handle(tx1); err != nil {
@@ -296,11 +297,11 @@ func TestTxHandler_OrphanTx(t *testing.T) {
 
 	// now create a new transaction with next sequence, but change last tx refer to unknown
 	tx2 := dto.TestSignedTransaction("test data")
-	tx2.Anchor().Submitter = tx1.Anchor().Submitter
-	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq + 1
-	tx2.Anchor().ShardId = tx1.Anchor().ShardId
+	tx2.Request().SubmitterId = tx1.Request().SubmitterId
+	tx2.Request().SubmitterSeq = tx1.Request().SubmitterSeq + 1
+	tx2.Request().ShardId = tx1.Request().ShardId
 	// force last tx reference to something not in DB
-	tx2.Anchor().SubmitterLastTx = dto.RandomHash()
+	tx2.Request().LastTx = dto.RandomHash()
 
 	// send second transaction to endorser
 	if res, err := e.Handle(tx2); err == nil || res != ERR_ORPHAN {
@@ -335,16 +336,16 @@ func TestAnchor_ValidSubmitterRequest(t *testing.T) {
 	}
 	testDb.Reset()
 
-	// create a new submitter anchor with pre-populated transaction as parent
-	a := &dto.Anchor{
-		Submitter:       parent.Anchor().Submitter,
-		SubmitterSeq:    parent.Anchor().SubmitterSeq + 1,
-		SubmitterLastTx: parent.Id(),
+	// create a new transaction request with pre-populated transaction as parent
+	req := &dto.TxRequest{
+		SubmitterId:  parent.Request().SubmitterId,
+		SubmitterSeq: parent.Request().SubmitterSeq + 1,
+		LastTx:       parent.Id(),
 	}
 
-	// send anchor for validation to endorser
-	if err := e.Anchor(a); err != nil {
-		t.Errorf("Anchor validation failed: %s", err)
+	// send request for validation to endorser
+	if err := e.Validate(req); err != nil {
+		t.Errorf("Request validation failed: %s", err)
 	}
 
 	// validate that submitter history was fetched for the parent and for current sequence
@@ -365,16 +366,16 @@ func TestAnchor_InvalidParent(t *testing.T) {
 	}
 	testDb.Reset()
 
-	// create a new submitter anchor with pre-populated transaction as parent, but incorrect parent hash
-	a := &dto.Anchor{
-		Submitter:       parent.Anchor().Submitter,
-		SubmitterSeq:    parent.Anchor().SubmitterSeq + 20,
-		SubmitterLastTx: dto.RandomHash(),
+	// create a new transaction request with pre-populated transaction as parent, but incorrect parent hash
+	req := &dto.TxRequest{
+		SubmitterId:  parent.Request().SubmitterId,
+		SubmitterSeq: parent.Request().SubmitterSeq + 1,
+		LastTx:       dto.RandomHash(),
 	}
 
-	// send anchor for validation to endorser
-	if err := e.Anchor(a); err == nil {
-		t.Errorf("Anchor validation did not check parent sequence")
+	// send request for validation to endorser
+	if err := e.Validate(req); err == nil {
+		t.Errorf("Request validation did not check parent sequence")
 	}
 
 	// validate that submitter history was fetched for the parent but not for current sequence
@@ -395,16 +396,16 @@ func TestAnchor_UnexpectedSequence(t *testing.T) {
 	}
 	testDb.Reset()
 
-	// create a new submitter anchor with pre-populated transaction as parent, but incorrect sequence
-	a := &dto.Anchor{
-		Submitter:       parent.Anchor().Submitter,
-		SubmitterSeq:    parent.Anchor().SubmitterSeq + 20,
-		SubmitterLastTx: parent.Id(),
+	// create a new transaction request with pre-populated transaction as parent, but incorrect sequence
+	req := &dto.TxRequest{
+		SubmitterId:  parent.Request().SubmitterId,
+		SubmitterSeq: parent.Request().SubmitterSeq + 20,
+		LastTx:       parent.Id(),
 	}
 
-	// send anchor for validation to endorser
-	if err := e.Anchor(a); err == nil {
-		t.Errorf("Anchor validation did not check parent sequence")
+	// send request for validation to endorser
+	if err := e.Validate(req); err == nil {
+		t.Errorf("Request validation did not check parent sequence")
 	}
 
 	// validate that submitter history was fetched for the parent but not for current sequence
@@ -424,25 +425,25 @@ func TestAnchor_DoubleSpending(t *testing.T) {
 		t.Errorf("Failed to update parent transaction: %s", err)
 	}
 	child := dto.TestSignedTransaction("test data")
-	child.Anchor().Submitter = parent.Anchor().Submitter
-	child.Anchor().SubmitterLastTx = parent.Id()
-	child.Anchor().SubmitterSeq = parent.Anchor().SubmitterSeq + 1
+	child.Request().SubmitterId = parent.Request().SubmitterId
+	child.Request().LastTx = parent.Id()
+	child.Request().SubmitterSeq = parent.Request().SubmitterSeq + 1
 	if err := testDb.UpdateSubmitter(child); err != nil {
 		t.Errorf("Failed to update child transaction: %s", err)
 	}
 	testDb.Reset()
 
-	// create a new submitter anchor with same submitter ID, Seq and Shard ID
-	a := &dto.Anchor{
-		Submitter:       child.Anchor().Submitter,
-		SubmitterSeq:    child.Anchor().SubmitterSeq,
-		SubmitterLastTx: parent.Id(),
-		ShardId:         child.Anchor().ShardId,
+	// create a new transaction request with same submitter ID, Seq and Shard ID
+	req := &dto.TxRequest{
+		SubmitterId:  child.Request().SubmitterId,
+		SubmitterSeq: child.Request().SubmitterSeq,
+		LastTx:       parent.Id(),
+		ShardId:      child.Request().ShardId,
 	}
 
-	// send anchor for validation to endorser
-	if err := e.Anchor(a); err == nil {
-		t.Errorf("Anchor validation did not check double spending")
+	// send request for validation to endorser
+	if err := e.Validate(req); err == nil {
+		t.Errorf("Request validation did not check double spending")
 	}
 
 	// validate that submitter history was fetched twice, once for the parent and then for current sequence
@@ -462,25 +463,25 @@ func TestAnchor_RelaxedSequenceRequirements(t *testing.T) {
 		t.Errorf("Failed to update parent transaction: %s", err)
 	}
 	child := dto.TestSignedTransaction("test data")
-	child.Anchor().Submitter = parent.Anchor().Submitter
-	child.Anchor().SubmitterLastTx = parent.Id()
-	child.Anchor().SubmitterSeq = parent.Anchor().SubmitterSeq + 1
+	child.Request().SubmitterId = parent.Request().SubmitterId
+	child.Request().LastTx = parent.Id()
+	child.Request().SubmitterSeq = parent.Request().SubmitterSeq + 1
 	if err := testDb.UpdateSubmitter(child); err != nil {
 		t.Errorf("Failed to update child transaction: %s", err)
 	}
 	testDb.Reset()
 
-	// create a new submitter anchor with same submitter ID, Seq but a different Shard ID
-	a := &dto.Anchor{
-		Submitter:       child.Anchor().Submitter,
-		SubmitterSeq:    child.Anchor().SubmitterSeq,
-		SubmitterLastTx: parent.Id(),
-		ShardId:         []byte("a different shard"),
+	// create a new transaction request with same submitter ID, Seq but a different Shard ID
+	req := &dto.TxRequest{
+		SubmitterId:  child.Request().SubmitterId,
+		SubmitterSeq: child.Request().SubmitterSeq,
+		LastTx:       parent.Id(),
+		ShardId:      []byte("a different shard"),
 	}
 
-	// send anchor for validation to endorser
-	if err := e.Anchor(a); err != nil {
-		t.Errorf("Anchor validation did not allow different shard with same sequence")
+	// send request for validation to endorser
+	if err := e.Validate(req); err != nil {
+		t.Errorf("Request validation did not allow different shard with same sequence")
 	}
 
 	// validate that submitter history was fetched twice, once for the parent and then for current sequence
@@ -500,17 +501,17 @@ func TestKnownShardsTxs_ValidRequest(t *testing.T) {
 		t.Errorf("Failed to update first transaction: %s", err)
 	}
 	tx2 := dto.TestSignedTransaction("transaction 2")
-	tx2.Anchor().Submitter = tx1.Anchor().Submitter
-	tx2.Anchor().SubmitterLastTx = tx1.Anchor().SubmitterLastTx
-	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
-	tx2.Anchor().ShardId = []byte("a different shard")
+	tx2.Request().SubmitterId = tx1.Request().SubmitterId
+	tx2.Request().LastTx = tx1.Request().LastTx
+	tx2.Request().SubmitterSeq = tx1.Request().SubmitterSeq
+	tx2.Request().ShardId = []byte("a different shard")
 	if err := testDb.UpdateSubmitter(tx2); err != nil {
 		t.Errorf("Failed to update 2nd transaction: %s", err)
 	}
 	testDb.Reset()
 
 	// fetch all known shard/tx pairs for the submitter/seq
-	shards, txs := e.KnownShardsTxs(tx1.Anchor().Submitter, tx1.Anchor().SubmitterSeq)
+	shards, txs := e.KnownShardsTxs(tx1.Request().SubmitterId, tx1.Request().SubmitterSeq)
 
 	if len(shards) != len(txs) {
 		t.Errorf("mismatch in shards and tx ids")
@@ -520,7 +521,7 @@ func TestKnownShardsTxs_ValidRequest(t *testing.T) {
 		t.Errorf("incorrect number of pairs: %d", len(shards))
 	}
 
-	if string(shards[0]) != string(tx1.Anchor().ShardId) || string(shards[1]) != string(tx2.Anchor().ShardId) {
+	if string(shards[0]) != string(tx1.Request().ShardId) || string(shards[1]) != string(tx2.Request().ShardId) {
 		t.Errorf("shard IDs are not correct")
 	}
 
@@ -545,17 +546,17 @@ func TestKnownShardsTxs_ZeroSeq(t *testing.T) {
 		t.Errorf("Failed to update first transaction: %s", err)
 	}
 	tx2 := dto.TestSignedTransaction("transaction 2")
-	tx2.Anchor().Submitter = tx1.Anchor().Submitter
-	tx2.Anchor().SubmitterLastTx = tx1.Anchor().SubmitterLastTx
-	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
-	tx2.Anchor().ShardId = []byte("a different shard")
+	tx2.Request().SubmitterId = tx1.Request().SubmitterId
+	tx2.Request().LastTx = tx1.Request().LastTx
+	tx2.Request().SubmitterSeq = tx1.Request().SubmitterSeq
+	tx2.Request().ShardId = []byte("a different shard")
 	if err := testDb.UpdateSubmitter(tx2); err != nil {
 		t.Errorf("Failed to update 2nd transaction: %s", err)
 	}
 	testDb.Reset()
 
 	// fetch all known shard/tx pairs for the submitter/seq "0"
-	shards, txs := e.KnownShardsTxs(tx1.Anchor().Submitter, 0x00)
+	shards, txs := e.KnownShardsTxs(tx1.Request().SubmitterId, 0x00)
 
 	if len(shards) != len(txs) {
 		t.Errorf("mismatch in shards and tx ids")
@@ -582,10 +583,10 @@ func TestKnownShardsTxs_UnknownSubmitter(t *testing.T) {
 		t.Errorf("Failed to update first transaction: %s", err)
 	}
 	tx2 := dto.TestSignedTransaction("transaction 2")
-	tx2.Anchor().Submitter = tx1.Anchor().Submitter
-	tx2.Anchor().SubmitterLastTx = tx1.Anchor().SubmitterLastTx
-	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
-	tx2.Anchor().ShardId = []byte("a different shard")
+	tx2.Request().SubmitterId = tx1.Request().SubmitterId
+	tx2.Request().LastTx = tx1.Request().LastTx
+	tx2.Request().SubmitterSeq = tx1.Request().SubmitterSeq
+	tx2.Request().ShardId = []byte("a different shard")
 	if err := testDb.UpdateSubmitter(tx2); err != nil {
 		t.Errorf("Failed to update 2nd transaction: %s", err)
 	}
@@ -619,17 +620,17 @@ func TestKnownShardsTxs_UnknownSequence(t *testing.T) {
 		t.Errorf("Failed to update first transaction: %s", err)
 	}
 	tx2 := dto.TestSignedTransaction("transaction 2")
-	tx2.Anchor().Submitter = tx1.Anchor().Submitter
-	tx2.Anchor().SubmitterLastTx = tx1.Anchor().SubmitterLastTx
-	tx2.Anchor().SubmitterSeq = tx1.Anchor().SubmitterSeq
-	tx2.Anchor().ShardId = []byte("a different shard")
+	tx2.Request().SubmitterId = tx1.Request().SubmitterId
+	tx2.Request().LastTx = tx1.Request().LastTx
+	tx2.Request().SubmitterSeq = tx1.Request().SubmitterSeq
+	tx2.Request().ShardId = []byte("a different shard")
 	if err := testDb.UpdateSubmitter(tx2); err != nil {
 		t.Errorf("Failed to update 2nd transaction: %s", err)
 	}
 	testDb.Reset()
 
 	// fetch all known shard/tx pairs for an unknown sequence
-	shards, txs := e.KnownShardsTxs(tx1.Anchor().Submitter, 0x11)
+	shards, txs := e.KnownShardsTxs(tx1.Request().SubmitterId, 0x11)
 
 	if len(shards) != len(txs) {
 		t.Errorf("mismatch in shards and tx ids")

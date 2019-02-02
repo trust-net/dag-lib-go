@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// REST API for spendr application
 package main
 
 import (
@@ -67,29 +69,6 @@ func getResourceByKey(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func requestAnchor(w http.ResponseWriter, r *http.Request) {
-	logger.Debug("Recieved POST /anchors from: %s", r.RemoteAddr)
-	// set headers
-	setHeaders(w)
-	// parse request body
-	req, err := api.ParseAnchorRequest(r)
-	if err != nil {
-		logger.Debug("Failed to decode request body: %s", err)
-		w.WriteHeader(400)
-		json.NewEncoder(w).Encode(err.Error())
-		return
-	}
-	// fetch an anchor from app
-	if anchor := doRequestAnchor(req.SubmitterBytes(), req.NextSeq, req.LastTxBytes()); anchor == nil {
-		logger.Debug("failed to anchor!!!")
-		w.WriteHeader(400)
-		json.NewEncoder(w).Encode("no anchor")
-	} else {
-		// respond back with anchor
-		json.NewEncoder(w).Encode(api.NewAnchorResponse(anchor))
-	}
-}
-
 func submitTransaction(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("Recieved POST /transactions from: %s", r.RemoteAddr)
 	// set headers
@@ -103,13 +82,13 @@ func submitTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// submit transaction to app
-	if err := doSubmitTransaction(req.DltTransaction()); err != nil {
+	if tx, err := doSubmitTransaction(req.DltRequest()); err != nil {
 		logger.Debug("Failed to submit transaction: %s", err)
 		w.WriteHeader(http.StatusNotAcceptable)
 		json.NewEncoder(w).Encode(err.Error())
 	} else {
 		// respond back with transaction submission result
-		json.NewEncoder(w).Encode(api.NewSubmitResponse(req.DltTransaction()))
+		json.NewEncoder(w).Encode(api.NewSubmitResponse(tx))
 	}
 }
 
@@ -127,8 +106,8 @@ func requestResourceCreationPayload(w http.ResponseWriter, r *http.Request) {
 	}
 	// respond with payload for the request
 	json.NewEncoder(w).Encode(OpcodeResponse{
-			Payload: base64.StdEncoding.EncodeToString(makeResourceCreationPayload(req.Key, int64(req.Value))),
-			Description: "Create " + req.Key,
+		Payload:     base64.StdEncoding.EncodeToString(makeResourceCreationPayload(req.Key, int64(req.Value))),
+		Description: "Create " + req.Key,
 	})
 }
 
@@ -146,8 +125,8 @@ func requestXferValuePayload(w http.ResponseWriter, r *http.Request) {
 	}
 	// respond with payload for the request
 	json.NewEncoder(w).Encode(OpcodeResponse{
-			Payload: base64.StdEncoding.EncodeToString(makeXferValuePayload(req.Source, req.Destination, int64(req.Value))),
-			Description: "Transfer from " + req.Source + " to " + req.Destination,
+		Payload:     base64.StdEncoding.EncodeToString(makeXferValuePayload(req.Source, req.Destination, int64(req.Value))),
+		Description: "Transfer from " + req.Source + " to " + req.Destination,
 	})
 }
 
@@ -160,7 +139,6 @@ func StartServer(listenPort int) error {
 	router := mux.NewRouter()
 	router.HandleFunc("/foo", getFoo).Methods("GET")
 	router.HandleFunc("/resources/{key}", getResourceByKey).Methods("GET")
-	router.HandleFunc("/anchors", requestAnchor).Methods("POST")
 	router.HandleFunc("/transactions", submitTransaction).Methods("POST")
 	router.HandleFunc("/opcode/create", requestResourceCreationPayload).Methods("POST")
 	router.HandleFunc("/opcode/xfer", requestXferValuePayload).Methods("POST")

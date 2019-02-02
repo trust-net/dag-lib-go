@@ -1,5 +1,4 @@
 // Copyright 2018-2019 The trust-net Authors
-// Controller interface and implementation for DLT Statck
 package stack
 
 import (
@@ -51,13 +50,12 @@ func TestRECV_SubmitterWalkUpRequestMsg_HasEntry(t *testing.T) {
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 
-	// submit a transactions to add ancestor to local shard's Anchor
-	tx := TestSignedTransaction("test payload1")
-	stack.Submit(tx)
-	nextAnchor := stack.Anchor(tx.Anchor().Submitter, 0x02, tx.Id())
-	if nextAnchor == nil {
-		t.Errorf("Failed to get anchor for next sequence")
-	}
+	// submit a transactions to add one ancestor to local submitter history
+	submitter := dto.TestSubmitter()
+	tx, _ := stack.Submit(submitter.NewRequest("test payload1"))
+	submitter.LastTx = tx.Id()
+	submitter.Seq += 1
+
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
@@ -75,8 +73,8 @@ func TestRECV_SubmitterWalkUpRequestMsg_HasEntry(t *testing.T) {
 		finished <- struct{}{}
 	}()
 
-	// now emit RECV_SubmitterWalkUpRequestMsg event requesting history using submitter's nextAnchor
-	req := NewSubmitterWalkUpRequestMsg(nextAnchor)
+	// now emit RECV_SubmitterWalkUpRequestMsg event requesting history using submitter's request from transaction
+	req := NewSubmitterWalkUpRequestMsg(submitter.NewRequest("dummy"))
 	events <- newControllerEvent(RECV_SubmitterWalkUpRequestMsg, req)
 	events <- newControllerEvent(SHUTDOWN, nil)
 
@@ -105,8 +103,8 @@ func TestRECV_SubmitterWalkUpRequestMsg_HasEntry(t *testing.T) {
 		t.Errorf("Incorrect number of shards: %d", len(peer.SendMsg.(*SubmitterWalkUpResponseMsg).Shards))
 	} else if peer.SendMsg.(*SubmitterWalkUpResponseMsg).Transactions[0] != tx.Id() {
 		t.Errorf("Incorrect transaction in response: %x\nExpected: %x", peer.SendMsg.(*SubmitterWalkUpResponseMsg).Transactions[0], tx.Id())
-	} else if string(peer.SendMsg.(*SubmitterWalkUpResponseMsg).Shards[0]) != string(tx.Anchor().ShardId) {
-		t.Errorf("Incorrect shard in response: %x\nExpected: %x", peer.SendMsg.(*SubmitterWalkUpResponseMsg).Shards[0], tx.Anchor().ShardId)
+	} else if string(peer.SendMsg.(*SubmitterWalkUpResponseMsg).Shards[0]) != string(tx.Request().ShardId) {
+		t.Errorf("Incorrect shard in response: %x\nExpected: %x", peer.SendMsg.(*SubmitterWalkUpResponseMsg).Shards[0], tx.Request().ShardId)
 	}
 }
 
@@ -147,11 +145,9 @@ func TestRECV_SubmitterWalkUpResponseMsg_UnknownShard(t *testing.T) {
 	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx := TestSignedTransaction("test payload1")
-	stack.Submit(tx)
+	tx, _ := stack.Submit(dto.TestSubmitter().NewRequest("test payload1"))
 	// build a SubmitterWalkUpResponseMsg that has same submitter, seq but different shard
-	nextAnchor := stack.Anchor(tx.Anchor().Submitter, 0x02, tx.Id())
-	msg := NewSubmitterWalkUpResponseMsg(NewSubmitterWalkUpRequestMsg(nextAnchor))
+	msg := NewSubmitterWalkUpResponseMsg(NewSubmitterWalkUpRequestMsg(tx.Request()))
 	msg.Transactions = [][64]byte{dto.RandomHash()}
 	msg.Shards = [][]byte{[]byte("a different shard")}
 	p2pLayer.Reset()
@@ -162,8 +158,6 @@ func TestRECV_SubmitterWalkUpResponseMsg_UnknownShard(t *testing.T) {
 	// build a mock peer
 	mockConn := p2p.TestConn()
 	peer := NewMockPeer(mockConn)
-	//	// set the peer state to expect the message ID
-	//	peer.SetState(int(RECV_SubmitterWalkUpResponseMsg), msg.Id())
 
 	// start stack's event listener
 	events := make(chan controllerEvent, 10)
@@ -206,13 +200,12 @@ func TestRECV_SubmitterWalkUpResponseMsg_DoubleSpend(t *testing.T) {
 	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx := TestSignedTransaction("test payload1")
-	stack.Submit(tx)
+	tx, _ := stack.Submit(dto.TestSubmitter().NewRequest("test payload1"))
+
 	// build a SubmitterWalkUpResponseMsg that has same submitter, seq, shard but different transaction
-	nextAnchor := stack.Anchor(tx.Anchor().Submitter, 0x02, tx.Id())
-	msg := NewSubmitterWalkUpResponseMsg(NewSubmitterWalkUpRequestMsg(nextAnchor))
+	msg := NewSubmitterWalkUpResponseMsg(NewSubmitterWalkUpRequestMsg(tx.Request()))
 	msg.Transactions = [][64]byte{dto.RandomHash()}
-	msg.Shards = [][]byte{nextAnchor.ShardId}
+	msg.Shards = [][]byte{tx.Request().ShardId}
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
@@ -269,24 +262,25 @@ func TestRECV_SubmitterWalkUpResponseMsg_ContinueWalkUp(t *testing.T) {
 	submitter := []byte("a test submitter")
 	seq := uint64(0x21)
 	tx1 := TestSignedTransaction("test payload1")
-	tx1.Anchor().Submitter = submitter
-	tx1.Anchor().SubmitterSeq = seq
-	tx1.Anchor().ShardId = []byte("shard 1")
+	tx1.Request().SubmitterId = submitter
+	tx1.Request().SubmitterSeq = seq
+	tx1.Request().ShardId = []byte("shard 1")
 	if err := testDb.UpdateSubmitter(tx1); err != nil {
 		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
 	}
 	// build another shard/transaction pair that is NOT in local DLT DB
 	tx2 := TestSignedTransaction("test payload2")
-	tx2.Anchor().Submitter = submitter
-	tx2.Anchor().SubmitterSeq = seq
-	tx2.Anchor().ShardId = []byte("shard 2")
+	tx2.Request().SubmitterId = submitter
+	tx2.Request().SubmitterSeq = seq
+	tx2.Request().ShardId = []byte("shard 2")
+
 	// build a SubmitterWalkUpResponseMsg that has above submitter/seq and both shard/transaction pairs
 	msg := &SubmitterWalkUpResponseMsg{
 		Submitter: submitter,
 		Seq:       seq,
 	}
 	msg.Transactions = [][64]byte{tx1.Id(), tx2.Id()}
-	msg.Shards = [][]byte{tx1.Anchor().ShardId, tx2.Anchor().ShardId}
+	msg.Shards = [][]byte{tx1.Request().ShardId, tx2.Request().ShardId}
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
@@ -337,13 +331,15 @@ func TestRECV_SubmitterWalkUpResponseMsg_AllKnownPairs(t *testing.T) {
 	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 
 	// submit a transactions to add ancestor to local shard's Anchor
-	tx := TestSignedTransaction("test payload1")
-	stack.Submit(tx)
+	sub := dto.TestSubmitter()
+	tx, _ := stack.Submit(sub.NewRequest("test payload1"))
+	sub.LastTx = tx.Id()
+	sub.Seq += 1
+
 	// build a SubmitterWalkUpResponseMsg that has same submitter, seq, shard and transaction
-	nextAnchor := stack.Anchor(tx.Anchor().Submitter, 0x02, tx.Id())
-	msg := NewSubmitterWalkUpResponseMsg(NewSubmitterWalkUpRequestMsg(nextAnchor))
+	msg := NewSubmitterWalkUpResponseMsg(NewSubmitterWalkUpRequestMsg(sub.NewRequest("dummy")))
 	msg.Transactions = [][64]byte{tx.Id()}
-	msg.Shards = [][]byte{nextAnchor.ShardId}
+	msg.Shards = [][]byte{tx.Request().ShardId}
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
@@ -397,16 +393,16 @@ func TestRECV_SubmitterWalkUpResponseMsg_ZeroPairsNonZeroSeq(t *testing.T) {
 	submitter := []byte("a test submitter")
 	seq := uint64(0x21)
 	tx1 := TestSignedTransaction("test payload1")
-	tx1.Anchor().Submitter = submitter
-	tx1.Anchor().SubmitterSeq = seq
-	tx1.Anchor().ShardId = []byte("shard 1")
+	tx1.Request().SubmitterId = submitter
+	tx1.Request().SubmitterSeq = seq
+	tx1.Request().ShardId = []byte("shard 1")
 	if err := testDb.UpdateSubmitter(tx1); err != nil {
 		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
 	}
 	// build a SubmitterWalkUpResponseMsg that has above submitter/seq bot no shard/transaction pairs
 	msg := &SubmitterWalkUpResponseMsg{
 		Submitter: submitter,
-		Seq:       seq,
+		Seq:       tx1.Request().SubmitterSeq,
 	}
 	msg.Transactions = [][64]byte{}
 	msg.Shards = [][]byte{}
@@ -459,16 +455,16 @@ func TestRECV_SubmitterWalkUpResponseMsg_MismatchShardTxCount(t *testing.T) {
 	submitter := []byte("a test submitter")
 	seq := uint64(0x21)
 	tx1 := TestSignedTransaction("test payload1")
-	tx1.Anchor().Submitter = submitter
-	tx1.Anchor().SubmitterSeq = seq
-	tx1.Anchor().ShardId = []byte("shard 1")
+	tx1.Request().SubmitterId = submitter
+	tx1.Request().SubmitterSeq = seq
+	tx1.Request().ShardId = []byte("shard 1")
 	if err := testDb.UpdateSubmitter(tx1); err != nil {
 		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
 	}
 	// build a SubmitterWalkUpResponseMsg that has above submitter/seq but mismatch in count of shard/transaction pairs
 	msg := &SubmitterWalkUpResponseMsg{
 		Submitter: submitter,
-		Seq:       seq,
+		Seq:       tx1.Request().SubmitterSeq,
 	}
 	msg.Transactions = [][64]byte{dto.RandomHash(), dto.RandomHash(), dto.RandomHash()}
 	msg.Shards = [][]byte{[]byte("shard 1"), []byte("shard 2")}
@@ -522,9 +518,9 @@ func testRECV_SubmitterWalkUpResponseMsg_StateValidationFailed(t *testing.T) {
 	submitter := []byte("a test submitter")
 	seq := uint64(0x21)
 	tx1 := TestSignedTransaction("test payload1")
-	tx1.Anchor().Submitter = submitter
-	tx1.Anchor().SubmitterSeq = seq
-	tx1.Anchor().ShardId = []byte("shard 1")
+	tx1.Request().SubmitterId = submitter
+	tx1.Request().SubmitterSeq = seq
+	tx1.Request().ShardId = []byte("shard 1")
 	if err := testDb.UpdateSubmitter(tx1); err != nil {
 		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
 	}
@@ -534,7 +530,7 @@ func testRECV_SubmitterWalkUpResponseMsg_StateValidationFailed(t *testing.T) {
 		Seq:       seq,
 	}
 	msg.Transactions = [][64]byte{tx1.Id()}
-	msg.Shards = [][]byte{tx1.Anchor().ShardId}
+	msg.Shards = [][]byte{tx1.Request().ShardId}
 	p2pLayer.Reset()
 	sharder.Reset()
 	endorser.Reset()
@@ -615,9 +611,9 @@ func TestRECV_SubmitterProcessDownRequestMsg_HasEntry(t *testing.T) {
 	submitter := []byte("a test submitter")
 	seq := uint64(0x21)
 	tx1 := TestSignedTransaction("test payload1")
-	tx1.Anchor().Submitter = submitter
-	tx1.Anchor().SubmitterSeq = seq
-	tx1.Anchor().ShardId = []byte("shard 1")
+	tx1.Request().SubmitterId = submitter
+	tx1.Request().SubmitterSeq = seq
+	tx1.Request().ShardId = []byte("shard 1")
 	if err := testDb.UpdateSubmitter(tx1); err != nil {
 		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
 	} else if err := testDb.UpdateShard(tx1); err != nil {
@@ -626,9 +622,9 @@ func TestRECV_SubmitterProcessDownRequestMsg_HasEntry(t *testing.T) {
 		t.Errorf("Failed to save transaction 1: %s", err)
 	}
 	tx2 := TestSignedTransaction("test payload2")
-	tx2.Anchor().Submitter = submitter
-	tx2.Anchor().SubmitterSeq = seq
-	tx2.Anchor().ShardId = []byte("shard 2")
+	tx2.Request().SubmitterId = submitter
+	tx2.Request().SubmitterSeq = seq
+	tx2.Request().ShardId = []byte("shard 2")
 	if err := testDb.UpdateSubmitter(tx2); err != nil {
 		t.Errorf("Failed to update submitter history for transaction 2: %s", err)
 	} else if err := testDb.UpdateShard(tx2); err != nil {
@@ -700,9 +696,9 @@ func TestRECV_SubmitterProcessDownRequestMsg_NoEntry(t *testing.T) {
 	submitter := []byte("a test submitter")
 	seq := uint64(0x21)
 	tx1 := TestSignedTransaction("test payload1")
-	tx1.Anchor().Submitter = submitter
-	tx1.Anchor().SubmitterSeq = seq
-	tx1.Anchor().ShardId = []byte("shard 1")
+	tx1.Request().SubmitterId = submitter
+	tx1.Request().SubmitterSeq = seq
+	tx1.Request().ShardId = []byte("shard 1")
 	if err := testDb.UpdateSubmitter(tx1); err != nil {
 		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
 	} else if err := testDb.UpdateShard(tx1); err != nil {
@@ -711,9 +707,9 @@ func TestRECV_SubmitterProcessDownRequestMsg_NoEntry(t *testing.T) {
 		t.Errorf("Failed to save transaction 1: %s", err)
 	}
 	tx2 := TestSignedTransaction("test payload2")
-	tx2.Anchor().Submitter = submitter
-	tx2.Anchor().SubmitterSeq = seq
-	tx2.Anchor().ShardId = []byte("shard 2")
+	tx2.Request().SubmitterId = submitter
+	tx2.Request().SubmitterSeq = seq
+	tx2.Request().ShardId = []byte("shard 2")
 	if err := testDb.UpdateSubmitter(tx2); err != nil {
 		t.Errorf("Failed to update submitter history for transaction 2: %s", err)
 	} else if err := testDb.UpdateShard(tx2); err != nil {
@@ -779,9 +775,9 @@ func TestRECV_SubmitterProcessDownRequestMsg_ZeroSeq(t *testing.T) {
 	submitter := []byte("a test submitter")
 	seq := uint64(0x1)
 	tx1 := TestSignedTransaction("test payload1")
-	tx1.Anchor().Submitter = submitter
-	tx1.Anchor().SubmitterSeq = seq
-	tx1.Anchor().ShardId = []byte("shard 1")
+	tx1.Request().SubmitterId = submitter
+	tx1.Request().SubmitterSeq = seq
+	tx1.Request().ShardId = []byte("shard 1")
 	if err := testDb.UpdateSubmitter(tx1); err != nil {
 		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
 	} else if err := testDb.UpdateShard(tx1); err != nil {
@@ -926,9 +922,9 @@ func TestRECV_SubmitterProcessDownResponseMsg_DoubleSpend(t *testing.T) {
 	submitter := []byte("a test submitter")
 	seq := uint64(0x1)
 	tx1 := TestSignedTransaction("test payload1")
-	tx1.Anchor().Submitter = submitter
-	tx1.Anchor().SubmitterSeq = seq
-	tx1.Anchor().ShardId = []byte("shard 1")
+	tx1.Request().SubmitterId = submitter
+	tx1.Request().SubmitterSeq = seq
+	tx1.Request().ShardId = []byte("shard 1")
 	if err := testDb.UpdateSubmitter(tx1); err != nil {
 		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
 	} else if err := testDb.UpdateShard(tx1); err != nil {
@@ -956,10 +952,12 @@ func TestRECV_SubmitterProcessDownResponseMsg_DoubleSpend(t *testing.T) {
 
 	// now emit RECV_SubmitterProcessDownResponseMsg event with a transaction that is double spending
 	tx2 := TestSignedTransaction("test payload1")
+	*tx2.Request() = *tx1.Request()
 	*tx2.Anchor() = *tx1.Anchor()
+	tx2.Anchor().Signature = []byte("different Id same tx")
 	msg := NewSubmitterProcessDownResponseMsg(&SubmitterProcessDownRequestMsg{
-		Submitter: tx1.Anchor().Submitter,
-		Seq:       tx1.Anchor().SubmitterSeq,
+		Submitter: tx1.Request().SubmitterId,
+		Seq:       tx1.Request().SubmitterSeq,
 	}, []dto.Transaction{tx2})
 	events <- newControllerEvent(RECV_SubmitterProcessDownResponseMsg, msg)
 	events <- newControllerEvent(SHUTDOWN, nil)
@@ -1021,9 +1019,9 @@ func TestRECV_SubmitterProcessDownResponseMsg_UnknownShardAncestor(t *testing.T)
 	submitter := []byte("a test submitter")
 	seq := uint64(0x1)
 	tx1 := TestSignedTransaction("test payload1")
-	tx1.Anchor().Submitter = submitter
-	tx1.Anchor().SubmitterSeq = seq
-	tx1.Anchor().ShardId = []byte("shard 1")
+	tx1.Request().SubmitterId = submitter
+	tx1.Request().SubmitterSeq = seq
+	tx1.Request().ShardId = []byte("shard 1")
 	if err := testDb.UpdateSubmitter(tx1); err != nil {
 		t.Errorf("Failed to update submitter history for transaction 1: %s", err)
 	} else if err := testDb.UpdateShard(tx1); err != nil {
@@ -1052,12 +1050,12 @@ func TestRECV_SubmitterProcessDownResponseMsg_UnknownShardAncestor(t *testing.T)
 	// now emit RECV_SubmitterProcessDownResponseMsg event with a transaction that has a ShardParent unknown locally
 	tx2 := TestSignedTransaction("test payload2")
 	tx2.Anchor().ShardParent = dto.RandomHash()
-	tx2.Anchor().Submitter = submitter
-	tx2.Anchor().SubmitterSeq = seq
-	tx2.Anchor().ShardId = []byte("shard 2")
+	tx2.Request().SubmitterId = submitter
+	tx2.Request().SubmitterSeq = seq
+	tx2.Request().ShardId = []byte("shard 2")
 	msg := NewSubmitterProcessDownResponseMsg(&SubmitterProcessDownRequestMsg{
-		Submitter: tx2.Anchor().Submitter,
-		Seq:       tx2.Anchor().SubmitterSeq,
+		Submitter: tx2.Request().SubmitterId,
+		Seq:       tx2.Request().SubmitterSeq,
 	}, []dto.Transaction{tx2})
 	events <- newControllerEvent(RECV_SubmitterProcessDownResponseMsg, msg)
 	events <- newControllerEvent(SHUTDOWN, nil)
@@ -1117,10 +1115,7 @@ func TestRECV_SubmitterProcessDownResponseMsg_HappyPath(t *testing.T) {
 	stack, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 
 	// setup DLT DB with submitter history using 1 shard/transaction pairs for the submitter/seq
-	tx1 := TestSignedTransaction("test payload1")
-	if err := stack.Submit(tx1); err != nil {
-		t.Errorf("Failed to submit transaction 1: %s", err)
-	}
+	stack.Submit(dto.TestSubmitter().NewRequest("test payload1"))
 
 	p2pLayer.Reset()
 	sharder.Reset()
@@ -1142,8 +1137,8 @@ func TestRECV_SubmitterProcessDownResponseMsg_HappyPath(t *testing.T) {
 	// now emit RECV_SubmitterProcessDownResponseMsg event with a transaction is not known locally
 	tx2 := TestSignedTransaction("test payload2")
 	msg := NewSubmitterProcessDownResponseMsg(&SubmitterProcessDownRequestMsg{
-		Submitter: tx2.Anchor().Submitter,
-		Seq:       tx2.Anchor().SubmitterSeq,
+		Submitter: tx2.Request().SubmitterId,
+		Seq:       tx2.Request().SubmitterSeq,
 	}, []dto.Transaction{tx2})
 	events <- newControllerEvent(RECV_SubmitterProcessDownResponseMsg, msg)
 	events <- newControllerEvent(SHUTDOWN, nil)

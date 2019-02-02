@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// A database repo to handle DLT state and history
 package repo
 
 import (
@@ -79,7 +81,7 @@ func (d *dltDb) GetTx(id [64]byte) dto.Transaction {
 		return nil
 	} else {
 		// deserialize the transaction read from DB
-		tx := dto.NewTransaction(&dto.Anchor{})
+		tx := dto.NewTransaction(&dto.TxRequest{}, &dto.Anchor{})
 		if err := tx.DeSerialize(data); err != nil {
 			return nil
 		}
@@ -159,7 +161,7 @@ func (d *dltDb) UpdateShard(tx dto.Transaction) error {
 	}
 
 	// remove parent and uncles from shard's TIPs (if present)
-	tips := d.shardTips(tx.Anchor().ShardId)
+	tips := d.shardTips(tx.Request().ShardId)
 	newTips := make([][64]byte, 0, len(tips))
 	uncles := make(map[[64]byte]struct{})
 	for _, uncle := range tx.Anchor().ShardUncles {
@@ -176,7 +178,7 @@ func (d *dltDb) UpdateShard(tx dto.Transaction) error {
 	newTips = append(newTips, tx.Id())
 	// fmt.Printf("adding child tip: %x\n", tx.Id())
 	// update shard's tips
-	if err = d.updateShardTips(tx.Anchor().ShardId, newTips); err != nil {
+	if err = d.updateShardTips(tx.Request().ShardId, newTips); err != nil {
 		return err
 	}
 
@@ -201,10 +203,10 @@ func (d *dltDb) ReplaceSubmitter(tx dto.Transaction) error {
 
 	// lookup submitter history, if present
 	var history *SubmitterHistory
-	if history = d.getSubmitterHistory(tx.Anchor().Submitter, tx.Anchor().SubmitterSeq); history == nil {
+	if history = d.getSubmitterHistory(tx.Request().SubmitterId, tx.Request().SubmitterSeq); history == nil {
 		history = &SubmitterHistory{
-			Submitter:    tx.Anchor().Submitter,
-			Seq:          tx.Anchor().SubmitterSeq,
+			Submitter:    tx.Request().SubmitterId,
+			Seq:          tx.Request().SubmitterSeq,
 			ShardTxPairs: make([]ShardTxPair, 0, 1),
 		}
 	}
@@ -212,7 +214,7 @@ func (d *dltDb) ReplaceSubmitter(tx dto.Transaction) error {
 	// remove any pre-existing shard/tx in history
 	found := false
 	newPair := ShardTxPair{
-		ShardId: tx.Anchor().ShardId,
+		ShardId: tx.Request().ShardId,
 		TxId:    tx.Id(),
 	}
 	for i, existingPair := range history.ShardTxPairs {
@@ -243,17 +245,17 @@ func (d *dltDb) UpdateSubmitter(tx dto.Transaction) error {
 
 	// lookup submitter history, if present
 	var history *SubmitterHistory
-	if history = d.getSubmitterHistory(tx.Anchor().Submitter, tx.Anchor().SubmitterSeq); history == nil {
+	if history = d.getSubmitterHistory(tx.Request().SubmitterId, tx.Request().SubmitterSeq); history == nil {
 		history = &SubmitterHistory{
-			Submitter:    tx.Anchor().Submitter,
-			Seq:          tx.Anchor().SubmitterSeq,
+			Submitter:    tx.Request().SubmitterId,
+			Seq:          tx.Request().SubmitterSeq,
 			ShardTxPairs: make([]ShardTxPair, 0, 1),
 		}
 	}
 
 	// make sure there is no pre-existing shard/tx in history
 	newPair := ShardTxPair{
-		ShardId: tx.Anchor().ShardId,
+		ShardId: tx.Request().ShardId,
 		TxId:    tx.Id(),
 	}
 	for _, existingPair := range history.ShardTxPairs {

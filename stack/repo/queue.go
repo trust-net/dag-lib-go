@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// A simple circular queue implementation for maintaining temporary state
 package repo
 
 import (

@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// Event definitions between asynchronous steps of DLT controller
 package stack
 
 import ()

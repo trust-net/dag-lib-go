@@ -1,8 +1,9 @@
+// Copyright 2018-2019 The trust-net Authors
 package consensus
 
 import (
-    "testing"
 	"github.com/trust-net/dag-lib-go/db"
+	"testing"
 )
 
 func TestInitiatization(t *testing.T) {

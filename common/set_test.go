@@ -1,7 +1,8 @@
+// Copyright 2018-2019 The trust-net Authors
 package common
 
 import (
-    "testing"
+	"testing"
 )
 
 func TestZeroAdd(t *testing.T) {

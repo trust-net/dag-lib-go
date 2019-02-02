@@ -4,38 +4,33 @@ package main
 
 import (
 	"bufio"
-	"crypto/ecdsa"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/state"
-	"math/big"
 	"os"
 	"strconv"
 	"strings"
 )
 
 var commands = map[string][2]string{
-	"show":   {"usage: show <countr name> ...", "show one or more counter's value"},
-	"create": {"usage: create <resource name> [<initial value>] ...", "create one or more counters with optional initial credits"},
-	"xfer":   {"usage: xfer <owned counter name> <xfer value> <recipient counter name>...", "transfer credits from one counter to another"},
+	"show":   {"usage: show <resource name> ...", "show one or more resource's value"},
+	"create": {"usage: create <resource name> [<initial value>] ...", "create one or more resource with optional initial credits"},
+	"xfer":   {"usage: xfer <owned resource name> <xfer value> <recipient resource name>...", "transfer credits from one resource to another"},
 	"info":   {"usage: info", "get current shard tips from local and remote nodes"},
-	"xover":  {"usage: xover <owned resource name> <xfer value> <recipient resource name>", "submit a transaction that has anchor from one node, but is submitted to another node"},
-	"quit":   {"usage: quit", "leave application and shutdown"},
-	"dupe":   {"usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>", "submit two double spending transactions using same tip"},
+	//	"xover":  {"usage: xover <owned resource name> <xfer value> <recipient resource name>", "submit a transaction that has anchor from one node, but is submitted to another node"},
+	"quit": {"usage: quit", "leave application and shutdown"},
+	//	"dupe":   {"usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>", "submit two double spending transactions using same tip"},
 	"double": {"usage: double <owned counter name> <xfer value> <recipient 1 counter> <recipient 2 countr>", "submit two double spending transactions on local node"},
 	"multi":  {"usage: multi <owned resource name> <xfer value> <recipient resource name>", "submit a redundant transactions on two different nodes"},
 	"split":  {"usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>", "submit two double spending transactions on two different nodes"},
-	"sign":   {"usage: sign <nonce> <base64 encoded payload>", "submit a payload and nonce to sign using CLI's submitter keys"},
+	"sign":   {"usage: sign <base64 encoded payload>", "submit a payload to sign using CLI's submitter keys"},
 }
 
 var (
@@ -44,12 +39,7 @@ var (
 	cmdPrompt = "SPENDR: "
 )
 
-var key *ecdsa.PrivateKey
-
-var submitter []byte
-
-var lastTx = [64]byte{}
-var lastSeq = uint64(0)
+var submitter *dto.Submitter
 
 // Transaction Ops
 type Ops struct {
@@ -81,35 +71,6 @@ type ArgsXferValue struct {
 	Destination string
 	// xfer value
 	Value int64
-}
-
-func sign(tx dto.Transaction, txPayload []byte) dto.Transaction {
-	// sign the test payload using SHA512 hash and ECDSA private key
-	type signature struct {
-		R *big.Int
-		S *big.Int
-	}
-	s := signature{}
-	hash := sha256.Sum256(append(common.Uint64ToBytes(tx.Anchor().SubmitterSeq), txPayload...))
-	s.R, s.S, _ = ecdsa.Sign(rand.Reader, key, hash[:])
-	tx.Self().Payload = txPayload
-	//	tx.Self().Signature, _ = common.Serialize(s)
-	tx.Self().Signature = append(s.R.Bytes(), s.S.Bytes()...)
-	return tx
-}
-
-func makeTransaction(dltStack stack.DLT, a *dto.Anchor, txPayload []byte) {
-	if a == nil {
-		fmt.Printf("Error submitting transaction: no anchor!!!\n")
-		return
-	}
-	tx := sign(dto.NewTransaction(a), txPayload)
-	if err := dltStack.Submit(tx); err != nil {
-		fmt.Printf("Error submitting transaction: %s\n", err)
-	} else {
-		lastTx = tx.Id()
-		lastSeq += 1
-	}
 }
 
 func scanCreateArgs(scanner *bufio.Scanner) (args []ArgsCreate) {
@@ -171,7 +132,7 @@ func handleOpCodeCreate(tx dto.Transaction, ws state.State, op Ops) error {
 	// create the resource
 	r := state.Resource{
 		Key:   []byte(arg.Name),
-		Owner: tx.Anchor().Submitter,
+		Owner: tx.Request().SubmitterId,
 		Value: common.Uint64ToBytes(uint64(arg.Value)),
 	}
 	// create resource in world state
@@ -192,23 +153,23 @@ func handleOpCodeXferValue(tx dto.Transaction, ws state.State, op Ops) error {
 	var err error
 	// first deduct from source and update world state
 	if from, err = ws.Get([]byte(arg.Source)); err != nil {
-		fmt.Printf("ERROR: attempt to xfer value from a non existing resource: %s\nSubmitter: %x\n", arg.Source, tx.Anchor().Submitter)
+		fmt.Printf("ERROR: attempt to xfer value from a non existing resource: %s\nSubmitter: %x\n", arg.Source, tx.Request().SubmitterId)
 		return fmt.Errorf("Resource does not exists")
 	}
 	// validate: source resource must be owned by submitter
-	if string(tx.Anchor().Submitter) != string(from.Owner) {
-		fmt.Printf("ERROR: attempt to xfer value from unauthorized resource: %s\nOwner: %x\nSubmitter: %x\n", arg.Source, from.Owner, tx.Anchor().Submitter)
+	if string(tx.Request().SubmitterId) != string(from.Owner) {
+		fmt.Printf("ERROR: attempt to xfer value from unauthorized resource: %s\nOwner: %x\nSubmitter: %x\n", arg.Source, from.Owner, tx.Request().SubmitterId)
 		return fmt.Errorf("Resource not owned")
 	}
 	// validate: xfer value should not be more than source resource's value
 	fromValue := int64(common.BytesToUint64(from.Value))
 	if fromValue < arg.Value {
-		fmt.Printf("ERROR: attempt to xfer excess value: %d\nResource value: %d\nSubmitter: %x\n", arg.Value, fromValue, tx.Anchor().Submitter)
+		fmt.Printf("ERROR: attempt to xfer excess value: %d\nResource value: %d\nSubmitter: %x\n", arg.Value, fromValue, tx.Request().SubmitterId)
 		return fmt.Errorf("Resource insufficient")
 	}
 	// validate: xfer value cannot be less than 1 (i.e. cannot make negative transaction from other people's resource)
 	if arg.Value < 1 {
-		fmt.Printf("ERROR: attempt to make deduction from other people: %d\nSubmitter: %x\n", arg.Value, tx.Anchor().Submitter)
+		fmt.Printf("ERROR: attempt to make deduction from other people: %d\nSubmitter: %x\n", arg.Value, tx.Request().SubmitterId)
 		return fmt.Errorf("Negative transaction")
 	}
 	// deduct from source
@@ -220,7 +181,7 @@ func handleOpCodeXferValue(tx dto.Transaction, ws state.State, op Ops) error {
 	}
 	// now fetch destination
 	if to, err = ws.Get([]byte(arg.Destination)); err != nil {
-		fmt.Printf("ERROR: attempt to xfer value to a non existing resource: %s\nSubmitter: %x\n", arg.Destination, tx.Anchor().Submitter)
+		fmt.Printf("ERROR: attempt to xfer value to a non existing resource: %s\nSubmitter: %x\n", arg.Destination, tx.Request().SubmitterId)
 		return fmt.Errorf("Resource does not exists")
 	}
 	// add value to destination resource
@@ -238,7 +199,7 @@ func txHandler(tx dto.Transaction, state state.State) error {
 	fmt.Printf("\n")
 	defer fmt.Printf("\n%s", cmdPrompt)
 	op := Ops{}
-	if err := common.Deserialize(tx.Self().Payload, &op); err != nil {
+	if err := common.Deserialize(tx.Request().Payload, &op); err != nil {
 		fmt.Printf("Invalid TX from %x\n%s", tx.Anchor().NodeId, err)
 		return err
 	}
@@ -265,12 +226,8 @@ func doGetResource(key string) ([]byte, uint64, error) {
 	}
 }
 
-func doRequestAnchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
-	return dlt.Anchor(id, seq, lastTx)
-}
-
-func doSubmitTransaction(tx dto.Transaction) error {
-	return dlt.Submit(tx)
+func doSubmitTransaction(req *dto.TxRequest) (dto.Transaction, error) {
+	return dlt.Submit(req)
 }
 
 func makeXferValuePayload(source, destination string, value int64) []byte {
@@ -298,6 +255,15 @@ func makeResourceCreationPayload(key string, value int64) []byte {
 	op.Args, _ = common.Serialize(args)
 	txPayload, _ := common.Serialize(op)
 	return txPayload
+}
+
+func submitTx(dlt stack.DLT, req *dto.TxRequest) {
+	if tx, err := dlt.Submit(req); err != nil {
+		fmt.Printf("Failed to submit transaction: %s\n", err)
+	} else {
+		submitter.LastTx = tx.Id()
+		submitter.Seq += 1
+	}
 }
 
 // main CLI loop
@@ -354,18 +320,20 @@ func cli(local, remote stack.DLT) error {
 							hasNext = wordScanner.Scan()
 						}
 						if !oneDone {
-							fmt.Printf("usage: value <name> ...\n")
+							fmt.Printf("%s\n", commands["show"][1])
+							fmt.Printf("%s\n", commands["show"][0])
 						}
 					case "create":
 						fallthrough
 					case "c":
 						args := scanCreateArgs(wordScanner)
 						if len(args) == 0 {
-							fmt.Printf("usage: create <resource name> [<initial value>] ...\n")
+							fmt.Printf("%s\n", commands["create"][1])
+							fmt.Printf("%s\n", commands["create"][0])
 						} else {
 							for _, arg := range args {
 								fmt.Printf("adding transaction: create %s %d\n", arg.Name, arg.Value)
-								makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), makeResourceCreationPayload(arg.Name, arg.Value))
+								submitTx(dlt, submitter.NewRequest(string(makeResourceCreationPayload(arg.Name, arg.Value))))
 							}
 						}
 					case "info":
@@ -375,8 +343,7 @@ func cli(local, remote stack.DLT) error {
 						if a := localDlt.Anchor([]byte("dummy"), 0x01, [64]byte{}); a == nil {
 							fmt.Printf("failed to get any info from local node...\n")
 						} else {
-							fmt.Printf("LOCAL ShardId: %s\n", a.ShardId)
-							fmt.Printf("Submitter Id : %x\n", submitter)
+							fmt.Printf("Submitter Id : %x\n", submitter.Id)
 							fmt.Printf("LOCAL Next Seq: %d\n", a.ShardSeq)
 							fmt.Printf("LOCAL Weight: %d\n", a.Weight)
 							fmt.Printf("LOCAL Parent: %x\n", a.ShardParent)
@@ -402,64 +369,28 @@ func cli(local, remote stack.DLT) error {
 						}
 						if len(arg.Source) != 0 && len(arg.Destination) != 0 && arg.Value > 0 {
 							fmt.Printf("adding transaction: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(dlt, dlt.Anchor(submitter, lastSeq+1, lastTx), makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
+							submitTx(dlt, submitter.NewRequest(string(makeXferValuePayload(arg.Source, arg.Destination, arg.Value))))
 						} else {
-							fmt.Printf("usage: xfer <owned resource name> <xfer value> <recipient resource name>\n")
+							fmt.Printf("%s\n", commands["xfer"][1])
+							fmt.Printf("%s\n", commands["xfer"][0])
 						}
 					case "sign":
 						var payload string
-						var nonce int
-						if wordScanner.Scan() {
-							nonce, _ = strconv.Atoi(wordScanner.Text())
-						}
 						if wordScanner.Scan() {
 							payload = wordScanner.Text()
 						}
-						if nonce > 0 && len(payload) != 0 {
+						if len(payload) != 0 {
 							if bytes, err := base64.StdEncoding.DecodeString(payload); err != nil {
 								fmt.Printf("Invalid base64 payload: %s\n", err)
 							} else {
 								// sign payload using CLI's submitter
-								tx := dto.TestTransaction()
-								tx.Anchor().SubmitterSeq = uint64(nonce)
-								sign(tx, bytes)
+								fmt.Printf("Submitter Id: %x\nLastTx: %x\nSequence: %d\nShard Id: %x\n", submitter.Id, submitter.LastTx, submitter.Seq, submitter.ShardId)
 								// print the base64 encoded signature
-								fmt.Printf("Signature: %s\n", base64.StdEncoding.EncodeToString(tx.Self().Signature))
+								fmt.Printf("Signature: %s\n", base64.StdEncoding.EncodeToString(submitter.NewRequest(string(bytes)).Signature))
 							}
 						} else {
-							fmt.Printf("usage: sign <nonce> <base64 encoded payload>\n")
-						}
-					case "dupe":
-						arg := ArgsXferValue{}
-						if wordScanner.Scan() {
-							arg.Source = wordScanner.Text()
-						}
-						if wordScanner.Scan() {
-							value, _ := strconv.Atoi(wordScanner.Text())
-							arg.Value = int64(value)
-						}
-						var dest1, dest2 string
-						if wordScanner.Scan() {
-							dest1 = wordScanner.Text()
-						}
-						if wordScanner.Scan() {
-							dest2 = wordScanner.Text()
-						}
-						if len(arg.Source) != 0 && len(dest1) != 0 && len(dest2) != 0 && arg.Value > 0 {
-							// save original last seq
-							origLastSeq := lastSeq
-							arg.Destination = dest1
-							anchor1 := dlt.Anchor(submitter, lastSeq+1, lastTx)
-							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
-							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(dlt, anchor1, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
-							arg.Destination = dest2
-							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(dlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
-							// correct last sequence (it may have moved up extra due to 2 submissions)
-							lastSeq = origLastSeq + 1
-						} else {
-							fmt.Printf("usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
+							fmt.Printf("%s\n", commands["sign"][1])
+							fmt.Printf("%s\n", commands["sign"][0])
 						}
 					case "double":
 						arg := ArgsXferValue{}
@@ -478,39 +409,29 @@ func cli(local, remote stack.DLT) error {
 							dest2 = wordScanner.Text()
 						}
 						if len(arg.Source) != 0 && len(dest1) != 0 && len(dest2) != 0 && arg.Value > 0 {
-							// save original last seq
-							origLastSeq := lastSeq
+							// save original submitter state
+							oldLastTx := submitter.LastTx
+							oldLastSeq := submitter.Seq
 							arg.Destination = dest1
-							anchor1 := dlt.Anchor(submitter, lastSeq+1, lastTx)
-							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(dlt, anchor1, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
+							submitTx(dlt, submitter.NewRequest(string(makeXferValuePayload(arg.Source, arg.Destination, arg.Value))))
+							// save new submitter state
+							newLastTx := submitter.LastTx
+							newLastSeq := submitter.Seq
+							// switch submitter to old state to create double spending request
+							submitter.LastTx = oldLastTx
+							submitter.Seq = oldLastSeq
 							arg.Destination = dest2
-							//							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
 							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(dlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
-							// correct last sequence (it may have moved up extra due to 2 submissions)
-							lastSeq = origLastSeq + 1
+							newReq := submitter.NewRequest(string(makeXferValuePayload(arg.Source, arg.Destination, arg.Value)))
+							// revert submitter back to state it was after last submission
+							submitter.LastTx = newLastTx
+							submitter.Seq = newLastSeq
+							// submit new double spending request with same DLT stack
+							submitTx(dlt, newReq)
 						} else {
-							fmt.Printf("usage: double <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
-						}
-					case "xover":
-						arg := ArgsXferValue{}
-						if wordScanner.Scan() {
-							arg.Source = wordScanner.Text()
-						}
-						if wordScanner.Scan() {
-							value, _ := strconv.Atoi(wordScanner.Text())
-							arg.Value = int64(value)
-						}
-						if wordScanner.Scan() {
-							arg.Destination = wordScanner.Text()
-						}
-						if len(arg.Source) != 0 && len(arg.Destination) != 0 && arg.Value > 0 {
-							fmt.Printf("adding transaction: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(remoteDlt, localDlt.Anchor(submitter, lastSeq+1, lastTx), makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
-						} else {
-							fmt.Printf("usage: xover <owned resource name> <xfer value> <recipient resource name>\n")
+							fmt.Printf("%s\n", commands["double"][1])
+							fmt.Printf("%s\n", commands["double"][0])
 						}
 					case "multi":
 						arg := ArgsXferValue{}
@@ -525,18 +446,17 @@ func cli(local, remote stack.DLT) error {
 							arg.Destination = wordScanner.Text()
 						}
 						if len(arg.Source) != 0 && len(arg.Destination) != 0 && arg.Value > 0 {
-							// save original last seq
-							origLastSeq := lastSeq
-							anchor1 := localDlt.Anchor(submitter, lastSeq+1, lastTx)
-							anchor2 := remoteDlt.Anchor(submitter, lastSeq+1, lastTx)
-							fmt.Printf("adding local transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(localDlt, anchor1, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
-							fmt.Printf("adding remote transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(remoteDlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
-							// correct last sequence (it may have moved up extra due to 2 submissions)
-							lastSeq = origLastSeq + 1
+							// create instance of request
+							req := submitter.NewRequest(string(makeXferValuePayload(arg.Source, arg.Destination, arg.Value)))
+							// submit request with local DLT stack
+							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
+							submitTx(localDlt, req)
+							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
+							// submit same request with remote DLT stack
+							submitTx(remoteDlt, req)
 						} else {
-							fmt.Printf("usage: multi <owned resource name> <xfer value> <recipient resource name>\n")
+							fmt.Printf("%s\n", commands["multi"][1])
+							fmt.Printf("%s\n", commands["multi"][0])
 						}
 					case "split":
 						arg := ArgsXferValue{}
@@ -555,21 +475,30 @@ func cli(local, remote stack.DLT) error {
 							dest2 = wordScanner.Text()
 						}
 						if len(arg.Source) != 0 && len(dest1) != 0 && len(dest2) != 0 && arg.Value > 0 {
+							// save original submitter state
+							oldLastTx := submitter.LastTx
+							oldLastSeq := submitter.Seq
 							arg.Destination = dest1
-							// save the last sequence
-							origLastSeq := lastSeq
-							anchor1 := localDlt.Anchor(submitter, lastSeq+1, lastTx)
-							anchor2 := remoteDlt.Anchor(submitter, lastSeq+1, lastTx)
-							fmt.Printf("adding local transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(localDlt, anchor1, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
+							// submit original request with local DLT stack
+							fmt.Printf("adding transaction #1: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
+							submitTx(localDlt, submitter.NewRequest(string(makeXferValuePayload(arg.Source, arg.Destination, arg.Value))))
+							// save new submitter state
+							newLastTx := submitter.LastTx
+							newLastSeq := submitter.Seq
+							// switch submitter to old state to create double spending request
+							submitter.LastTx = oldLastTx
+							submitter.Seq = oldLastSeq
 							arg.Destination = dest2
-							//							anchor2 := dlt.Anchor(submitter, lastSeq+1, lastTx)
-							fmt.Printf("adding remote transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
-							makeTransaction(remoteDlt, anchor2, makeXferValuePayload(arg.Source, arg.Destination, arg.Value))
-							// correct last sequence (it may have moved up extra due to 2 submissions)
-							lastSeq = origLastSeq + 1
+							fmt.Printf("adding transaction #2: xfer %s %d %s\n", arg.Source, arg.Value, arg.Destination)
+							newReq := submitter.NewRequest(string(makeXferValuePayload(arg.Source, arg.Destination, arg.Value)))
+							// revert submitter back to state it was after last submission
+							submitter.LastTx = newLastTx
+							submitter.Seq = newLastSeq
+							// submit new double spending request with remote DLT stack
+							submitTx(remoteDlt, newReq)
 						} else {
-							fmt.Printf("usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>\n")
+							fmt.Printf("%s\n", commands["split"][1])
+							fmt.Printf("%s\n", commands["split"][0])
 						}
 					default:
 						fmt.Printf("Unknown Command: %s", cmd)
@@ -634,9 +563,9 @@ func main() {
 	port, _ := strconv.Atoi(config.Port)
 	config2.Port = strconv.Itoa(port + 100)
 
-	// create a new ECDSA key for submitter client
-	key, _ = crypto.GenerateKey()
-	submitter = crypto.FromECDSAPub(&key.PublicKey)
+	// create a new submitter
+	submitter = dto.TestSubmitter()
+	submitter.ShardId = AppShard
 
 	// start net server
 	if err := StartServer(*apiPort); err != nil {

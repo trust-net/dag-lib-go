@@ -1,10 +1,9 @@
-// Copyright 2018 The trust-net Authors
+// Copyright 2018-2019 The trust-net Authors
 // Common DTO types used throughout DLT stack
 package dto
 
 import (
 	"crypto/sha512"
-	//	"encoding/binary"
 	"github.com/trust-net/dag-lib-go/common"
 )
 
@@ -13,6 +12,7 @@ type Transaction interface {
 	Serialize() ([]byte, error)
 	DeSerialize(data []byte) error
 	Anchor() *Anchor
+	Request() *TxRequest
 	Self() *transaction
 }
 
@@ -21,10 +21,8 @@ type transaction struct {
 	// id of the transaction created from its hash
 	id     [64]byte
 	idDone bool
-	// serialized transaction payload
-	Payload []byte
-	// transaction payload signature by the submitter
-	Signature []byte
+	// transaction request from submitter
+	TxRequest *TxRequest
 	// transaction anchor from DLT stack
 	TxAnchor *Anchor
 }
@@ -34,9 +32,9 @@ func (tx *transaction) Id() [64]byte {
 	if tx.idDone {
 		return tx.id
 	}
-	data := make([]byte, 0)
+	data := make([]byte, 0, 128)
 	// signature should be sufficient to capture payload and submitter ID
-	data = append(data, tx.Signature...)
+	data = append(data, tx.TxRequest.Signature...)
 	// append anchor's signature
 	data = append(data, tx.TxAnchor.Signature...)
 	tx.id = sha512.Sum512(data)
@@ -44,10 +42,16 @@ func (tx *transaction) Id() [64]byte {
 	return tx.id
 }
 
+// serialize transaction for local DB storage, should not be used to transmit bytes over network
 func (tx *transaction) Serialize() ([]byte, error) {
 	return common.Serialize(tx)
 }
 
+// de-serialize transaction from local DB storage, should not be used to de-serialize from network bytes
+// ###########################################################
+// TBD: need to change dto.Transaction from interface to concrete type, so that p2p layer can do
+// network transmission using rlp encoding and do not require this de-serialize method
+// ###########################################################
 func (tx *transaction) DeSerialize(data []byte) error {
 	if err := common.Deserialize(data, tx); err != nil {
 		return err
@@ -59,16 +63,21 @@ func (tx *transaction) Anchor() *Anchor {
 	return tx.TxAnchor
 }
 
+func (tx *transaction) Request() *TxRequest {
+	return tx.TxRequest
+}
+
 func (tx *transaction) Self() *transaction {
 	return tx
 }
 
-// make sure any Transaction can only be created with an anchor
-func NewTransaction(a *Anchor) *transaction {
-	if a == nil {
+// make sure any Transaction can only be created with a request and anchor
+func NewTransaction(r *TxRequest, a *Anchor) *transaction {
+	if r == nil || a == nil {
 		return nil
 	}
 	return &transaction{
-		TxAnchor: a,
+		TxRequest: r,
+		TxAnchor:  a,
 	}
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 The trust-net Authors
+// Copyright 2018-2019 The trust-net Authors
 // Mock DEVp2p implementations for use as test fixtures
 package p2p
 
@@ -72,6 +72,9 @@ type MockP2P struct {
 
 func (p2p *MockP2P) Anchor(a *dto.Anchor) error {
 	p2p.IsAnchored = true
+	if a != nil {
+		a.NodeId = p2p.Id()
+	}
 	return nil
 }
 

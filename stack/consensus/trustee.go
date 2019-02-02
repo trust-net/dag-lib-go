@@ -1,5 +1,5 @@
 // Copyright 2018 The trust-net Authors
-// Consensus Layer interface and implementation for DLT Statck
+// a consensys layer for implementing canonical blockchain if needed
 package consensus
 
 import (

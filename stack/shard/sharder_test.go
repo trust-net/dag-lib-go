@@ -1,8 +1,8 @@
+// Copyright 2018-2019 The trust-net Authors
 package shard
 
 import (
 	"fmt"
-	//	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/repo"
@@ -95,7 +95,7 @@ func TestRegistrationReplay(t *testing.T) {
 	// register an app using same shard as network transaction
 	cbCalled := false
 	txHandler := func(tx dto.Transaction, state state.State) error { cbCalled = true; return nil }
-	if err := s.Register(tx.Anchor().ShardId, txHandler); err != nil {
+	if err := s.Register(tx.Request().ShardId, txHandler); err != nil {
 		t.Errorf("App registration failed: %s", err)
 	}
 
@@ -192,10 +192,11 @@ func TestAnchorRegistered(t *testing.T) {
 		t.Errorf("Anchor update failed: %s", err)
 	}
 
-	// anchor should have registered app's ID
-	if string(a.ShardId) != "test shard" {
-		t.Errorf("Incorrect shard ID: %s", a.ShardId)
-	}
+	// anchor does not have shard Id anymore
+	//	// anchor should have registered app's ID
+	//	if string(a.ShardId) != "test shard" {
+	//		t.Errorf("Incorrect shard ID: %s", a.ShardId)
+	//	}
 
 	// anchor should have shard's 1st sequence (since no other transaction after genesis)
 	if a.ShardSeq != 0x01 {
@@ -203,7 +204,7 @@ func TestAnchorRegistered(t *testing.T) {
 	}
 
 	// anchor should have shard's genesis as parent (since no other transaction after genesis)
-	if a.ShardParent != GenesisShardTx(a.ShardId).Id() {
+	if a.ShardParent != GenesisShardTx([]byte("test shard")).Id() {
 		t.Errorf("Incorrect shard parent: %x", a.ShardParent)
 	}
 }
@@ -434,7 +435,7 @@ func TestHandlerRegistered(t *testing.T) {
 	// register an app for transaction's shard
 	called := false
 	txHandler := func(tx dto.Transaction, state state.State) error { called = true; return nil }
-	s.Register(tx.Anchor().ShardId, txHandler)
+	s.Register(tx.Request().ShardId, txHandler)
 	testDb.Reset()
 
 	// send the mock network transaction to sharder with app registered
@@ -462,7 +463,7 @@ func TestHandlerAppFiltering(t *testing.T) {
 	// register an app for shard different from network transaction
 	called := false
 	txHandler := func(tx dto.Transaction, state state.State) error { called = true; return nil }
-	s.Register([]byte(string(tx.Anchor().ShardId)+"extra"), txHandler)
+	s.Register([]byte(string(tx.Request().ShardId)+"extra"), txHandler)
 
 	// send the mock network transaction to sharder from different shard
 	if err := s.Handle(tx); err != nil {
@@ -484,10 +485,10 @@ func TestHandlerTransactionValidation(t *testing.T) {
 	// register an app for transaction's shard
 	called := false
 	txHandler := func(tx dto.Transaction, state state.State) error { called = true; return nil }
-	s.Register(tx.Anchor().ShardId, txHandler)
+	s.Register(tx.Request().ShardId, txHandler)
 
 	// send the mock transaction to sharder with missing shard ID in transaction
-	tx.Anchor().ShardId = nil
+	tx.Request().ShardId = nil
 	if err := s.Handle(tx); err == nil {
 		t.Errorf("sharder did not check for missing shard ID")
 	}
@@ -529,7 +530,7 @@ func TestApproverHappyPath(t *testing.T) {
 	// register an app for transaction's shard
 	called := false
 	txHandler := func(tx dto.Transaction, state state.State) error { called = true; return nil }
-	s.Register(tx.Anchor().ShardId, txHandler)
+	s.Register(tx.Request().ShardId, txHandler)
 	testDb.Reset()
 
 	// send the transaction to sharder for approval
@@ -563,7 +564,7 @@ func TestAncestorsKnownStartHash(t *testing.T) {
 	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
 	// register an app for transaction's shard
 	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
-	s.Register(tx1.Anchor().ShardId, txHandler)
+	s.Register(tx1.Request().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
 	s.LockState()
@@ -603,7 +604,7 @@ func TestAncestorsUnknownStartHash(t *testing.T) {
 	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
 	// register an app for transaction's shard
 	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
-	s.Register(tx1.Anchor().ShardId, txHandler)
+	s.Register(tx1.Request().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
 	s.LockState()
@@ -643,7 +644,7 @@ func TestChildrenKnownParent(t *testing.T) {
 	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
 	// register an app for transaction's shard
 	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
-	s.Register(tx1.Anchor().ShardId, txHandler)
+	s.Register(tx1.Request().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
 	s.LockState()
@@ -681,7 +682,7 @@ func TestChildrenUnknownParent(t *testing.T) {
 	tx2.Anchor().ShardSeq = tx1.Anchor().ShardSeq + 1
 	// register an app for transaction's shard
 	txHandler := func(tx dto.Transaction, state state.State) error { return nil }
-	s.Register(tx1.Anchor().ShardId, txHandler)
+	s.Register(tx1.Request().ShardId, txHandler)
 
 	// add transactions to sharder's DAG
 	s.LockState()
@@ -720,8 +721,8 @@ func TestWorldStateResourceAccess(t *testing.T) {
 	txHandler := func(tx dto.Transaction, s state.State) error {
 		if r, err := s.Get([]byte("key")); err != nil {
 			return err
-		} else if string(r.Value) != string(tx.Self().Payload) {
-			return fmt.Errorf("Unexpected resource value: '%s', expected: %s", r.Value, tx.Self().Payload)
+		} else if string(r.Value) != string(tx.Request().Payload) {
+			return fmt.Errorf("Unexpected resource value: '%s', expected: %s", r.Value, tx.Request().Payload)
 		}
 		return nil
 	}
@@ -730,7 +731,7 @@ func TestWorldStateResourceAccess(t *testing.T) {
 	tx, _ := SignedShardTransaction("test data to validate")
 	s.db.AddTx(tx)
 	s.Handle(tx)
-	testShard := tx.Anchor().ShardId
+	testShard := tx.Request().ShardId
 
 	// set test value in world state for test shard
 	db := dbp.DB("Shard-World-State-" + string(testShard))
@@ -755,7 +756,7 @@ func TestWorldStateResourceVisibilityAcrossShards(t *testing.T) {
 	// register an app
 	var seenResource *state.Resource
 	txHandler := func(tx dto.Transaction, s state.State) error {
-		seenResource, _ = s.Get(tx.Self().Payload)
+		seenResource, _ = s.Get(tx.Request().Payload)
 		return nil
 	}
 
@@ -763,7 +764,7 @@ func TestWorldStateResourceVisibilityAcrossShards(t *testing.T) {
 	tx, _ := SignedShardTransaction("key")
 	s.db.AddTx(tx)
 	s.Handle(tx)
-	testShard := tx.Anchor().ShardId
+	testShard := tx.Request().ShardId
 
 	// set test value in world state for test shard
 	db := dbp.DB("Shard-World-State-" + string(testShard))
@@ -818,7 +819,7 @@ func TestWorldStateReadAccessRegisteredApp(t *testing.T) {
 	tx, _ := SignedShardTransaction("test data to validate")
 	s.db.AddTx(tx)
 	s.Handle(tx)
-	testShard := tx.Anchor().ShardId
+	testShard := tx.Request().ShardId
 
 	// set test value in world state for test shard
 	db := dbp.DB("Shard-World-State-" + string(testShard))
@@ -852,7 +853,7 @@ func TestWorldStateReadAccessNoApp(t *testing.T) {
 	tx, _ := SignedShardTransaction("test data to validate")
 	s.db.AddTx(tx)
 	s.Handle(tx)
-	testShard := tx.Anchor().ShardId
+	testShard := tx.Request().ShardId
 
 	// set test value in world state for test shard
 	db := dbp.DB("Shard-World-State-" + string(testShard))
@@ -888,7 +889,7 @@ func TestFlush_RegisteredApp(t *testing.T) {
 	tx, _ := SignedShardTransaction("test data to validate")
 	s.db.AddTx(tx)
 	s.Handle(tx)
-	testShard := tx.Anchor().ShardId
+	testShard := tx.Request().ShardId
 
 	// set test value in world state for test shard
 	db := dbp.DB("Shard-World-State-" + string(testShard))
@@ -933,7 +934,7 @@ func TestFlush_UnregisteredShard(t *testing.T) {
 	tx, _ := SignedShardTransaction("test data to validate")
 	s.db.AddTx(tx)
 	s.Handle(tx)
-	testShard := tx.Anchor().ShardId
+	testShard := tx.Request().ShardId
 
 	// set test value in world state for test shard
 	db := dbp.DB("Shard-World-State-" + string(testShard))

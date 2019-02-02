@@ -1,4 +1,4 @@
-// Copyright 2018 The trust-net Authors
+// Copyright 2018-2019 The trust-net Authors
 // P2P message interface and implementation for DAG protocol library
 package p2p
 

@@ -1,3 +1,5 @@
+// Copyright 2018-2019 The trust-net Authors
+// a basic set implementation
 package common
 
 import (
@@ -5,8 +7,9 @@ import (
 )
 
 var marker = struct{}{}
+
 type Set struct {
-	data	 map[interface{}]struct{}
+	data map[interface{}]struct{}
 	lock sync.RWMutex
 }
 
@@ -48,14 +51,14 @@ func (set *Set) Remove(items ...interface{}) {
 	}
 }
 
-func (set *Set) Has(item interface{}) bool{
+func (set *Set) Has(item interface{}) bool {
 	set.lock.RLock()
 	defer set.lock.RUnlock()
 	_, has := set.data[item]
 	return has
 }
 
-func (set *Set) Pop() interface{}{
+func (set *Set) Pop() interface{} {
 	set.lock.Lock()
 	defer set.lock.Unlock()
 	for item, _ := range set.data {

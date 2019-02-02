@@ -21,6 +21,7 @@ Go library for [DAG protocol](https://github.com/trust-net/dag-documentation#dag
     * [Process transactions from network peers](https://github.com/trust-net/dag-lib-go#Process-transactions-from-network-peers)
     * [Stop DLT Stack](https://github.com/trust-net/dag-lib-go#Stop-DLT-Stack)
 * [Release Notes](https://github.com/trust-net/dag-lib-go#Release-Notes)
+    * [Iteration 8](#Iteration-8)
     * [Iteration 7](#Iteration-7)
     * [Iteration 6](https://github.com/trust-net/dag-lib-go#Iteration-6)
     * [Iteration 5](https://github.com/trust-net/dag-lib-go#Iteration-5)
@@ -140,7 +141,7 @@ A test driver application is provided to demonstrate and validate the double spe
 * support to simulate a "dishonest" client that submits double spending transaction on two different nodes across the network
 
 
-Refer to documentation for double spender application CLI at [documentation link](https://github.com/trust-net/dag-lib-go/issues/36) for testing double spending scenarios.
+Refer to documentation for double spender application CLI at [documentation link](./docs/SpendrApp.md#Spendr-A-Value-Transfer-Application) for testing double spending scenarios.
 
 Alternatively, use companion [Android App](https://github.com/trust-net/SpendrClient) as sample submitter/client to test Spendr's REST API.
 
@@ -188,6 +189,11 @@ If application had registered with DLT stack with appropriate callback methods, 
 Once application execution completes (either due to application shutdown, or any other reason), call the `stack.DLT.Stop()` method to disconnect from all connected network peers.
 
 ## Release Notes
+
+### Iteration 8
+* changed the transaction submission flow to a single step request from submitter
+* moved the shard's DAG tip "coalescing" inside critical stage after the shard world state is locked
+* protocol implementation bug fixes, as per [Iteration 8](https://github.com/trust-net/dag-lib-go/issues/52)
 
 ### Iteration 7
 * Made protocol's hashing and encryption compatible with ethereumJ based [Java client](https://github.com/trust-net/dag-lib-java)
