@@ -80,7 +80,7 @@ Signature []byte
 `ShardId` is the byte array uniquely identifying the application shard for an anchor (and its transaction).
 
 ### Submitter Id
-`SubmitterId` is the ECDSA public key of the transaction requester. This value will be used in validating the signature of transation payload later. Also, protocol uses full length of the public key as Id of submitter.
+`SubmitterId` is the ECDSA public key of the transaction requester. This value will be used in validating the signature of transation payload later. Also, protocol uses full length (65 bytes) of the public key as Id of submitter.
 
 ### Last Transaction
 `LastTx` is the reference to last transaction from submitter's history, provided by the submitter as a parameter for transaction request. 
@@ -98,7 +98,7 @@ Signature []byte
 
 ```
 // create a place holder for request's bytes
-bytes := make([]byte, 0, len(r.Payload)+len(r.ShardId)+144)
+bytes := make([]byte, 0, len(r.Payload)+len(r.ShardId)+145)
 
 // start with payload of the request
 bytes = append(bytes, r.Payload...)
@@ -152,7 +152,7 @@ Signature []byte
 ```
 
 ### Node Id
-`NodeId` is the public key (full length) of the node's ECDSA key. It's included in the anchor to validate the anchor signature when a transaction is received/processed at each node in the network. Also, Protocol uses the full length of the key for node's ID.
+`NodeId` is the public key (full length, 65 bytes) of the node's ECDSA key. It's included in the anchor to validate the anchor signature when a transaction is received/processed at each node in the network. Also, Protocol uses the full length of the key for node's ID.
 
 ### Shard Sequence
 `ShardSeq` is the depth of shard's DAG at the time of anchor request.

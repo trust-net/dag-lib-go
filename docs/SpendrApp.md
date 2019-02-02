@@ -312,7 +312,7 @@ Above request should return a success response for transaction submission as fol
   "type": "object",
   "properties": {
     "tx_id": {
-      "description": "130 char hex encoded id of the submitted transaction",
+      "description": "128 char hex encoded id of the submitted transaction",
       "type": "string"
     }
   },
