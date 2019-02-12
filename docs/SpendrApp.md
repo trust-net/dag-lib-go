@@ -282,7 +282,7 @@ POST /transactions
       "type": "string"
     },
     "last_tx": {
-      "description": "130 char hex encoded id of the last transaction from submitter",
+      "description": "128 char hex encoded id of the last transaction from submitter",
       "type": "string"
     },
     "submitter_seq": {
