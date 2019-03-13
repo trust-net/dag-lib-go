@@ -71,6 +71,8 @@ func (s *sharder) LockState() error {
 		if state, err := state.NewWorldState(s.dbp, s.shardId); err == nil {
 			s.worldState = state
 		} else {
+			// unlock the lock from above
+			s.useWorldState.Unlock()
 			return fmt.Errorf("Failed to get world state reference: %s", err)
 		}
 	}
@@ -79,7 +81,10 @@ func (s *sharder) LockState() error {
 
 func (s *sharder) UnlockState() {
 	// discarded whatever is not commited
-	s.worldState = nil
+	if s.worldState != nil {
+		s.worldState.Close()
+		s.worldState = nil
+	}
 	// unlock world state
 	s.useWorldState.Unlock()
 }
@@ -154,6 +159,11 @@ func (s *sharder) Register(shardId []byte, txHandler func(tx dto.Transaction, st
 				// fetch transaction for this node
 				if tx := s.db.GetTx(node.TxId); tx != nil {
 					// fmt.Printf("GetTx: %x\n", tx.Id())
+					// check if transaction is alread seen
+					if s.worldState.Seen(node.TxId[:]) {
+						// skip
+						continue
+					}
 					// replay transaction to the app
 					if err := s.txHandler(tx, s.worldState); err == nil {
 						// we only add children of this transaction to queue if this was a good transaction
@@ -315,6 +325,9 @@ func (s *sharder) Approve(tx dto.Transaction) error {
 		if err := s.db.AddTx(tx); err != nil {
 			return err
 		}
+		// mark the transaction as seen by app
+		txId := tx.Id()
+		s.worldState.Seen(txId[:])
 
 		// moved this to shard commit step
 		//		// update the shard's DAG and Tips
@@ -368,6 +381,9 @@ func (s *sharder) Handle(tx dto.Transaction) error {
 		if err := s.txHandler(tx, s.worldState); err != nil {
 			return err
 		}
+		// mark the transaction as seen by app
+		txId := tx.Id()
+		s.worldState.Seen(txId[:])
 	}
 	return nil
 }
@@ -381,6 +397,7 @@ func (s *sharder) GetState(key []byte) (*state.Resource, error) {
 		if state, err := state.NewWorldState(s.dbp, s.shardId); err != nil {
 			return nil, err
 		} else {
+			defer state.Close()
 			return state.Get(key)
 		}
 	}

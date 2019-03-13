@@ -439,6 +439,8 @@ func TestHandlerRegistered(t *testing.T) {
 	testDb.Reset()
 
 	// send the mock network transaction to sharder with app registered
+	s.LockState()
+	defer s.UnlockState()
 	if err := s.Handle(tx); err != nil {
 		t.Errorf("Registered transacton handling failed: %s", err)
 	}
@@ -489,6 +491,8 @@ func TestHandlerTransactionValidation(t *testing.T) {
 
 	// send the mock transaction to sharder with missing shard ID in transaction
 	tx.Request().ShardId = nil
+	s.LockState()
+	defer s.UnlockState()
 	if err := s.Handle(tx); err == nil {
 		t.Errorf("sharder did not check for missing shard ID")
 	}
@@ -534,6 +538,8 @@ func TestApproverHappyPath(t *testing.T) {
 	testDb.Reset()
 
 	// send the transaction to sharder for approval
+	s.LockState()
+	defer s.UnlockState()
 	if err := s.Approve(tx); err != nil {
 		t.Errorf("Transaction approval failed: %s", err)
 	}

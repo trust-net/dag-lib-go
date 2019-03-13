@@ -9,15 +9,20 @@ import (
 )
 
 type State interface {
+// used to check if a transaction is already seen by the shard, so as to skip duplicates
+// also, marks the transaction as seen for any future reference
+	Seen(txId []byte) bool
 	Get(key []byte) (*Resource, error)
 	Put(r *Resource) error
 	Delete(key []byte) error
 	Persist() error
 	Reset() error
+	Close() error
 }
 
 type worldState struct {
 	stateDb db.Database
+	seenTxDb db.Database
 	// in mem cache for resource updates, until transaction is completely accepted and persisted
 	cache map[string]*Resource
 	// TBD: following should be redundant, since we are locking at sharding layer before passing this reference
@@ -56,6 +61,19 @@ func (s *worldState) Delete(key []byte) error {
 	return nil
 }
 
+// used to check if a transaction is already seen by the shard, so as to skip duplicates
+// also, marks the transaction as seen for any future reference
+func (s *worldState) Seen(txId []byte) bool {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	isSeen, _ := s.seenTxDb.Has(txId)
+	if !isSeen {
+		s.seenTxDb.Put(txId, []byte{})
+	}
+	return isSeen
+	
+}
+
 func (s *worldState) Put(r *Resource) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -66,6 +84,12 @@ func (s *worldState) Put(r *Resource) error {
 	return nil
 }
 
+func (s *worldState) Close() error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.seenTxDb.Close()
+	return s.stateDb.Close()
+}
 func (s *worldState) Persist() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -111,11 +135,13 @@ func (s *worldState) Reset() error {
 
 func NewWorldState(dbp db.DbProvider, shardId []byte) (*worldState, error) {
 	if stateDb := dbp.DB("Shard-World-State-" + string(shardId)); stateDb != nil {
-		return &worldState{
-			stateDb: stateDb,
-			cache:   make(map[string]*Resource),
-		}, nil
-	} else {
-		return nil, fmt.Errorf("could not instantiate DB")
+		if seenTxDb := dbp.DB("Shard-Seen-Tx-" + string(shardId)); seenTxDb != nil {
+			return &worldState{
+				stateDb: stateDb,
+				seenTxDb: seenTxDb,
+				cache:   make(map[string]*Resource),
+			}, nil
+		}
 	}
+	return nil, fmt.Errorf("could not instantiate DB")
 }
