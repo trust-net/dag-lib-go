@@ -7,10 +7,12 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/repo"
 	"github.com/trust-net/dag-lib-go/stack/state"
+	"github.com/trust-net/dag-lib-go/log"
 	"testing"
 )
 
 func TestInitiatization(t *testing.T) {
+	log.SetLogLevel(log.NONE)
 	var s Sharder
 	var err error
 	testDb := repo.NewMockDltDb()
@@ -27,6 +29,7 @@ func TestInitiatization(t *testing.T) {
 }
 
 func TestGenesis(t *testing.T) {
+	log.SetLogLevel(log.NONE)
 	// create 2 different shard genesis transactions
 	gen1 := GenesisShardTx([]byte("shard 1"))
 	gen2 := GenesisShardTx([]byte("shard 2"))
@@ -39,6 +42,7 @@ func TestGenesis(t *testing.T) {
 }
 
 func TestRegistration(t *testing.T) {
+	log.SetLogLevel(log.NONE)
 	testDb := repo.NewMockDltDb()
 	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
@@ -81,6 +85,7 @@ func TestRegistration(t *testing.T) {
 
 // test that app registration gets a replay of existing transactions
 func TestRegistrationReplay(t *testing.T) {
+	log.SetLogLevel(log.NONE)
 	testDb := repo.NewMockDltDb()
 	s, _ := NewSharder(testDb, db.NewInMemDbProvider())
 
@@ -719,6 +724,7 @@ func TestChildrenUnknownParent(t *testing.T) {
 }
 
 func TestWorldStateResourceAccess(t *testing.T) {
+	log.SetLogLevel(log.NONE)
 	testDb := repo.NewMockDltDb()
 	dbp := db.NewInMemDbProvider()
 	s, _ := NewSharder(testDb, dbp)
@@ -747,6 +753,7 @@ func TestWorldStateResourceAccess(t *testing.T) {
 	}
 	data, _ := r.Serialize()
 	db.Put(r.Key, data)
+	db.Close()
 
 	// now register the app for the shard and it should check for above world state value
 	if err := s.Register(testShard, txHandler); err != nil {
@@ -755,6 +762,7 @@ func TestWorldStateResourceAccess(t *testing.T) {
 }
 
 func TestWorldStateResourceVisibilityAcrossShards(t *testing.T) {
+	log.SetLogLevel(log.NONE)
 	testDb := repo.NewMockDltDb()
 	dbp := db.NewInMemDbProvider()
 	s, _ := NewSharder(testDb, dbp)
@@ -780,6 +788,7 @@ func TestWorldStateResourceVisibilityAcrossShards(t *testing.T) {
 	}
 	data, _ := r.Serialize()
 	db.Put(r.Key, data)
+	db.Close()
 
 	// now register the app for the shard and it should check for above world state value
 	if err := s.Register(testShard, txHandler); err != nil {
@@ -835,6 +844,7 @@ func TestWorldStateReadAccessRegisteredApp(t *testing.T) {
 	}
 	data, _ := r.Serialize()
 	db.Put(r.Key, data)
+	db.Close()
 
 	// now register the app for the shard
 	s.Register(testShard, txHandler)
@@ -869,6 +879,7 @@ func TestWorldStateReadAccessNoApp(t *testing.T) {
 	}
 	data, _ := r.Serialize()
 	db.Put(r.Key, data)
+	db.Close()
 
 	// register the app for the shard so that it processed transaction
 	s.Register(testShard, txHandler)
@@ -905,6 +916,7 @@ func TestFlush_RegisteredApp(t *testing.T) {
 	}
 	data, _ := r.Serialize()
 	db.Put(r.Key, data)
+	db.Close()
 
 	// now register the app for the shard
 	s.Register(testShard, txHandler)
@@ -950,6 +962,7 @@ func TestFlush_UnregisteredShard(t *testing.T) {
 	}
 	data, _ := r.Serialize()
 	db.Put(r.Key, data)
+	db.Close()
 
 	// now register the app for the shard
 	s.Register(testShard, txHandler)

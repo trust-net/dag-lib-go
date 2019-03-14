@@ -5,6 +5,7 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"testing"
+	"github.com/trust-net/dag-lib-go/log"
 )
 
 // test stack controller event listener handles ALERT_DoubleSpend correctly
@@ -87,6 +88,7 @@ func TestRECV_ALERT_DoubleSpend_LocalWinner(t *testing.T) {
 // test stack controller event listener handles ALERT_DoubleSpend correctly
 // when remote transaction is earlier
 func TestRECV_ALERT_DoubleSpend_RemoteWinner(t *testing.T) {
+	log.SetLogLevel(log.NONE)
 	// create a DLT stack instance with registered app and initialized mocks
 	local, sharder, endorser, p2pLayer, testDb := initMocksAndDb()
 	// create another instance, as a remote stack

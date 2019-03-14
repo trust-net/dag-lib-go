@@ -189,13 +189,6 @@ func (s *sharder) Register(shardId []byte, txHandler func(tx dto.Transaction, st
 }
 
 func (s *sharder) Unregister() error {
-	///////////////////////////////////////////////////////
-	// TBD: remove below when we start persisting last processed transaction during unregister,
-	// and do not replay previosuly processed transactions during register
-	if state, err := state.NewWorldState(s.dbp, s.shardId); err == nil {
-		state.Reset()
-	}
-	///////////////////////////////////////////////////////
 	s.shardId = nil
 	s.txHandler = nil
 	s.genesisTx = nil
@@ -403,13 +396,17 @@ func (s *sharder) GetState(key []byte) (*state.Resource, error) {
 	}
 }
 
+// flush world state for the shard
 func (s *sharder) Flush(shardId []byte) error {
-	// flush world state for the shard
-	if state, err := state.NewWorldState(s.dbp, shardId); err != nil {
+	// first check if the shard is same as registered and has world state open
+	var ws state.State
+	var err error
+	if string(shardId) == string(s.shardId) && s.worldState != nil {
+		ws = s.worldState
+	} else if ws, err = state.NewWorldState(s.dbp, shardId); err != nil {
 		return err
-	} else {
-		state.Reset()
 	}
+	ws.Reset()
 	// flush shard DAG
 	if err := s.db.FlushShard(shardId); err != nil {
 		return err
