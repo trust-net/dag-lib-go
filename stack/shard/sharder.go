@@ -374,7 +374,7 @@ func (s *sharder) Handle(tx dto.Transaction) error {
 		if err := s.txHandler(tx, s.worldState); err != nil {
 			return err
 		}
-		// mark the transaction as seen by app
+		// mark the transaction as seen by app so that it will not get replayed at startup/registration
 		txId := tx.Id()
 		s.worldState.Seen(txId[:])
 	}

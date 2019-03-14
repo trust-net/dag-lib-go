@@ -45,12 +45,14 @@ type layerDEVp2p struct {
 }
 
 func (l *layerDEVp2p) Anchor(a *dto.Anchor) error {
+	l.lock.Lock()
+	defer l.lock.Unlock()
 	if a == nil {
 		return errors.New("cannot sign nil anchor")
 	}
 	// force update anchor's node ID with this node
 	a.NodeId = l.Id()
-	if signature, err := l.Sign(a.Bytes()); err != nil {
+	if signature, err := l.sign(a.Bytes()); err != nil {
 		return err
 	} else {
 		a.Signature = signature
@@ -87,6 +89,12 @@ func (l *layerDEVp2p) Id() []byte {
 }
 
 func (l *layerDEVp2p) Sign(data []byte) ([]byte, error) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	return l.sign(data)
+}
+
+func (l *layerDEVp2p) sign(data []byte) ([]byte, error) {
 	s := signature{}
 	var err error
 	// sign the payload using SHA256 hash and ECDSA signature

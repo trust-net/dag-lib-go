@@ -9,21 +9,23 @@ import (
 	"flag"
 	"fmt"
 	"github.com/trust-net/dag-lib-go/common"
-	"github.com/trust-net/dag-lib-go/db"
+	"github.com/trust-net/dag-lib-go/dbp"
 	"github.com/trust-net/dag-lib-go/stack"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/p2p"
 	"github.com/trust-net/dag-lib-go/stack/state"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
 )
 
 var commands = map[string][2]string{
-	"show":   {"usage: show <resource name> ...", "show one or more resource's value"},
-	"create": {"usage: create <resource name> [<initial value>] ...", "create one or more resource with optional initial credits"},
-	"xfer":   {"usage: xfer <owned resource name> <xfer value> <recipient resource name>...", "transfer credits from one resource to another"},
-	"info":   {"usage: info", "get current shard tips from local and remote nodes"},
+	"show":        {"usage: show <resource name> ...", "show one or more resource's value"},
+	"create":      {"usage: create <resource name> [<initial value>] ...", "create one or more resource with optional initial credits"},
+	"bulk_create": {"usage: bulk_create <resource prefix> <number of counters> ...", "load network by creating bulk of resources with random initial values (0-100)"},
+	"xfer":        {"usage: xfer <owned resource name> <xfer value> <recipient resource name>...", "transfer credits from one resource to another"},
+	"info":        {"usage: info", "get current shard tips from local and remote nodes"},
 	//	"xover":  {"usage: xover <owned resource name> <xfer value> <recipient resource name>", "submit a transaction that has anchor from one node, but is submitted to another node"},
 	"quit": {"usage: quit", "leave application and shutdown"},
 	//	"dupe":   {"usage: dupe <owned resource name> <xfer value> <recipient 1> <recipient 2>", "submit two double spending transactions using same tip"},
@@ -257,12 +259,14 @@ func makeResourceCreationPayload(key string, value int64) []byte {
 	return txPayload
 }
 
-func submitTx(dlt stack.DLT, req *dto.TxRequest) {
+func submitTx(dlt stack.DLT, req *dto.TxRequest) bool {
 	if tx, err := dlt.Submit(req); err != nil {
 		fmt.Printf("Failed to submit transaction: %s\n", err)
+		return false
 	} else {
 		submitter.LastTx = tx.Id()
 		submitter.Seq += 1
+		return true
 	}
 }
 
@@ -334,6 +338,36 @@ func cli(local, remote stack.DLT) error {
 							for _, arg := range args {
 								fmt.Printf("adding transaction: create %s %d\n", arg.Name, arg.Value)
 								submitTx(dlt, submitter.NewRequest(string(makeResourceCreationPayload(arg.Name, arg.Value))))
+							}
+						}
+					case "bulk_create":
+						args := scanCreateArgs(wordScanner)
+						if len(args) == 0 {
+							fmt.Printf("%s\n", commands["bulk_create"][1])
+							fmt.Printf("%s\n", commands["bulk_create"][0])
+						} else {
+							for _, arg := range args {
+								fmt.Printf("bulk createing %d tokens with %s prefix\n", arg.Value, arg.Name)
+								use := localDlt
+								failCount := 0
+								for i := int64(1); i <= arg.Value; {
+									name := fmt.Sprintf("%s-%04d", arg.Name, i)
+									value := rand.Int63n(100)
+									if i%2 == 0 {
+										use = remoteDlt
+									} else {
+										use = localDlt
+									}
+									if submitTx(use, submitter.NewRequest(string(makeResourceCreationPayload(name, value)))) {
+										i += 1
+										failCount = 0
+									} else if failCount > 100 {
+										fmt.Printf("aborting after %d failures\n", failCount)
+										break
+									} else {
+										failCount += 1
+									}
+								}
 							}
 						}
 					case "info":
@@ -573,9 +607,11 @@ func main() {
 	}
 
 	// instantiate two DLT stacks
-	if localDlt, err := stack.NewDltStack(config, db.NewInMemDbProvider()); err != nil {
+	dbpLocal, _ := dbp.NewDbp("spendr-local")
+	dbpRemote, _ := dbp.NewDbp("spendr-remote")
+	if localDlt, err := stack.NewDltStack(config, dbpLocal); err != nil {
 		fmt.Printf("Failed to create 1st DLT stack: %s", err)
-	} else if remoteDlt, err := stack.NewDltStack(config2, db.NewInMemDbProvider()); err != nil {
+	} else if remoteDlt, err := stack.NewDltStack(config2, dbpRemote); err != nil {
 		fmt.Printf("Failed to create 2nd DLT stack: %s", err)
 	} else if err = cli(localDlt, remoteDlt); err != nil {
 		fmt.Printf("Error in CLI: %s", err)

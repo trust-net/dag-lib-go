@@ -55,6 +55,8 @@ func (db *dbLevelDB) GetAll() [][]byte {
 	if it == nil || !it.First() {
 		db.logger.Debug("empty iterator from DB")
 		return nil
+	} else {
+		defer it.Release()
 	}
 
 	// loop through iterator and add to values
@@ -92,5 +94,6 @@ func (db *dbLevelDB) Delete(key []byte) error {
 }
 
 func (db *dbLevelDB) Close() error {
+//	db.logger.Debug("Closing database")
 	return db.ldb.Close()
 }

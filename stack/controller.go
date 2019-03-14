@@ -99,6 +99,7 @@ func (d *dlt) unregister() error {
 func (d *dlt) validateSignatures(tx dto.Transaction) error {
 	// validate transaction Anchor signature using transaction approver's ID
 	if !d.p2p.Verify(tx.Anchor().Bytes(), tx.Anchor().Signature, tx.Anchor().NodeId) {
+		d.logger.Debug("Invalid anchor signature for Tx: %x\n%s", tx.Id(), tx.Anchor().ToString())
 		return errors.New("Anchor signature invalid")
 	}
 
@@ -155,6 +156,11 @@ func (d *dlt) Submit(req *dto.TxRequest) (dto.Transaction, error) {
 	if a, err := d.anchor(); err != nil {
 		return nil, err
 	} else {
+		// test my own signature
+		if !d.p2p.Verify(a.Bytes(), a.Signature, a.NodeId) {
+			d.logger.Debug("Invalid signature for my own anchor!!!\n%s", a.ToString())
+			return nil, errors.New("Anchor signature invalid")
+		}
 		tx = dto.NewTransaction(req, a)
 	}
 
@@ -186,6 +192,8 @@ func (d *dlt) Submit(req *dto.TxRequest) (dto.Transaction, error) {
 			return nil, err
 		}
 	}
+	// log anchor details for successfully accpeted submission
+	d.logger.Debug("Submitted anchor signature for Tx: %x\n%s", tx.Id(), tx.Anchor().ToString())
 
 	// finally send it to p2p layer, to broadcase to others
 	id := tx.Id()
@@ -1014,7 +1022,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 
 			// validate signatures
 			if err := d.validateSignatures(tx); err != nil {
-				peer.Logger().Debug("Submitted transaction failed signature verification: %s", err)
+				peer.Logger().Debug("Network transaction failed signature verification: %s", err)
 				return err
 			}
 

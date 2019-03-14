@@ -4,6 +4,7 @@ package dto
 
 import (
 	"github.com/trust-net/dag-lib-go/common"
+	"fmt"
 )
 
 // transaction message
@@ -20,6 +21,11 @@ type Anchor struct {
 	ShardUncles [][64]byte
 	// anchor signature from DLT stack
 	Signature []byte
+}
+
+func (a *Anchor) ToString() string {
+	return fmt.Sprintf("NodeId: %x\nShardSeq: %d, Weight: %d, ShardUncles: %d\nShardParent: %x\nSignature: %x",
+		a.NodeId, a.ShardSeq, a.Weight, len(a.ShardUncles), a.ShardParent, a.Signature)
 }
 
 func (a *Anchor) Serialize() ([]byte, error) {

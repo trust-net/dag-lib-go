@@ -64,7 +64,6 @@ type dbpLevelDb struct {
 }
 
 func (dbp *dbpLevelDb) DB(namespace string) db.Database {
-	logger.Debug("Request for database in namespace: %s", namespace)
 	// create a subdirectory for the namespace
 	if err := createDir(dbp.dirRoot + "/" + namespace); err != nil {
 		// issue with provided directory path
@@ -75,7 +74,7 @@ func (dbp *dbpLevelDb) DB(namespace string) db.Database {
 		logger.Error("Failed to instantiate namespace %s: %s", namespace, err)
 		return nil
 	} else {
-		logger.Debug("Providing database for namespace: %s", namespace)
+//		db.logger.Debug("opened database for namespace: %s", namespace)
 		return db
 	}
 }
