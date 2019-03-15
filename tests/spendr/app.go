@@ -25,6 +25,7 @@ var commands = map[string][2]string{
 	"create":      {"usage: create <resource name> [<initial value>] ...", "create one or more resource with optional initial credits"},
 	"bulk_create": {"usage: bulk_create <resource prefix> <number of counters> ...", "load network by creating bulk of resources with random initial values (0-100)"},
 	"xfer":        {"usage: xfer <owned resource name> <xfer value> <recipient resource name>...", "transfer credits from one resource to another"},
+	"bulk_xfer":   {"usage: bulk_xfer <source resource> <destination resource> <xfer value>", "load network by creating bulk transfer of credits from one resource to another"},
 	"info":        {"usage: info", "get current shard tips from local and remote nodes"},
 	//	"xover":  {"usage: xover <owned resource name> <xfer value> <recipient resource name>", "submit a transaction that has anchor from one node, but is submitted to another node"},
 	"quit": {"usage: quit", "leave application and shutdown"},
@@ -156,22 +157,26 @@ func handleOpCodeXferValue(tx dto.Transaction, ws state.State, op Ops) error {
 	// first deduct from source and update world state
 	if from, err = ws.Get([]byte(arg.Source)); err != nil {
 		fmt.Printf("ERROR: attempt to xfer value from a non existing resource: %s\nSubmitter: %x\n", arg.Source, tx.Request().SubmitterId)
+		fmt.Printf("\n%s", cmdPrompt)
 		return fmt.Errorf("Resource does not exists")
 	}
 	// validate: source resource must be owned by submitter
 	if string(tx.Request().SubmitterId) != string(from.Owner) {
 		fmt.Printf("ERROR: attempt to xfer value from unauthorized resource: %s\nOwner: %x\nSubmitter: %x\n", arg.Source, from.Owner, tx.Request().SubmitterId)
+		fmt.Printf("\n%s", cmdPrompt)
 		return fmt.Errorf("Resource not owned")
 	}
 	// validate: xfer value should not be more than source resource's value
 	fromValue := int64(common.BytesToUint64(from.Value))
 	if fromValue < arg.Value {
 		fmt.Printf("ERROR: attempt to xfer excess value: %d\nResource value: %d\nSubmitter: %x\n", arg.Value, fromValue, tx.Request().SubmitterId)
+		fmt.Printf("\n%s", cmdPrompt)
 		return fmt.Errorf("Resource insufficient")
 	}
 	// validate: xfer value cannot be less than 1 (i.e. cannot make negative transaction from other people's resource)
 	if arg.Value < 1 {
 		fmt.Printf("ERROR: attempt to make deduction from other people: %d\nSubmitter: %x\n", arg.Value, tx.Request().SubmitterId)
+		fmt.Printf("\n%s", cmdPrompt)
 		return fmt.Errorf("Negative transaction")
 	}
 	// deduct from source
@@ -179,11 +184,13 @@ func handleOpCodeXferValue(tx dto.Transaction, ws state.State, op Ops) error {
 	// update world state
 	if err := ws.Put(from); err != nil {
 		fmt.Printf("Error in updating '%s' with world state: %s\n", from.Key, err)
+		fmt.Printf("\n%s", cmdPrompt)
 		return err
 	}
 	// now fetch destination
 	if to, err = ws.Get([]byte(arg.Destination)); err != nil {
 		fmt.Printf("ERROR: attempt to xfer value to a non existing resource: %s\nSubmitter: %x\n", arg.Destination, tx.Request().SubmitterId)
+		fmt.Printf("\n%s", cmdPrompt)
 		return fmt.Errorf("Resource does not exists")
 	}
 	// add value to destination resource
@@ -192,17 +199,19 @@ func handleOpCodeXferValue(tx dto.Transaction, ws state.State, op Ops) error {
 	// update world state
 	if err := ws.Put(to); err != nil {
 		fmt.Printf("Error in updating '%s' with world state: %s\n", to.Key, err)
+		fmt.Printf("\n%s", cmdPrompt)
 		return err
 	}
 	return nil
 }
 
 func txHandler(tx dto.Transaction, state state.State) error {
-	fmt.Printf("\n")
-	defer fmt.Printf("\n%s", cmdPrompt)
+//	fmt.Printf("\n")
+//	defer fmt.Printf("\n%s", cmdPrompt)
 	op := Ops{}
 	if err := common.Deserialize(tx.Request().Payload, &op); err != nil {
 		fmt.Printf("Invalid TX from %x\n%s", tx.Anchor().NodeId, err)
+		fmt.Printf("\n%s", cmdPrompt)
 		return err
 	}
 	switch op.Code {
@@ -212,6 +221,7 @@ func txHandler(tx dto.Transaction, state state.State) error {
 		return handleOpCodeXferValue(tx, state, op)
 	default:
 		fmt.Printf("Unknown Op Code: %d\n", op.Code)
+		fmt.Printf("\n%s", cmdPrompt)
 		return fmt.Errorf("Unknown Op Code: %d", op.Code)
 	}
 }
@@ -219,6 +229,16 @@ func txHandler(tx dto.Transaction, state state.State) error {
 var dlt, remoteDlt, localDlt stack.DLT
 
 func doGetResource(key string) ([]byte, uint64, error) {
+	// get current network counter value from world state
+	if r, err := dlt.GetState([]byte(key)); err == nil {
+		value := common.BytesToUint64(r.Value)
+		return r.Owner, value, nil
+	} else {
+		return nil, 0, err
+	}
+}
+
+func getResource(dlt stack.DLT, key string) ([]byte, uint64, error) {
 	// get current network counter value from world state
 	if r, err := dlt.GetState([]byte(key)); err == nil {
 		value := common.BytesToUint64(r.Value)
@@ -315,10 +335,16 @@ func cli(local, remote stack.DLT) error {
 									oneDone = true
 								}
 								// get current network counter value from world state
-								if owner, value, err := doGetResource(key); err == nil {
-									fmt.Printf("%x [% 10s]: %d", owner, key, value)
+								_, locVal, locErr := getResource(localDlt, key)
+								_, remVal, remErr := getResource(remoteDlt, key)
+								if locErr == nil && remErr == nil {
+									fmt.Printf("[% 10s]: LOCAL: %d | REMOT: %d", key, locVal, remVal)
+								} else if locErr != nil && remErr == nil {
+									fmt.Printf("[% 10s]: LOCAL: %s | REMOT: %d", key, locErr, remVal)
+								} else if locErr == nil && remErr != nil {
+									fmt.Printf("[% 10s]: LOCAL: %d | REMOT: %s", key, locVal, remErr)
 								} else {
-									fmt.Printf("% 10s: %s", key, err)
+									fmt.Printf("% 10s: LOCAL: %s | REMOT: %s", key, locErr, remErr)
 								}
 							}
 							hasNext = wordScanner.Scan()
@@ -353,11 +379,14 @@ func cli(local, remote stack.DLT) error {
 								for i := int64(1); i <= arg.Value; {
 									name := fmt.Sprintf("%s-%04d", arg.Name, i)
 									value := rand.Int63n(100)
-									if i%2 == 0 {
-										use = remoteDlt
-									} else {
-										use = localDlt
-									}
+									// we do not want to alternate between nodes because of high velocity
+									// transactions, in practice this would be throtttled by rate limiting
+									// transactions from a single submitter
+									//									if i%2 == 0 {
+									//										use = remoteDlt
+									//									} else {
+									//										use = localDlt
+									//									}
 									if submitTx(use, submitter.NewRequest(string(makeResourceCreationPayload(name, value)))) {
 										i += 1
 										failCount = 0
@@ -407,6 +436,45 @@ func cli(local, remote stack.DLT) error {
 						} else {
 							fmt.Printf("%s\n", commands["xfer"][1])
 							fmt.Printf("%s\n", commands["xfer"][0])
+						}
+					case "bulk_xfer":
+						var source, dest string
+						var value int
+						if wordScanner.Scan() {
+							source = wordScanner.Text()
+						}
+						if wordScanner.Scan() {
+							dest = wordScanner.Text()
+						}
+						if wordScanner.Scan() {
+							value, _ = strconv.Atoi(wordScanner.Text())
+						}
+						if len(source) != 0 && len(dest) != 0 && value > 0 {
+							use := localDlt
+							success := submitTx(use, submitter.NewRequest(string(makeResourceCreationPayload(source, int64(value*10)))))
+							fmt.Printf("creating resource %s with initial value %d: %v\n", source, value, success)
+							success = success && submitTx(use, submitter.NewRequest(string(makeResourceCreationPayload(dest, 0))))
+							fmt.Printf("creating resource %s with initial value %d: %v\n", dest, 0, success)
+							if success {
+								fmt.Printf("adding %d transactions to xfer 1 value from %s to %s\n", value, source, dest)
+								failCount := 0
+								for i := 1; i <= value; {
+									if submitTx(dlt, submitter.NewRequest(string(makeXferValuePayload(source, dest, 1)))) {
+										i += 1
+										failCount = 0
+									} else if failCount > 100 {
+										fmt.Printf("aborting after %d failures\n", failCount)
+										break
+									} else {
+										failCount += 1
+									}
+								}
+							} else {
+								fmt.Printf("aborting due to failed resource creation\n")
+							}
+						} else {
+							fmt.Printf("%s\n", commands["bulk_xfer"][1])
+							fmt.Printf("%s\n", commands["bulk_xfer"][0])
 						}
 					case "sign":
 						var payload string

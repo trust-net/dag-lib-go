@@ -146,7 +146,7 @@ func (d *dlt) Submit(req *dto.TxRequest) (dto.Transaction, error) {
 
 	// lock shard
 	if err := d.sharder.LockState(); err != nil {
-		d.logger.Error("Failed to get world state lock: %s", err)
+		d.logger.Error("Submit: failed to get world state lock: %s", err)
 		return nil, err
 	}
 	defer d.sharder.UnlockState()
@@ -309,7 +309,7 @@ func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx d
 
 	// let sharding layer process transaction
 	if err := d.sharder.LockState(); err != nil {
-		peer.Logger().Error("Failed to get world state lock: %s\nTransaction: %x", err, tx.Id())
+		peer.Logger().Error("handleTransaction: failed to get world state lock: %s\nTransaction: %x", err, tx.Id())
 		return err
 	}
 	defer d.sharder.UnlockState()
@@ -664,8 +664,11 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 func (d *dlt) handleRECV_ForceShardSyncMsg(peer p2p.Peer, msg *ForceShardSyncMsg) error {
 	// reset the seen set at peer to prepare for sync (and retransmissions)
 	peer.ResetSeen()
-	// lock sharder
-	d.sharder.LockState()
+	// lock shard
+	if err := d.sharder.LockState(); err != nil {
+		d.logger.Error("handleRECV_ForceShardSyncMsg: failed to get world state lock: %s", err)
+		return err
+	}
 	defer d.sharder.UnlockState()
 	// compare local anchor with remote anchor,
 	// fetch anchor only for remote peer's shard,
@@ -886,7 +889,10 @@ func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent
 	// reset the seen set at peer to prepare for sync (and retransmissions)
 	peer.ResetSeen()
 	// lock sharder
-	d.sharder.LockState()
+	if err := d.sharder.LockState(); err != nil {
+		d.logger.Error("handleALERT_DoubleSpend: failed to get world state lock: %s", err)
+		return err
+	}
 	defer d.sharder.UnlockState()
 
 	// fetch local transaction for same submitter/seq/shard
@@ -941,7 +947,10 @@ func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent
 
 func (d *dlt) handleRECV_ForceShardFlushMsg(peer p2p.Peer, events chan controllerEvent, msg *ForceShardFlushMsg) error {
 	// lock sharder
-	d.sharder.LockState()
+	if err := d.sharder.LockState(); err != nil {
+		d.logger.Error("handleRECV_ForceShardFlushMsg: failed to get world state lock: %s", err)
+		return err
+	}
 	defer d.sharder.UnlockState()
 
 	// deserialize remote transaction from message
