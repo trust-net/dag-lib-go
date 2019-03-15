@@ -1289,8 +1289,9 @@ func (d *dlt) runner(peer p2p.Peer) error {
 func (d *dlt) isSeen(msgId [64]byte) bool {
 //	d.lock.Lock()
 //	defer d.lock.Unlock()
-	if d.seen.Size() > 100 {
-		for i := 0; i < 20; i += 1 {
+	maxSize := 100 * 12 // n/w throughput * n/w latency
+	if d.seen.Size() > maxSize {
+		for i := 0; i < maxSize/20; i += 1 {
 			d.seen.Pop()
 		}
 	}
