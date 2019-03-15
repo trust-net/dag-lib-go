@@ -64,15 +64,15 @@ func GenesisShardTx(shardId []byte) dto.Transaction {
 }
 
 func (s *sharder) LockState() error {
-	// lock world state
-	s.useWorldState.Lock()
+//	// lock world state
+//	s.useWorldState.Lock()
 	if s.shardId != nil {
 		// create new state from DB
 		if state, err := state.NewWorldState(s.dbp, s.shardId); err == nil {
 			s.worldState = state
 		} else {
-			// unlock the lock from above
-			s.useWorldState.Unlock()
+//			// unlock the lock from above
+//			s.useWorldState.Unlock()
 			return fmt.Errorf("Failed to get world state reference: %s", err)
 		}
 	}
@@ -85,8 +85,8 @@ func (s *sharder) UnlockState() {
 		s.worldState.Close()
 		s.worldState = nil
 	}
-	// unlock world state
-	s.useWorldState.Unlock()
+//	// unlock world state
+//	s.useWorldState.Unlock()
 }
 
 func (s *sharder) CommitState(tx dto.Transaction) error {

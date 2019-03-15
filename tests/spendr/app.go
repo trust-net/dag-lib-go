@@ -452,7 +452,7 @@ func cli(local, remote stack.DLT) error {
 						if len(source) != 0 && len(dest) != 0 && value > 0 {
 							use := localDlt
 							success := submitTx(use, submitter.NewRequest(string(makeResourceCreationPayload(source, int64(value*10)))))
-							fmt.Printf("creating resource %s with initial value %d: %v\n", source, value, success)
+							fmt.Printf("creating resource %s with initial value %d: %v\n", source, value*10, success)
 							success = success && submitTx(use, submitter.NewRequest(string(makeResourceCreationPayload(dest, 0))))
 							fmt.Printf("creating resource %s with initial value %d: %v\n", dest, 0, success)
 							if success {

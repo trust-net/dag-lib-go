@@ -15,11 +15,13 @@ import (
 )
 
 func initMocks() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P) {
+	log.SetLogLevel(log.NONE)
 	stack, sharder, endorser, mockP2PLayer, _ := initMocksAndDb()
 	return stack, sharder, endorser, mockP2PLayer
 }
 
 func initMocksAndDb() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P, *repo.MockDltDb) {
+	log.SetLogLevel(log.DEBUG)
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	mockDb := repo.NewMockDltDb()
@@ -53,7 +55,7 @@ func initMocksAndDb() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P, *repo.Mo
 // initialize DLT stack and validate
 func TestInitiatization(t *testing.T) {
 	// supress all logs
-	log.SetLogLevel(log.NONE)
+	log.SetLogLevel(log.DEBUG)
 	var stack DLT
 	var err error
 	testDb := db.NewInMemDbProvider()
