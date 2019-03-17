@@ -7,7 +7,7 @@ import (
 	"github.com/trust-net/dag-lib-go/common"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/stack/dto"
-	"sync"
+//	"sync"
 )
 
 type DagNode struct {
@@ -70,12 +70,12 @@ type dltDb struct {
 	shardDAGsDb        db.Database
 	shardTipsDb        db.Database
 	submitterHistoryDb db.Database
-	lock               sync.RWMutex
+//	lock               sync.RWMutex
 }
 
 func (d *dltDb) GetTx(id [64]byte) dto.Transaction {
-	d.lock.Lock()
-	defer d.lock.Unlock()
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
 	// get serialized transactions from DB
 	if data, err := d.txDb.Get(id[:]); err != nil {
 		return nil
@@ -95,8 +95,8 @@ func (d *dltDb) AddTx(tx dto.Transaction) error {
 	if data, err = tx.Serialize(); err != nil {
 		return err
 	}
-	d.lock.Lock()
-	defer d.lock.Unlock()
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
 	// check for duplicate transaction
 	id := tx.Id()
 	if present, _ := d.txDb.Has(id[:]); present {
@@ -111,8 +111,8 @@ func (d *dltDb) AddTx(tx dto.Transaction) error {
 }
 
 func (d *dltDb) FlushShard(shardId []byte) error {
-	d.lock.Lock()
-	defer d.lock.Unlock()
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
 	// walk through shard's tips, traverse up and remove
 	tipNodes := []*DagNode{}
 	for _, tip := range d.shardTips(shardId) {
@@ -139,8 +139,8 @@ func (d *dltDb) FlushShard(shardId []byte) error {
 func (d *dltDb) UpdateShard(tx dto.Transaction) error {
 	// save transaction
 	var err error
-	d.lock.Lock()
-	defer d.lock.Unlock()
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
 
 	// add the DAG node for the transaction to shard DAG db
 	dagNode := DagNode{
@@ -198,8 +198,8 @@ func (d *dltDb) saveShardDagNode(node *DagNode) error {
 }
 
 func (d *dltDb) ReplaceSubmitter(tx dto.Transaction) error {
-	d.lock.Lock()
-	defer d.lock.Unlock()
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
 
 	// lookup submitter history, if present
 	var history *SubmitterHistory
@@ -240,8 +240,8 @@ func (d *dltDb) ReplaceSubmitter(tx dto.Transaction) error {
 }
 
 func (d *dltDb) UpdateSubmitter(tx dto.Transaction) error {
-	d.lock.Lock()
-	defer d.lock.Unlock()
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
 
 	// lookup submitter history, if present
 	var history *SubmitterHistory
@@ -284,8 +284,8 @@ func (d *dltDb) UpdateSubmitter(tx dto.Transaction) error {
 }
 
 func (d *dltDb) DeleteTx(id [64]byte) error {
-	d.lock.Lock()
-	defer d.lock.Unlock()
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
 	// TBD: check that its a tip transaction, otherwise cannot delete
 
 	if err := d.txDb.Delete(id[:]); err != nil {
@@ -297,8 +297,8 @@ func (d *dltDb) DeleteTx(id [64]byte) error {
 }
 
 func (d *dltDb) GetShardDagNode(id [64]byte) *DagNode {
-	d.lock.Lock()
-	defer d.lock.Unlock()
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
 	return d.getShardDagNode(id)
 }
 
@@ -326,8 +326,8 @@ func submitterHistoryKey(id []byte, seq uint64) []byte {
 }
 
 func (d *dltDb) GetSubmitterHistory(id []byte, seq uint64) *SubmitterHistory {
-	d.lock.Lock()
-	defer d.lock.Unlock()
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
 
 	// get the submitter history
 	return d.getSubmitterHistory(id, seq)
@@ -355,8 +355,8 @@ func (d *dltDb) GetSubmitters() []byte {
 }
 
 func (d *dltDb) ShardTips(shardId []byte) [][64]byte {
-	d.lock.Lock()
-	defer d.lock.Unlock()
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
 	return d.shardTips(shardId)
 }
 
