@@ -1274,7 +1274,7 @@ func (d *dlt) runner(peer p2p.Peer) error {
 		}()
 	}
 	// start the event listener for this connection
-	events := make(chan controllerEvent, 10)
+	events := make(chan controllerEvent, 100 * 12)
 	go d.peerEventsListener(peer, events)
 	// start listening on messages from peer node
 	if err := d.listener(peer, events); err != nil {
