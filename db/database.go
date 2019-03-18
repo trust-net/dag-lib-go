@@ -12,6 +12,7 @@ type Database interface {
 	Delete(key []byte) error
 	Close() error
 	Name() string
+	Drop() error
 }
 
 type DbProvider interface {

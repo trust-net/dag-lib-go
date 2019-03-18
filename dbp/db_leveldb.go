@@ -94,6 +94,31 @@ func (db *dbLevelDB) Delete(key []byte) error {
 }
 
 func (db *dbLevelDB) Close() error {
-//	db.logger.Debug("Closing database")
+	//	db.logger.Debug("Closing database")
 	return db.ldb.Close()
+}
+
+func (db *dbLevelDB) Drop() error {
+	// get an iterator over DB
+	it := db.ldb.NewIterator(nil, nil)
+	if it == nil || !it.First() {
+		db.logger.Debug("empty iterator from DB")
+		return nil
+	} else {
+		defer it.Release()
+	}
+
+	// loop through iterator and delete keys
+	done := false
+	count := 0
+	for !done {
+		// copy over bytes, since iterator re-uses the existing slice, and append is copying reference only
+		if err := db.Delete(it.Key()); err != nil {
+			return err
+		}
+		count += 1
+		done = !it.Next()
+	}
+	db.logger.Debug("dropped %d elements", count)
+	return nil
 }

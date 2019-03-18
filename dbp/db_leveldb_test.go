@@ -159,7 +159,7 @@ func Test_Db_HasNotExisting(t *testing.T) {
 
 	// try to check if key exists that was never put
 	if exists, _ := db.Has([]byte("test-key")); exists {
-		t.Errorf("got incorect exists check: %s", exists)
+		t.Errorf("got incorect exists check: %v", exists)
 	}
 }
 
@@ -268,6 +268,43 @@ func Test_Db_GetAll(t *testing.T) {
 			if !seen {
 				t.Errorf("did not find %s in get all", v)
 			}
+		}
+	}
+}
+
+func Test_Db_Drop(t *testing.T) {
+	log.SetLogLevel(log.NONE)
+	dirPath := "tmp"
+	namespace := "test"
+	defer cleanup(dirPath)
+
+	// create a db
+	dbp, _ := NewDbp(dirPath)
+	db := dbp.DB(namespace)
+
+	// put some value
+	db.Put([]byte("test-key-1"), []byte("test-value-1"))
+	db.Put([]byte("test-key-2"), []byte("test-value-2"))
+	db.Put([]byte("test-key-3"), []byte("test-value-3"))
+
+	// drop the table
+	if err := db.Drop(); err != nil {
+		t.Errorf("failed to drop table: %s", err)
+	}
+
+	// get all values
+	values := db.GetAll()
+	if len(values) != 0 {
+		t.Errorf("did not expect any keys")
+	} else {
+		if exists, _ := db.Has([]byte("test-key-1")); exists {
+			t.Errorf("got incorect exists after drop: %v", exists)
+		}
+		if exists, _ := db.Has([]byte("test-key-2")); exists {
+			t.Errorf("got incorect exists after drop: %v", exists)
+		}
+		if exists, _ := db.Has([]byte("test-key-3")); exists {
+			t.Errorf("got incorect exists after drop: %v", exists)
 		}
 	}
 }

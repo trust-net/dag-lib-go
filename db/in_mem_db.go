@@ -4,36 +4,36 @@ package db
 
 import (
 	"errors"
-	"sync"
 	"github.com/trust-net/dag-lib-go/log"
+	"sync"
 )
 
 // in memory implementation of database (for testing etc.)
 type inMemDb struct {
-	mdb  map[string][]byte
-	lock sync.RWMutex
-	name string
+	mdb    map[string][]byte
+	lock   sync.RWMutex
+	name   string
 	isOpen bool
 	logger log.Logger
 }
 
 func NewInMemDatabase(name string) *inMemDb {
 	return &inMemDb{
-		mdb:  make(map[string][]byte),
-		name: name,
+		mdb:    make(map[string][]byte),
+		name:   name,
 		isOpen: true,
 		logger: log.NewLogger("inMemDb-" + name),
 	}
 }
 
 type inMemDbProvider struct {
-	repos map[string]*inMemDb
+	repos  map[string]*inMemDb
 	logger log.Logger
 }
 
 func NewInMemDbProvider() *inMemDbProvider {
 	return &inMemDbProvider{
-		repos: make(map[string]*inMemDb),
+		repos:  make(map[string]*inMemDb),
 		logger: log.NewLogger("inMemDbProvider"),
 	}
 }
@@ -83,6 +83,15 @@ func (db *inMemDb) GetAll() [][]byte {
 		i += 1
 	}
 	return values
+}
+
+func (db *inMemDb) Drop() error {
+	db.lock.Lock()
+	defer db.lock.Unlock()
+	for k, _ := range db.mdb {
+		delete(db.mdb, k)
+	}
+	return nil
 }
 
 func (db *inMemDb) Flush() {
