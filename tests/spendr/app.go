@@ -677,6 +677,8 @@ func main() {
 	// instantiate two DLT stacks
 	dbpLocal, _ := dbp.NewDbp("spendr-local")
 	dbpRemote, _ := dbp.NewDbp("spendr-remote")
+//	dbpLocal := db.NewInMemDbProvider()
+//	dbpRemote := db.NewInMemDbProvider()
 	if localDlt, err := stack.NewDltStack(config, dbpLocal); err != nil {
 		fmt.Printf("Failed to create 1st DLT stack: %s", err)
 	} else if remoteDlt, err := stack.NewDltStack(config2, dbpRemote); err != nil {

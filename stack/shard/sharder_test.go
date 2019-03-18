@@ -140,7 +140,7 @@ func TestRegistrationKnownShard(t *testing.T) {
 	if s.shardId == nil {
 		t.Errorf("Sharder did not register app's shard ID")
 	}
-	if s.txHandler == nil {
+	if s.appTxHandler == nil {
 		t.Errorf("Sharder did not register transaction call back")
 	}
 
@@ -172,7 +172,7 @@ func TestUnregistration(t *testing.T) {
 	if s.shardId != nil {
 		t.Errorf("Sharder did not clear app's shard ID")
 	}
-	if s.txHandler != nil {
+	if s.appTxHandler != nil {
 		t.Errorf("Sharder did not clear transaction call back")
 	}
 

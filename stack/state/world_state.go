@@ -120,16 +120,17 @@ func (s *worldState) Reset() error {
 //	s.lock.Lock()
 //	defer s.lock.Unlock()
 
+    // reset the cache
 	s.cache = make(map[string]*Resource)
-	for _, data := range s.stateDb.GetAll() {
-		r := &Resource{}
-		var err error
-		if err = r.DeSerialize(data); err == nil {
-			err = s.stateDb.Delete(r.Key)
-		}
-		if err != nil {
-			return err
-		}
+
+	// delete world state DB
+	if err := s.stateDb.Drop(); err != nil {
+		return err
+	}
+
+	// delete seen transactions DB
+	if err := s.seenTxDb.Drop(); err != nil {
+		return err
 	}
 	return nil
 }

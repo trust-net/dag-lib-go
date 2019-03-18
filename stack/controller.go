@@ -1027,7 +1027,7 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			return err
 		}
 		d.lock.Lock()
-		d.logger.Debug("listener: locked DLT stack")
+		d.logger.Debug("listener: locked DLT stack for message code: %d", msg.Code())
 		switch msg.Code() {
 		case NodeShutdownMsgCode:
 			// cleanly shutdown peer connection
