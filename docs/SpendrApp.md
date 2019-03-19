@@ -1,21 +1,22 @@
 ## Spendr: A Value Transfer Application
 
-* [Application Architecture](#Application-Architecture)
-    * [Application Shard Specs](#Application-Shard-Specs)
-    * [Application Transactions](#Application-Transactions)
-    * [Multiple Nodes Support](#Multiple-Nodes-Support)
-* [Transaction Ops](#Transaction-Ops)
-    * [Resource Creation Op](#Resource-Creation-Op)
-    * [Value Transfer Op](#Value-Transfer-Op)
-* [CLI Commands](#CLI-Commands)
-    * [Local Double Spend](#Local-Double-Spend)
-    * [Multiple Node Submission](#Multiple-Node-Submission)
-    * [Split Shard Submission](#Split-Shard-Submission)
-* [API Specifications](#API-Specifications)
-    * [Op: Query Resource Value](#Op-Query-Resource-Value)
-    * [Op: Resource Creation Payload](#Op-Resource-Creation-Payload)
-    * [Op: Value Transfer Payload](#Op-Value-Transfer-Payload)
-    * [Op: Submit Transaction](#Op-Submit-Transaction)
+* [Application Architecture](#application-architecture)
+    * [Application Shard Specs](#application-shard-specs)
+    * [Application Transactions](#application-transactions)
+    * [Multiple Nodes Support](#multiple-nodes-support)
+* [Transaction Ops](#transaction-ops)
+    * [Resource Creation Op](#resource-creation-op)
+    * [Value Transfer Op](#value-transfer-op)
+* [CLI Commands](#cli-commands)
+    * [Local Double Spend](#local-double-spend)
+    * [Multiple Node Submission](#multiple-node-submission)
+    * [Split Shard Submission](#split-shard-submission)
+    * [Bulk Load Generation](#bulk-load-generation)
+* [API Specifications](#api-specifications)
+    * [Op: Query Resource Value](#op-query-resource-value)
+    * [Op: Resource Creation Payload](#op-resource-creation-payload)
+    * [Op: Value Transfer Payload](#op-value-transfer-payload)
+    * [Op: Submit Transaction](#op-submit-transaction)
 
 ## Application Architecture
 A test driver application is provided to demonstrate and validate the double spending resolution protocol of the DLT stack protocol. Application implements following capabilities:
@@ -136,6 +137,27 @@ Test driver will implement a new CLI command that can be used to submit two doub
 CLI> usage: split <owned resource name> <xfer value> <recipient 1> <recipient 2>
 ```
 Above command will submit 2 different value transfer operations as 2 separate transaction requests in parallel to two different nodes using the same submitter seq. Network should eventually detect this double spending attempt and consistently converge on only one of the value transfer operation while rejecting the other operation on all nodes. World state on all nodes should show consistent and correct values for all recipients.
+
+### Bulk Load Generation
+Test driver implements following 2 CLI commands to generate bulk transactions load on the network:   
+
+**Create a bulk of `<number of counters>` number of transactions to create new counters**   
+_(all tokens have name format <prefix> + "-" + <0 padded 4 digit count>, e.g. `test-0001`)_
+
+```
+SPENDR: bulk_create
+load network by creating bulk of resources with random initial values (0-100)
+usage: bulk_create <resource prefix> <number of counters> ...
+```
+
+**Create a bulk of `<xfer value>` number of transactions to transfers `1` unit of value each**   
+_(named source and destination resources are created, so must not be present)_
+
+```
+SPENDR: bulk_xfer help
+load network by creating bulk transfer of credits from one resource to another
+usage: bulk_xfer <source resource> <destination resource> <xfer value>
+```
 
 ## API Specifications
 Application provides REST API to perform following operations from a remote client:

@@ -15,14 +15,13 @@ import (
 )
 
 func initMocks() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P) {
+	log.SetLogLevel(log.NONE)
 	stack, sharder, endorser, mockP2PLayer, _ := initMocksAndDb()
 	return stack, sharder, endorser, mockP2PLayer
 }
 
 func initMocksAndDb() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P, *repo.MockDltDb) {
-	// supress all logs
-	log.SetLogLevel(log.NONE)
-
+	log.SetLogLevel(log.DEBUG)
 	// create an instance of stack controller
 	stack, _ := NewDltStack(p2p.TestConfig(), db.NewInMemDbProvider())
 	mockDb := repo.NewMockDltDb()
@@ -55,6 +54,8 @@ func initMocksAndDb() (*dlt, *mockSharder, *mockEndorser, *p2p.MockP2P, *repo.Mo
 
 // initialize DLT stack and validate
 func TestInitiatization(t *testing.T) {
+	// supress all logs
+	log.SetLogLevel(log.DEBUG)
 	var stack DLT
 	var err error
 	testDb := db.NewInMemDbProvider()
@@ -77,10 +78,13 @@ func TestInitiatization(t *testing.T) {
 }
 
 // register application
-func TestRegister(t *testing.T) {
+func TestRegister_UnseenTx(t *testing.T) {
+	log.SetLogLevel(log.NONE)
 	// create a DLT stack instance with registered app and initialized mocks
 	stack, sharder, endorser, p2pLayer := initMocks()
 
+	// unregister default app
+	stack.Unregister()
 	// register a transaction with sharder to be replayed upon app registration
 	tx, _ := shard.SignedShardTransaction("test payload")
 	endorser.Handle(tx)
@@ -97,8 +101,7 @@ func TestRegister(t *testing.T) {
 	endorser.Reset()
 	p2pLayer.Reset()
 
-	// unregister default app and register a new app that remembers when replay transaction
-	stack.Unregister()
+	// register a new app that remembers when replay transaction
 	app := TestAppConfig()
 	cbCalled := false
 	txHandler := func(tx dto.Transaction, state state.State) error { cbCalled = true; return nil }
@@ -145,10 +148,11 @@ func TestRegister(t *testing.T) {
 	}
 }
 
-// replay failure during register application
-func TestRegisterReplayFailure(t *testing.T) {
+// re-register application after seen transaction
+func TestRegister_SeenTx(t *testing.T) {
+	log.SetLogLevel(log.NONE)
 	// create a DLT stack instance with registered app and initialized mocks
-	stack, sharder, endorser, _ := initMocks()
+	stack, sharder, endorser, p2pLayer := initMocks()
 
 	// register a transaction with sharder to be replayed upon app registration
 	tx, _ := shard.SignedShardTransaction("test payload")
@@ -161,8 +165,46 @@ func TestRegisterReplayFailure(t *testing.T) {
 	sharder.CommitState(tx)
 	sharder.UnlockState()
 
-	// unregister default app and register a new app that rejects replay transaction
+	// reset mocks to start tracking what we expect
+	sharder.Reset()
+	endorser.Reset()
+	p2pLayer.Reset()
+
+	// unregister and then re-register app that has already seen transaction earlier
 	stack.Unregister()
+	app := TestAppConfig()
+	cbCalled := false
+	txHandler := func(tx dto.Transaction, state state.State) error { cbCalled = true; return nil }
+
+	if err := stack.Register(app.ShardId, app.Name, txHandler); err != nil {
+		t.Errorf("Registration failed upon replay error: %s", err)
+	}
+
+	// replay should NOT have called application's transaction handler since transaction was already seen
+	if cbCalled {
+		t.Errorf("DLT stack app registration should not replay seen transactions to the app")
+	}
+}
+
+// replay failure during register application
+func TestRegisterReplayFailure(t *testing.T) {
+	// create a DLT stack instance with registered app and initialized mocks
+	stack, sharder, endorser, _ := initMocks()
+
+	// unregister default app
+	stack.Unregister()
+	// register a transaction with sharder to be replayed upon app registration
+	tx, _ := shard.SignedShardTransaction("test payload")
+	endorser.Handle(tx)
+	// lock the shard
+	sharder.LockState()
+	// handle transaction
+	sharder.Handle(tx)
+	// commit the shard
+	sharder.CommitState(tx)
+	sharder.UnlockState()
+
+	// register a new app that rejects replay transaction
 	app := TestAppConfig()
 	txHandler := func(tx dto.Transaction, state state.State) error { return errors.New("forced failure") }
 
@@ -2976,8 +3018,7 @@ func TestRECV_ForceShardSyncMsg_KnownShard_LocalAhead(t *testing.T) {
 	endorser.Reset()
 	p2pLayer.Reset()
 
-	log.SetLogLevel(log.DEBUG)
-	defer log.SetLogLevel(log.NONE)
+	log.SetLogLevel(log.NONE)
 
 	// build a mock peer
 	mockConn := p2p.TestConn()

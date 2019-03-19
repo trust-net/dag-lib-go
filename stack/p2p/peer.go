@@ -11,7 +11,7 @@ import (
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"github.com/trust-net/dag-lib-go/stack/repo"
 	"net"
-	"sync"
+//	"sync"
 )
 
 // P2P layer's wrapper for extracting Peer interface from underlying implementations
@@ -81,7 +81,7 @@ type peerDEVp2p struct {
 	states         map[int]interface{}
 	shardChildrenQ repo.Queue
 	txStack        []dto.Transaction
-	lock           sync.RWMutex
+//	lock           sync.RWMutex
 	logger         log.Logger
 }
 
@@ -183,15 +183,15 @@ func (p *peerDEVp2p) ShardChildrenQ() repo.Queue {
 }
 
 func (p *peerDEVp2p) ToBeFetchedStackPush(tx dto.Transaction) error {
-	p.lock.Lock()
-	defer p.lock.Unlock()
+//	p.lock.Lock()
+//	defer p.lock.Unlock()
 	p.txStack = append([]dto.Transaction{tx}, p.txStack...)
 	return nil
 }
 
 func (p *peerDEVp2p) ToBeFetchedStackPop() dto.Transaction {
-	p.lock.Lock()
-	defer p.lock.Unlock()
+//	p.lock.Lock()
+//	defer p.lock.Unlock()
 	if len(p.txStack) > 0 {
 		tx := p.txStack[0]
 		p.txStack = p.txStack[1:]

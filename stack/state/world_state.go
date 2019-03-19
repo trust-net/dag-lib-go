@@ -5,7 +5,7 @@ package state
 import (
 	"fmt"
 	"github.com/trust-net/dag-lib-go/db"
-	"sync"
+//	"sync"
 )
 
 type State interface {
@@ -28,12 +28,12 @@ type worldState struct {
 	// TBD: following should be redundant, since we are locking at sharding layer before passing this reference
 	// to app for transaction processing -- but then we never know how app is using it. Also, protects during any
 	// reads happening outside of transaction processing
-	lock sync.RWMutex
+//	lock sync.RWMutex
 }
 
 func (s *worldState) Get(key []byte) (*Resource, error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+//	s.lock.Lock()
+//	defer s.lock.Unlock()
 	// first look into cache
 	if r, found := s.cache[string(key)]; !found {
 		// not found, so read from DB and cache
@@ -55,8 +55,8 @@ func (s *worldState) Get(key []byte) (*Resource, error) {
 
 // delete will put nil as value
 func (s *worldState) Delete(key []byte) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+//	s.lock.Lock()
+//	defer s.lock.Unlock()
 	s.cache[string(key)] = nil
 	return nil
 }
@@ -64,8 +64,8 @@ func (s *worldState) Delete(key []byte) error {
 // used to check if a transaction is already seen by the shard, so as to skip duplicates
 // also, marks the transaction as seen for any future reference
 func (s *worldState) Seen(txId []byte) bool {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+//	s.lock.Lock()
+//	defer s.lock.Unlock()
 	isSeen, _ := s.seenTxDb.Has(txId)
 	if !isSeen {
 		s.seenTxDb.Put(txId, []byte{})
@@ -75,8 +75,8 @@ func (s *worldState) Seen(txId []byte) bool {
 }
 
 func (s *worldState) Put(r *Resource) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+//	s.lock.Lock()
+//	defer s.lock.Unlock()
 	if r == nil || len(r.Key) == 0 {
 		return fmt.Errorf("nil resource or key")
 	}
@@ -85,14 +85,14 @@ func (s *worldState) Put(r *Resource) error {
 }
 
 func (s *worldState) Close() error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+//	s.lock.Lock()
+//	defer s.lock.Unlock()
 	s.seenTxDb.Close()
 	return s.stateDb.Close()
 }
 func (s *worldState) Persist() error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+//	s.lock.Lock()
+//	defer s.lock.Unlock()
 	for k, r := range s.cache {
 		if r == nil {
 			// delete from DB
@@ -117,18 +117,20 @@ func (s *worldState) Persist() error {
 }
 
 func (s *worldState) Reset() error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+//	s.lock.Lock()
+//	defer s.lock.Unlock()
+
+    // reset the cache
 	s.cache = make(map[string]*Resource)
-	for _, data := range s.stateDb.GetAll() {
-		r := &Resource{}
-		var err error
-		if err = r.DeSerialize(data); err == nil {
-			err = s.stateDb.Delete(r.Key)
-		}
-		if err != nil {
-			return err
-		}
+
+	// delete world state DB
+	if err := s.stateDb.Drop(); err != nil {
+		return err
+	}
+
+	// delete seen transactions DB
+	if err := s.seenTxDb.Drop(); err != nil {
+		return err
 	}
 	return nil
 }

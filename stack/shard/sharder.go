@@ -48,7 +48,7 @@ type sharder struct {
 
 	shardId       []byte
 	genesisTx     dto.Transaction
-	txHandler     func(tx dto.Transaction, state state.State) error
+	appTxHandler     func(tx dto.Transaction, state state.State) error
 	worldState    state.State
 	useWorldState sync.RWMutex
 }
@@ -63,16 +63,39 @@ func GenesisShardTx(shardId []byte) dto.Transaction {
 	return tx
 }
 
+func (s *sharder) txHandler(tx dto.Transaction, state state.State, ignoreSeen bool) error {
+	// check if app has registered a transaction handler
+	if s.appTxHandler == nil {
+		return fmt.Errorf("no app handler registered")
+	}
+
+	// check to make sure transaction is not processed already
+	txId := tx.Id()
+	if state.Seen(txId[:]) {
+		// transaction already processed by application
+		if !ignoreSeen {
+			// report error for seen transaction
+			return fmt.Errorf("transaction already processed")
+		} else {
+			// silently skip
+			return nil
+		}
+	}
+	
+	// call app's registered transaction handler
+	return s.appTxHandler(tx, state)
+}
+
 func (s *sharder) LockState() error {
-	// lock world state
-	s.useWorldState.Lock()
+//	// lock world state
+//	s.useWorldState.Lock()
 	if s.shardId != nil {
 		// create new state from DB
 		if state, err := state.NewWorldState(s.dbp, s.shardId); err == nil {
 			s.worldState = state
 		} else {
-			// unlock the lock from above
-			s.useWorldState.Unlock()
+//			// unlock the lock from above
+//			s.useWorldState.Unlock()
 			return fmt.Errorf("Failed to get world state reference: %s", err)
 		}
 	}
@@ -82,11 +105,12 @@ func (s *sharder) LockState() error {
 func (s *sharder) UnlockState() {
 	// discarded whatever is not commited
 	if s.worldState != nil {
-		s.worldState.Close()
+		// we should re-use the DB connections
+//		s.worldState.Close()
 		s.worldState = nil
 	}
-	// unlock world state
-	s.useWorldState.Unlock()
+//	// unlock world state
+//	s.useWorldState.Unlock()
 }
 
 func (s *sharder) CommitState(tx dto.Transaction) error {
@@ -109,7 +133,7 @@ func (s *sharder) CommitState(tx dto.Transaction) error {
 
 func (s *sharder) Register(shardId []byte, txHandler func(tx dto.Transaction, state state.State) error) error {
 	s.shardId = append(shardId)
-	s.txHandler = txHandler
+	s.appTxHandler = txHandler
 	// lock world state for replay
 	if err := s.LockState(); err != nil {
 		return err
@@ -159,13 +183,13 @@ func (s *sharder) Register(shardId []byte, txHandler func(tx dto.Transaction, st
 				// fetch transaction for this node
 				if tx := s.db.GetTx(node.TxId); tx != nil {
 					// fmt.Printf("GetTx: %x\n", tx.Id())
-					// check if transaction is alread seen
-					if s.worldState.Seen(node.TxId[:]) {
-						// skip
-						continue
-					}
-					// replay transaction to the app
-					if err := s.txHandler(tx, s.worldState); err == nil {
+//					// check if transaction is alread seen
+//					if s.worldState.Seen(node.TxId[:]) {
+//						// skip
+//						continue
+//					}
+					// replay transaction to the app, silently ignore seen transaction
+					if err := s.txHandler(tx, s.worldState, true); err == nil {
 						// we only add children of this transaction to queue if this was a good transaction
 						for _, id := range node.Children {
 							// fmt.Printf("Pushing into Q: %x\n", id)
@@ -189,15 +213,8 @@ func (s *sharder) Register(shardId []byte, txHandler func(tx dto.Transaction, st
 }
 
 func (s *sharder) Unregister() error {
-	///////////////////////////////////////////////////////
-	// TBD: remove below when we start persisting last processed transaction during unregister,
-	// and do not replay previosuly processed transactions during register
-	if state, err := state.NewWorldState(s.dbp, s.shardId); err == nil {
-		state.Reset()
-	}
-	///////////////////////////////////////////////////////
 	s.shardId = nil
-	s.txHandler = nil
+	s.appTxHandler = nil
 	s.genesisTx = nil
 	s.worldState = nil
 	return nil
@@ -316,7 +333,7 @@ func (s *sharder) Approve(tx dto.Transaction) error {
 		return fmt.Errorf("parent transaction unknown for shard")
 	} else {
 		// process transaction via application's callback
-		if err := s.txHandler(tx, s.worldState); err != nil {
+		if err := s.txHandler(tx, s.worldState, false); err != nil {
 			return err
 		}
 
@@ -325,9 +342,10 @@ func (s *sharder) Approve(tx dto.Transaction) error {
 		if err := s.db.AddTx(tx); err != nil {
 			return err
 		}
-		// mark the transaction as seen by app
-		txId := tx.Id()
-		s.worldState.Seen(txId[:])
+		// moved this to txhandler wrapper
+//		// mark the transaction as seen by app
+//		txId := tx.Id()
+//		s.worldState.Seen(txId[:])
 
 		// moved this to shard commit step
 		//		// update the shard's DAG and Tips
@@ -377,13 +395,14 @@ func (s *sharder) Handle(tx dto.Transaction) error {
 	}
 
 	// if an app is registered, call app's transaction handler
-	if s.txHandler != nil && string(s.shardId) == string(tx.Request().ShardId) {
-		if err := s.txHandler(tx, s.worldState); err != nil {
+	if s.appTxHandler != nil && string(s.shardId) == string(tx.Request().ShardId) {
+		if err := s.txHandler(tx, s.worldState, false); err != nil {
 			return err
 		}
-		// mark the transaction as seen by app
-		txId := tx.Id()
-		s.worldState.Seen(txId[:])
+		// moved this to txhandler wrapper
+//		// mark the transaction as seen by app so that it will not get replayed at startup/registration
+//		txId := tx.Id()
+//		s.worldState.Seen(txId[:])
 	}
 	return nil
 }
@@ -397,19 +416,24 @@ func (s *sharder) GetState(key []byte) (*state.Resource, error) {
 		if state, err := state.NewWorldState(s.dbp, s.shardId); err != nil {
 			return nil, err
 		} else {
-			defer state.Close()
+			// re-use db connection
+//			defer state.Close()
 			return state.Get(key)
 		}
 	}
 }
 
+// flush world state for the shard
 func (s *sharder) Flush(shardId []byte) error {
-	// flush world state for the shard
-	if state, err := state.NewWorldState(s.dbp, shardId); err != nil {
+	// first check if the shard is same as registered and has world state open
+	var ws state.State
+	var err error
+	if string(shardId) == string(s.shardId) && s.worldState != nil {
+		ws = s.worldState
+	} else if ws, err = state.NewWorldState(s.dbp, shardId); err != nil {
 		return err
-	} else {
-		state.Reset()
 	}
+	ws.Reset()
 	// flush shard DAG
 	if err := s.db.FlushShard(shardId); err != nil {
 		return err

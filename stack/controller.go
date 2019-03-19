@@ -99,6 +99,7 @@ func (d *dlt) unregister() error {
 func (d *dlt) validateSignatures(tx dto.Transaction) error {
 	// validate transaction Anchor signature using transaction approver's ID
 	if !d.p2p.Verify(tx.Anchor().Bytes(), tx.Anchor().Signature, tx.Anchor().NodeId) {
+		d.logger.Debug("Invalid anchor signature for Tx: %x\n%s", tx.Id(), tx.Anchor().ToString())
 		return errors.New("Anchor signature invalid")
 	}
 
@@ -118,6 +119,8 @@ func (d *dlt) isPoW(req *dto.TxRequest) bool {
 }
 
 func (d *dlt) Submit(req *dto.TxRequest) (dto.Transaction, error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	// node needs to host a registered app for accepting transaction request
 	if d.app == nil {
 		return nil, errors.New("app not registered")
@@ -145,7 +148,7 @@ func (d *dlt) Submit(req *dto.TxRequest) (dto.Transaction, error) {
 
 	// lock shard
 	if err := d.sharder.LockState(); err != nil {
-		d.logger.Error("Failed to get world state lock: %s", err)
+		d.logger.Error("Submit: failed to get world state lock: %s", err)
 		return nil, err
 	}
 	defer d.sharder.UnlockState()
@@ -155,6 +158,11 @@ func (d *dlt) Submit(req *dto.TxRequest) (dto.Transaction, error) {
 	if a, err := d.anchor(); err != nil {
 		return nil, err
 	} else {
+		// test my own signature
+		if !d.p2p.Verify(a.Bytes(), a.Signature, a.NodeId) {
+			d.logger.Debug("Invalid signature for my own anchor!!!\n%s", a.ToString())
+			return nil, errors.New("Anchor signature invalid")
+		}
 		tx = dto.NewTransaction(req, a)
 	}
 
@@ -186,6 +194,8 @@ func (d *dlt) Submit(req *dto.TxRequest) (dto.Transaction, error) {
 			return nil, err
 		}
 	}
+	// log anchor details for successfully accpeted submission
+	d.logger.Debug("Submitted anchor signature for Tx: %x\n%s", tx.Id(), tx.Anchor().ToString())
 
 	// finally send it to p2p layer, to broadcase to others
 	id := tx.Id()
@@ -214,6 +224,8 @@ func (d *dlt) Anchor(id []byte, seq uint64, lastTx [64]byte) *dto.Anchor {
 }
 
 func (d *dlt) GetState(key []byte) (*state.Resource, error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	// fetch value from sharder
 	return d.sharder.GetState(key)
 }
@@ -234,10 +246,14 @@ func (d *dlt) anchor() (*dto.Anchor, error) {
 }
 
 func (d *dlt) Start() error {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	return d.p2p.Start()
 }
 
 func (d *dlt) Stop() {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	d.p2p.Stop()
 }
 
@@ -301,7 +317,7 @@ func (d *dlt) handleTransaction(peer p2p.Peer, events chan controllerEvent, tx d
 
 	// let sharding layer process transaction
 	if err := d.sharder.LockState(); err != nil {
-		peer.Logger().Error("Failed to get world state lock: %s\nTransaction: %x", err, tx.Id())
+		peer.Logger().Error("handleTransaction: failed to get world state lock: %s\nTransaction: %x", err, tx.Id())
 		return err
 	}
 	defer d.sharder.UnlockState()
@@ -353,6 +369,8 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 	done := false
 	for !done {
 		e := <-events
+		d.lock.Lock()
+		d.logger.Debug("peerEventsListener: locked DLT stack")
 		switch e.code {
 		case RECV_NewTxBlockMsg:
 			// check if transaction's parent is known
@@ -649,6 +667,8 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 		default:
 			peer.Logger().Error("Unknown event: %d", e.code)
 		}
+		d.logger.Debug("peerEventsListener: unlocked DLT stack")
+		d.lock.Unlock()
 	}
 	peer.Logger().Info("Exiting event listener...")
 }
@@ -656,8 +676,11 @@ func (d *dlt) peerEventsListener(peer p2p.Peer, events chan controllerEvent) {
 func (d *dlt) handleRECV_ForceShardSyncMsg(peer p2p.Peer, msg *ForceShardSyncMsg) error {
 	// reset the seen set at peer to prepare for sync (and retransmissions)
 	peer.ResetSeen()
-	// lock sharder
-	d.sharder.LockState()
+	// lock shard
+	if err := d.sharder.LockState(); err != nil {
+		d.logger.Error("handleRECV_ForceShardSyncMsg: failed to get world state lock: %s", err)
+		return err
+	}
 	defer d.sharder.UnlockState()
 	// compare local anchor with remote anchor,
 	// fetch anchor only for remote peer's shard,
@@ -878,7 +901,10 @@ func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent
 	// reset the seen set at peer to prepare for sync (and retransmissions)
 	peer.ResetSeen()
 	// lock sharder
-	d.sharder.LockState()
+	if err := d.sharder.LockState(); err != nil {
+		d.logger.Error("handleALERT_DoubleSpend: failed to get world state lock: %s", err)
+		return err
+	}
 	defer d.sharder.UnlockState()
 
 	// fetch local transaction for same submitter/seq/shard
@@ -933,7 +959,10 @@ func (d *dlt) handleALERT_DoubleSpend(peer p2p.Peer, events chan controllerEvent
 
 func (d *dlt) handleRECV_ForceShardFlushMsg(peer p2p.Peer, events chan controllerEvent, msg *ForceShardFlushMsg) error {
 	// lock sharder
-	d.sharder.LockState()
+	if err := d.sharder.LockState(); err != nil {
+		d.logger.Error("handleRECV_ForceShardFlushMsg: failed to get world state lock: %s", err)
+		return err
+	}
 	defer d.sharder.UnlockState()
 
 	// deserialize remote transaction from message
@@ -997,11 +1026,15 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			peer.Logger().Debug("Failed to read message: %s", err)
 			return err
 		}
+		d.lock.Lock()
+		d.logger.Debug("listener: locked DLT stack for message code: %d", msg.Code())
 		switch msg.Code() {
 		case NodeShutdownMsgCode:
 			// cleanly shutdown peer connection
 			d.p2p.Disconnect(peer)
 			events <- newControllerEvent(SHUTDOWN, nil)
+			d.logger.Debug("listener: unlocked DLT stack")
+			d.lock.Unlock()
 			return nil
 
 		case TransactionMsgCode:
@@ -1009,17 +1042,23 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			tx := dto.NewTransaction(&dto.TxRequest{}, &dto.Anchor{})
 			if err := msg.Decode(tx); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			}
 
 			// validate signatures
 			if err := d.validateSignatures(tx); err != nil {
-				peer.Logger().Debug("Submitted transaction failed signature verification: %s", err)
+				peer.Logger().Debug("Network transaction failed signature verification: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			}
 
 			// check if message was already seen by stack
 			if d.isSeen(tx.Id()) {
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				continue
 			} else {
 				// emit a RECV_NewTxBlockMsg event
@@ -1031,6 +1070,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &ShardSyncMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("\nFailed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_ShardSyncMsg event
@@ -1042,6 +1083,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &ShardAncestorRequestMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_ShardAncestorRequestMsg event
@@ -1053,6 +1096,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &ShardAncestorResponseMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_ShardAncestorResponseMsg event
@@ -1064,6 +1109,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &ShardChildrenRequestMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_ShardChildrenRequestMsg event
@@ -1075,6 +1122,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &ShardChildrenResponseMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_ShardChildrenResponseMsg event
@@ -1086,6 +1135,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &TxShardChildRequestMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_TxShardChildRequestMsg event
@@ -1097,6 +1148,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &TxShardChildResponseMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_TxShardChildResponseMsg event
@@ -1108,6 +1161,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &ForceShardSyncMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_ForceShardSyncMsg event
@@ -1119,6 +1174,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &SubmitterWalkUpRequestMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_SubmitterWalkUpRequestMsg event
@@ -1130,6 +1187,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &SubmitterWalkUpResponseMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_SubmitterWalkUpResponseMsg event
@@ -1141,6 +1200,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &SubmitterProcessDownRequestMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_SubmitterProcessDownRequestMsg event
@@ -1152,6 +1213,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &SubmitterProcessDownResponseMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_SubmitterProcessDownResponseMsg event
@@ -1163,6 +1226,8 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 			m := &ForceShardFlushMsg{}
 			if err := msg.Decode(m); err != nil {
 				d.logger.Debug("Failed to decode message: %s", err)
+				d.logger.Debug("listener: unlocked DLT stack")
+				d.lock.Unlock()
 				return err
 			} else {
 				// emit a RECV_ForceShardFlushMsg event
@@ -1178,8 +1243,11 @@ func (d *dlt) listener(peer p2p.Peer, events chan controllerEvent) error {
 		default:
 			// error condition, unknown protocol message
 			d.logger.Debug("Unknown protocol message recieved: %d", msg.Code())
+			d.lock.Unlock()
 			return errors.New("unknown protocol message recieved")
 		}
+		d.logger.Debug("listener: unlocked DLT stack")
+		d.lock.Unlock()
 	}
 }
 
@@ -1206,7 +1274,7 @@ func (d *dlt) runner(peer p2p.Peer) error {
 		}()
 	}
 	// start the event listener for this connection
-	events := make(chan controllerEvent, 10)
+	events := make(chan controllerEvent, 100 * 12)
 	go d.peerEventsListener(peer, events)
 	// start listening on messages from peer node
 	if err := d.listener(peer, events); err != nil {
@@ -1219,10 +1287,11 @@ func (d *dlt) runner(peer p2p.Peer) error {
 
 // mark a message as seen for stack (different from marking it seen for connected peer nodes)
 func (d *dlt) isSeen(msgId [64]byte) bool {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	if d.seen.Size() > 100 {
-		for i := 0; i < 20; i += 1 {
+//	d.lock.Lock()
+//	defer d.lock.Unlock()
+	maxSize := 100 * 12 // n/w throughput * n/w latency
+	if d.seen.Size() > maxSize {
+		for i := 0; i < maxSize/20; i += 1 {
 			d.seen.Pop()
 		}
 	}

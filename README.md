@@ -21,8 +21,9 @@ Go library for [DAG protocol](https://github.com/trust-net/dag-documentation#dag
     * [Process transactions from network peers](https://github.com/trust-net/dag-lib-go#Process-transactions-from-network-peers)
     * [Stop DLT Stack](https://github.com/trust-net/dag-lib-go#Stop-DLT-Stack)
 * [Release Notes](https://github.com/trust-net/dag-lib-go#Release-Notes)
-    * [Iteration 8](#Iteration-8)
-    * [Iteration 7](#Iteration-7)
+    * [Iteration 9](#iteration-9)
+    * [Iteration 8](#iteration-8)
+    * [Iteration 7](#iteration-7)
     * [Iteration 6](https://github.com/trust-net/dag-lib-go#Iteration-6)
     * [Iteration 5](https://github.com/trust-net/dag-lib-go#Iteration-5)
     * [Iteration 4](https://github.com/trust-net/dag-lib-go#Iteration-4)
@@ -167,7 +168,7 @@ Create a `p2p.Config` instance. These values can be read from a file, using the 
 ```
 
 ### Instantiate DLT stack
-Use `stack.NewDltStack(conf p2p.Config, db db.Database)` method to instantiate a DLT stack controller. This takes two arguments:
+Use `stack.NewDltStack(conf p2p.Config, dbp db.DbProvider)` method to instantiate a DLT stack controller. This takes two arguments:
 * a `p2p.Config` structure with parameters as described above
 * an implementation of `db.DbProvider` implementation, that will be used by DLT stack to instantiate DLT DB to save/retrieve/persist data
 
@@ -189,6 +190,14 @@ If application had registered with DLT stack with appropriate callback methods, 
 Once application execution completes (either due to application shutdown, or any other reason), call the `stack.DLT.Stop()` method to disconnect from all connected network peers.
 
 ## Release Notes
+
+### Iteration 9
+* support persistence, i.e., node restart should not loose world state, as per [Iteration 9](https://github.com/trust-net/dag-lib-go/issues/57)
+* app registration and transaction handling callback should not re-play seen transactions
+* node should be able to process long running sessions with huge amount of transactions data
+* added tests for bulk load transactions for persistent storage
+* simplified locking in DLT stack
+* added leveldb based persistent storage for db provider and db implementations
 
 ### Iteration 8
 * changed the transaction submission flow to a single step request from submitter

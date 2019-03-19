@@ -11,7 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/trust-net/dag-lib-go/stack/dto"
 	"math/big"
-	"sync"
+//	"sync"
 )
 
 type Layer interface {
@@ -41,16 +41,18 @@ type layerDEVp2p struct {
 	cb    Runner
 	id    []byte
 	peers map[string]Peer
-	lock  sync.RWMutex
+//	lock  sync.RWMutex
 }
 
 func (l *layerDEVp2p) Anchor(a *dto.Anchor) error {
+//	l.lock.Lock()
+//	defer l.lock.Unlock()
 	if a == nil {
 		return errors.New("cannot sign nil anchor")
 	}
 	// force update anchor's node ID with this node
 	a.NodeId = l.Id()
-	if signature, err := l.Sign(a.Bytes()); err != nil {
+	if signature, err := l.sign(a.Bytes()); err != nil {
 		return err
 	} else {
 		a.Signature = signature
@@ -64,8 +66,8 @@ func (l *layerDEVp2p) Start() error {
 
 func (l *layerDEVp2p) Disconnect(peer Peer) {
 	// remove the peer from peer map
-	l.lock.Lock()
-	defer l.lock.Unlock()
+//	l.lock.Lock()
+//	defer l.lock.Unlock()
 	delete(l.peers, string(peer.ID()))
 	peer.Disconnect()
 }
@@ -87,6 +89,12 @@ func (l *layerDEVp2p) Id() []byte {
 }
 
 func (l *layerDEVp2p) Sign(data []byte) ([]byte, error) {
+//	l.lock.Lock()
+//	defer l.lock.Unlock()
+	return l.sign(data)
+}
+
+func (l *layerDEVp2p) sign(data []byte) ([]byte, error) {
 	s := signature{}
 	var err error
 	// sign the payload using SHA256 hash and ECDSA signature
@@ -138,13 +146,13 @@ func (l *layerDEVp2p) Broadcast(msgId []byte, msgcode uint64, data interface{}) 
 func (l *layerDEVp2p) runner(dPeer *p2p.Peer, dRw p2p.MsgReadWriter) error {
 	peer := NewDEVp2pPeer(dPeer, dRw)
 	// add the peer to layer's peers map
-	l.lock.Lock()
+//	l.lock.Lock()
 	l.peers[string(peer.ID())] = peer
-	l.lock.Unlock()
+//	l.lock.Unlock()
 	defer func() {
-		l.lock.Lock()
+//		l.lock.Lock()
 		delete(l.peers, string(peer.ID()))
-		l.lock.Unlock()
+//		l.lock.Unlock()
 	}()
 	return l.cb(peer)
 }

@@ -4,39 +4,55 @@ package db
 
 import (
 	"errors"
+	"github.com/trust-net/dag-lib-go/log"
 	"sync"
 )
 
 // in memory implementation of database (for testing etc.)
 type inMemDb struct {
-	mdb  map[string][]byte
-	lock sync.RWMutex
-	name string
+	mdb    map[string][]byte
+	lock   sync.RWMutex
+	name   string
+	isOpen bool
+	logger log.Logger
 }
 
 func NewInMemDatabase(name string) *inMemDb {
 	return &inMemDb{
-		mdb:  make(map[string][]byte),
-		name: name,
+		mdb:    make(map[string][]byte),
+		name:   name,
+		isOpen: true,
+		logger: log.NewLogger("inMemDb-" + name),
 	}
 }
 
 type inMemDbProvider struct {
-	repos map[string]*inMemDb
+	repos  map[string]*inMemDb
+	logger log.Logger
 }
 
 func NewInMemDbProvider() *inMemDbProvider {
 	return &inMemDbProvider{
-		repos: make(map[string]*inMemDb),
+		repos:  make(map[string]*inMemDb),
+		logger: log.NewLogger("inMemDbProvider"),
 	}
 }
 
 func (p *inMemDbProvider) DB(ns string) Database {
 	if db, exists := p.repos[ns]; exists {
-		return db
+		if db.isOpen {
+			p.logger.Debug("DB already open: %s", ns)
+			db.isOpen = true
+			return db
+		} else {
+			p.logger.Debug("DB re-opened: %s", ns)
+			db.isOpen = true
+			return db
+		}
 	} else {
 		db = NewInMemDatabase(ns)
 		p.repos[ns] = db
+		p.logger.Debug("DB opened for: %s", ns)
 		return db
 	}
 }
@@ -70,6 +86,15 @@ func (db *inMemDb) GetAll() [][]byte {
 	return values
 }
 
+func (db *inMemDb) Drop() error {
+	db.lock.Lock()
+	defer db.lock.Unlock()
+	for k, _ := range db.mdb {
+		delete(db.mdb, k)
+	}
+	return nil
+}
+
 func (db *inMemDb) Flush() {
 	db.lock.Lock()
 	defer db.lock.Unlock()
@@ -91,6 +116,8 @@ func (db *inMemDb) Delete(key []byte) error {
 }
 
 func (db *inMemDb) Close() error {
+	db.isOpen = false
+	db.logger.Debug("Closed DB: %s", db.name)
 	return nil
 }
 

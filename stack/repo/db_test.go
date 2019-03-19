@@ -17,20 +17,17 @@ func TestInitiatization(t *testing.T) {
 	if db == nil || err != nil {
 		t.Errorf("Initiatization validation failed, c: %s, err: %s", repo, err)
 	}
-	if db.txDb != testDb.DB("dlt_transactions") {
-		t.Errorf("Incorrect Transaction DB reference expected: %s, actual: %s", testDb.DB("dlt_transactions").Name(), db.txDb.Name())
+	if db.txDb.Name() != "dlt_transactions" {
+		t.Errorf("Incorrect Transaction DB reference expected: %s, actual: %s", "dlt_transactions", db.txDb.Name())
 	}
-	if db.shardDAGsDb != testDb.DB("dlt_shard_dags") {
-		t.Errorf("Incorrect Shards DB reference expected: %s, actual: %s", testDb.DB("dlt_shard_dags").Name(), db.shardDAGsDb.Name())
+	if db.shardDAGsDb.Name() != "dlt_shard_dags" {
+		t.Errorf("Incorrect Shards DB reference expected: %s, actual: %s", "dlt_shard_dags", db.shardDAGsDb.Name())
 	}
-	if db.shardTipsDb != testDb.DB("dlt_shard_tips") {
-		t.Errorf("Incorrect Shards DB reference expected: %s, actual: %s", testDb.DB("dlt_shard_tips").Name(), db.shardTipsDb.Name())
+	if db.shardTipsDb.Name() != "dlt_shard_tips" {
+		t.Errorf("Incorrect Shards DB reference expected: %s, actual: %s", "dlt_shard_tips", db.shardTipsDb.Name())
 	}
-	//	if db.submitterDAGsDb != testDb.DB("dlt_submitter_dags") {
-	//		t.Errorf("Incorrect Submitters DB reference expected: %s, actual: %s", testDb.DB("dlt_submitter_dags").Name(), db.submitterDAGsDb.Name())
-	//	}
-	if db.submitterHistoryDb != testDb.DB("dlt_submitter_history") {
-		t.Errorf("Incorrect Submitters history DB reference expected: %s, actual: %s", testDb.DB("dlt_submitter_history").Name(), db.submitterHistoryDb.Name())
+	if db.submitterHistoryDb.Name() != "dlt_submitter_history" {
+		t.Errorf("Incorrect Submitters history DB reference expected: %s, actual: %s", "dlt_submitter_history", db.submitterHistoryDb.Name())
 	}
 }
 

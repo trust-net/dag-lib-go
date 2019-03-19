@@ -64,16 +64,17 @@ func (s *Submitter) NewRequest(data string) *TxRequest {
 		// payload for transaction's operations
 		Payload: []byte(data),
 		// shard id for the transaction
-		ShardId: s.ShardId,
-		// submitter's last transaction
-		LastTx: s.LastTx,
+		ShardId: append([]byte{}, s.ShardId...),
+//		// submitter's last transaction
+//		LastTx: s.LastTx,
 		// Submitter's public ID
-		SubmitterId: s.Id,
+		SubmitterId: append([]byte{}, s.Id...),
 		// submitter's transaction sequence
 		SubmitterSeq: s.Seq,
 		// a padding to meet challenge for network's DoS protection
 		Padding: 0x00,
 	}
+	copy(req.LastTx[:], s.LastTx[:])
 
 	// sign the request using SHA256 digest and ECDSA private key
 	type signature struct {
