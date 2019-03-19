@@ -87,6 +87,20 @@ func Test_DB_Reopen(t *testing.T) {
 	}
 }
 
+func Test_DB_OpenOpen(t *testing.T) {
+	log.SetLogLevel(log.NONE)
+	dirPath := "tmp"
+	namespace := "test"
+	defer cleanup("tmp")
+	dbp, _ := NewDbp(dirPath)
+	// create db
+	dbp.DB(namespace)
+	// re-open db that was already created
+	if db := dbp.DB(namespace); db == nil {
+		t.Errorf("failed to reopen db namespace")
+	}
+}
+
 func Test_DB_Namepsaces(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"

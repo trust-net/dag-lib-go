@@ -17,6 +17,8 @@ type dbLevelDB struct {
 	ldb *leveldb.DB
 	// logger
 	logger log.Logger
+	// connection status
+	isOpen bool
 }
 
 func newDbLevelDB(namespace string, path string, cache int, handles int) (*dbLevelDB, error) {
@@ -45,6 +47,7 @@ func newDbLevelDB(namespace string, path string, cache int, handles int) (*dbLev
 		ldb:       ldb,
 		namespace: namespace,
 		logger:    log.NewLogger("db-" + namespace),
+		isOpen:    true,
 	}
 	return db, nil
 }
@@ -94,7 +97,8 @@ func (db *dbLevelDB) Delete(key []byte) error {
 }
 
 func (db *dbLevelDB) Close() error {
-	//	db.logger.Debug("Closing database")
+	db.logger.Debug("Closing database")
+	db.isOpen = false
 	return db.ldb.Close()
 }
 

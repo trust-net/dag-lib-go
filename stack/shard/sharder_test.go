@@ -329,6 +329,8 @@ func TestAnchorMultiTip(t *testing.T) {
 	child1, _ := SignedShardTransaction("child1")
 	child2, _ := SignedShardTransaction("child2")
 	s.db.AddTx(child1)
+	log.SetLogLevel(log.DEBUG)
+	defer log.SetLogLevel(log.NONE)
 	s.LockState()
 	s.Handle(child1)
 	s.CommitState(child1)

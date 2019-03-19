@@ -39,6 +39,7 @@ func NewDbp(dirRoot string) (db.DbProvider, error) {
 	logger.Debug("Created a DB Provider instance at directory root: %s", dirRoot)
 	return &dbpLevelDb{
 		dirRoot: dirRoot,
+		repos:   make(map[string]*dbLevelDB),
 	}, nil
 }
 
@@ -61,20 +62,32 @@ func makeReadWrite(path string) error {
 type dbpLevelDb struct {
 	// directory root for each database to be provided
 	dirRoot string
+	// open DB connections
+	repos map[string]*dbLevelDB
 }
 
 func (dbp *dbpLevelDb) DB(namespace string) db.Database {
+	// check if DB connection already exists
+	if repo, exists := dbp.repos[namespace]; exists {
+		if repo.isOpen {
+			logger.Debug("re-using already open DB: %s", namespace)
+			return repo
+		} else {
+			logger.Debug("DB is closed: %s", namespace)
+		}
+	}
 	// create a subdirectory for the namespace
 	if err := createDir(dbp.dirRoot + "/" + namespace); err != nil {
 		// issue with provided directory path
 		logger.Error("Cannot create %s: %s", dbp.dirRoot+"/"+namespace, err)
 		return nil
 	}
-	if db, err := newDbLevelDB(namespace, dbp.dirRoot+"/"+namespace, 16, 16); err != nil {
+	if repo, err := newDbLevelDB(namespace, dbp.dirRoot+"/"+namespace, 16, 16); err != nil {
 		logger.Error("Failed to instantiate namespace %s: %s", namespace, err)
 		return nil
 	} else {
-//		db.logger.Debug("opened database for namespace: %s", namespace)
-		return db
+		dbp.repos[namespace] = repo
+		logger.Debug("opened database for namespace: %s", namespace)
+		return repo
 	}
 }

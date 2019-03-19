@@ -41,8 +41,9 @@ func NewInMemDbProvider() *inMemDbProvider {
 func (p *inMemDbProvider) DB(ns string) Database {
 	if db, exists := p.repos[ns]; exists {
 		if db.isOpen {
-			p.logger.Error("DB already open: %s", ns)
-			return nil
+			p.logger.Debug("DB already open: %s", ns)
+			db.isOpen = true
+			return db
 		} else {
 			p.logger.Debug("DB re-opened: %s", ns)
 			db.isOpen = true

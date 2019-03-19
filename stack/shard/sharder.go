@@ -105,7 +105,8 @@ func (s *sharder) LockState() error {
 func (s *sharder) UnlockState() {
 	// discarded whatever is not commited
 	if s.worldState != nil {
-		s.worldState.Close()
+		// we should re-use the DB connections
+//		s.worldState.Close()
 		s.worldState = nil
 	}
 //	// unlock world state
@@ -415,7 +416,8 @@ func (s *sharder) GetState(key []byte) (*state.Resource, error) {
 		if state, err := state.NewWorldState(s.dbp, s.shardId); err != nil {
 			return nil, err
 		} else {
-			defer state.Close()
+			// re-use db connection
+//			defer state.Close()
 			return state.Get(key)
 		}
 	}
