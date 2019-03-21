@@ -38,6 +38,13 @@ func NewInMemDbProvider() *inMemDbProvider {
 	}
 }
 
+func (p *inMemDbProvider) CloseAll() error {
+	for _, db := range p.repos {
+		db.Close()
+	}
+	return nil
+}
+
 func (p *inMemDbProvider) DB(ns string) Database {
 	if db, exists := p.repos[ns]; exists {
 		if db.isOpen {
