@@ -66,6 +66,13 @@ type dbpLevelDb struct {
 	repos map[string]*dbLevelDB
 }
 
+func (dbp *dbpLevelDb) CloseAll() error {
+	for _, db := range dbp.repos {
+		db.Close()
+	}
+	return nil
+}
+
 func (dbp *dbpLevelDb) DB(namespace string) db.Database {
 	// check if DB connection already exists
 	if repo, exists := dbp.repos[namespace]; exists {

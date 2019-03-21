@@ -7,6 +7,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/trust-net/dag-lib-go/log"
 )
 
@@ -97,8 +98,16 @@ func (db *dbLevelDB) Delete(key []byte) error {
 }
 
 func (db *dbLevelDB) Close() error {
-	db.logger.Debug("Closing database")
 	db.isOpen = false
+	// compact the DB
+	db.logger.Debug("Compacting database ...")
+	if err := db.ldb.CompactRange(util.Range{}); err != nil {
+		db.logger.Error("Failed to compact db: %s", err)
+		return err
+	}
+	db.logger.Debug("Compacting done.")
+	db.logger.Debug("Closing database ...")
+	defer db.logger.Debug("Close done.")
 	return db.ldb.Close()
 }
 

@@ -17,4 +17,5 @@ type Database interface {
 
 type DbProvider interface {
 	DB(namespace string) Database
+	CloseAll() error
 }

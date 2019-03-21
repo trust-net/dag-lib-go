@@ -37,6 +37,7 @@ type dlt struct {
 	app       *AppConfig
 	txHandler func(tx dto.Transaction, state state.State) error
 	db        repo.DltDb
+	dbp		  db.DbProvider
 	p2p       p2p.Layer
 	conf      *p2p.Config
 	sharder   shard.Sharder
@@ -254,7 +255,9 @@ func (d *dlt) Start() error {
 func (d *dlt) Stop() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	d.logger.Debug("Shutting down...")
 	d.p2p.Stop()
+	d.dbp.CloseAll()
 }
 
 // perform handshake with the peer node
@@ -1311,6 +1314,7 @@ func NewDltStack(conf p2p.Config, dbp db.DbProvider) (*dlt, error) {
 	}
 	stack := &dlt{
 		db:     db,
+		dbp: dbp,
 		seen:   common.NewSet(),
 		logger: log.NewLogger(conf.Name),
 		conf:   &conf,
