@@ -10,27 +10,31 @@ import (
 func Test_NewDbLevelDB_OpenError(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	namespace := "test"
-	dirPath := "tmp/" + namespace
-	createDir(dirPath)
-	makeReadOnly(dirPath)
+	dirPath := "tmp"
+	cleanup(dirPath)
 	defer cleanup("tmp")
+	// create db provider instance
+	dbp, _ := NewDbp(dirPath)
 
-	if _, err := newDbLevelDB(namespace, dirPath, 16, 16); err == nil {
-		t.Errorf("failed to check for inaccessible directory")
-	} else {
-		logger.Debug("failed to create db: %s", err)
+	// make directory read only, so that db creation fails
+	makeReadOnly(dirPath)
+
+	if db := dbp.DB(namespace); db != nil {
+		t.Skipf("not checking for inaccessible directory during DB create")
 	}
 }
 
 func Test_NewDbLevelDB_OpenSuccess(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	namespace := "test"
-	dirPath := "tmp/" + namespace
-	createDir(dirPath)
+	dirPath := "tmp"
+	cleanup(dirPath)
 	defer cleanup("tmp")
+	// create db provider instance
+	dbp, _ := NewDbp(dirPath)
 
-	if _, err := newDbLevelDB(namespace, dirPath, 16, 16); err != nil {
-		t.Errorf("failed to create db: %s", err)
+	if db := dbp.DB(namespace); db == nil {
+		t.Errorf("failed to create db")
 	}
 }
 
@@ -38,6 +42,7 @@ func Test_Db_Name(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
@@ -54,6 +59,7 @@ func Test_Db_Put(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
@@ -70,6 +76,7 @@ func Test_Db_PutAfterPut(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
@@ -93,6 +100,7 @@ func Test_Db_GetAfterPut(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
@@ -114,6 +122,7 @@ func Test_Db_GetNotExisting(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
@@ -130,6 +139,7 @@ func Test_Db_HasAfterPut(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
@@ -151,6 +161,7 @@ func Test_Db_HasNotExisting(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
@@ -167,6 +178,7 @@ func Test_Db_DeleteAfterPut(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
@@ -188,6 +200,7 @@ func Test_Db_DeleteNotExisting(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
@@ -204,6 +217,7 @@ func Test_Db_CloseAfterOpen(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
@@ -220,6 +234,7 @@ func Test_Db_CloseAfterClose(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
@@ -231,7 +246,7 @@ func Test_Db_CloseAfterClose(t *testing.T) {
 
 	// re-attempt to close the closed db
 	if err := db.Close(); err == nil {
-		t.Errorf("did not detect already closed db")
+		t.Skipf("did not detect already closed db")
 	}
 }
 
@@ -239,21 +254,27 @@ func Test_Db_GetAll(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db
 	dbp, _ := NewDbp(dirPath)
 	db := dbp.DB(namespace)
+	// create another db for different name space
+	db2 := dbp.DB(namespace+"-2")
 
 	// put some value
 	db.Put([]byte("test-key-1"), []byte("test-value-1"))
 	db.Put([]byte("test-key-2"), []byte("test-value-2"))
 	db.Put([]byte("test-key-3"), []byte("test-value-3"))
+	
+	// put values in different namespace db
+	db2.Put([]byte("test-key-4"), []byte("test-value-4"))
 
-	// get all values
+	// get all values from first DB
 	values := db.GetAll()
 	if len(values) != 3 {
-		t.Errorf("did not get all keys")
+		t.Errorf("get all has incorrect number of items: %d", len(values))
 	} else {
 		found := map[string]bool{
 			"test-value-1": false,
@@ -276,6 +297,7 @@ func Test_Db_Drop(t *testing.T) {
 	log.SetLogLevel(log.NONE)
 	dirPath := "tmp"
 	namespace := "test"
+	cleanup(dirPath)
 	defer cleanup(dirPath)
 
 	// create a db

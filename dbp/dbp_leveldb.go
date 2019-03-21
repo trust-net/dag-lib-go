@@ -6,6 +6,11 @@ import (
 	"fmt"
 	"github.com/trust-net/dag-lib-go/db"
 	"github.com/trust-net/dag-lib-go/log"
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/filter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/util"
 	"os"
 )
 
@@ -37,8 +42,27 @@ func NewDbp(dirRoot string) (db.DbProvider, error) {
 		}
 	}
 	logger.Debug("Created a DB Provider instance at directory root: %s", dirRoot)
+
+	// Ensure we have some minimal caching and file guarantees
+		cache := 16
+		handles := 16
+	ldb, err := leveldb.OpenFile(dirRoot, &opt.Options{
+		OpenFilesCacheCapacity: handles,
+		BlockCacheCapacity:     cache / 2,
+		WriteBuffer:            cache / 4, // Two of these are used internally
+		Filter:                 filter.NewBloomFilter(10),
+	})
+	if _, corrupted := err.(*errors.ErrCorrupted); corrupted {
+		ldb, err = leveldb.RecoverFile(dirRoot, nil)
+	}
+	// (Re)check for errors and abort if opening of the db failed
+	if err != nil {
+		return nil, err
+	}
+
 	return &dbpLevelDb{
 		dirRoot: dirRoot,
+		ldb: ldb,
 		repos:   make(map[string]*dbLevelDB),
 	}, nil
 }
@@ -62,6 +86,8 @@ func makeReadWrite(path string) error {
 type dbpLevelDb struct {
 	// directory root for each database to be provided
 	dirRoot string
+	// LevelDB instance
+	ldb *leveldb.DB
 	// open DB connections
 	repos map[string]*dbLevelDB
 }
@@ -70,26 +96,31 @@ func (dbp *dbpLevelDb) CloseAll() error {
 	for _, db := range dbp.repos {
 		db.Close()
 	}
-	return nil
+	// compact the DB
+	logger.Debug("Compacting database ...")
+	if err := dbp.ldb.CompactRange(util.Range{}); err != nil {
+		logger.Error("Failed to compact db: %s", err)
+		return err
+	}
+	logger.Debug("Compacting done.")
+	logger.Debug("Closing database ...")
+	defer logger.Debug("Close done.")
+	return dbp.ldb.Close()
 }
 
 func (dbp *dbpLevelDb) DB(namespace string) db.Database {
 	// check if DB connection already exists
 	if repo, exists := dbp.repos[namespace]; exists {
-		if repo.isOpen {
-			logger.Debug("re-using already open DB: %s", namespace)
-			return repo
-		} else {
-			logger.Debug("DB is closed: %s", namespace)
-		}
+		logger.Debug("re-using already open DB: %s", namespace)
+		return repo
 	}
-	// create a subdirectory for the namespace
-	if err := createDir(dbp.dirRoot + "/" + namespace); err != nil {
-		// issue with provided directory path
-		logger.Error("Cannot create %s: %s", dbp.dirRoot+"/"+namespace, err)
-		return nil
-	}
-	if repo, err := newDbLevelDB(namespace, dbp.dirRoot+"/"+namespace, 16, 16); err != nil {
+//	// create a subdirectory for the namespace
+//	if err := createDir(dbp.dirRoot + "/" + namespace); err != nil {
+//		// issue with provided directory path
+//		logger.Error("Cannot create %s: %s", dbp.dirRoot+"/"+namespace, err)
+//		return nil
+//	}
+	if repo, err := newDbLevelDB(dbp, namespace); err != nil {
 		logger.Error("Failed to instantiate namespace %s: %s", namespace, err)
 		return nil
 	} else {

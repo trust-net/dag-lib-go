@@ -3,59 +3,38 @@
 package dbp
 
 import (
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/filter"
-	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/trust-net/dag-lib-go/log"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 type dbLevelDB struct {
-	// namespace for the DB
+	// db provider reference
+	dbp *dbpLevelDb
+	// prefix for the DB
+	prefix []byte
+	// namspace for the DB
 	namespace string
-	// LevelDB instance
-	ldb *leveldb.DB
+//	// LevelDB instance
+//	ldb *leveldb.DB
 	// logger
 	logger log.Logger
-	// connection status
-	isOpen bool
+//	// connection status
+//	isOpen bool
 }
 
-func newDbLevelDB(namespace string, path string, cache int, handles int) (*dbLevelDB, error) {
-	// Ensure we have some minimal caching and file guarantees
-	if cache < 16 {
-		cache = 16
-	}
-	if handles < 16 {
-		handles = 16
-	}
-	ldb, err := leveldb.OpenFile(path, &opt.Options{
-		OpenFilesCacheCapacity: handles,
-		BlockCacheCapacity:     cache / 2,
-		WriteBuffer:            cache / 4, // Two of these are used internally
-		Filter:                 filter.NewBloomFilter(10),
-	})
-	if _, corrupted := err.(*errors.ErrCorrupted); corrupted {
-		ldb, err = leveldb.RecoverFile(path, nil)
-	}
-	// (Re)check for errors and abort if opening of the db failed
-	if err != nil {
-		return nil, err
-	}
-
+func newDbLevelDB(dbp *dbpLevelDb, namespace string) (*dbLevelDB, error) {
 	db := &dbLevelDB{
-		ldb:       ldb,
+		dbp: dbp,
 		namespace: namespace,
+		prefix: []byte("start-" + namespace + "-end:"),
 		logger:    log.NewLogger("db-" + namespace),
-		isOpen:    true,
 	}
 	return db, nil
 }
 
 func (db *dbLevelDB) GetAll() [][]byte {
 	// get an iterator over DB
-	it := db.ldb.NewIterator(nil, nil)
+	it := db.dbp.ldb.NewIterator(util.BytesPrefix([]byte(db.prefix)), nil)
 	if it == nil || !it.First() {
 		db.logger.Debug("empty iterator from DB")
 		return nil
@@ -73,7 +52,7 @@ func (db *dbLevelDB) GetAll() [][]byte {
 		values = append(values, value)
 		done = !it.Next()
 	}
-	db.logger.Error("getall has %d elements", len(values))
+	db.logger.Debug("getall has %d elements", len(values))
 	return values
 }
 
@@ -82,38 +61,29 @@ func (db *dbLevelDB) Name() string {
 }
 
 func (db *dbLevelDB) Put(key []byte, value []byte) error {
-	return db.ldb.Put(key, value, nil)
+	return db.dbp.ldb.Put(append(db.prefix, key...), value, nil)
 }
 
 func (db *dbLevelDB) Get(key []byte) ([]byte, error) {
-	return db.ldb.Get(key, nil)
+	return db.dbp.ldb.Get(append(db.prefix, key...), nil)
 }
 
 func (db *dbLevelDB) Has(key []byte) (bool, error) {
-	return db.ldb.Has(key, nil)
+	return db.dbp.ldb.Has(append(db.prefix, key...), nil)
 }
 
 func (db *dbLevelDB) Delete(key []byte) error {
-	return db.ldb.Delete(key, nil)
+	return db.dbp.ldb.Delete(append(db.prefix, key...), nil)
 }
 
 func (db *dbLevelDB) Close() error {
-	db.isOpen = false
-	// compact the DB
-	db.logger.Debug("Compacting database ...")
-	if err := db.ldb.CompactRange(util.Range{}); err != nil {
-		db.logger.Error("Failed to compact db: %s", err)
-		return err
-	}
-	db.logger.Debug("Compacting done.")
-	db.logger.Debug("Closing database ...")
-	defer db.logger.Debug("Close done.")
-	return db.ldb.Close()
+	db.dbp = nil
+	return nil
 }
 
 func (db *dbLevelDB) Drop() error {
 	// get an iterator over DB
-	it := db.ldb.NewIterator(nil, nil)
+	it := db.dbp.ldb.NewIterator(util.BytesPrefix([]byte(db.prefix)), nil)
 	if it == nil || !it.First() {
 		db.logger.Debug("empty iterator from DB")
 		return nil
@@ -126,7 +96,7 @@ func (db *dbLevelDB) Drop() error {
 	count := 0
 	for !done {
 		// copy over bytes, since iterator re-uses the existing slice, and append is copying reference only
-		if err := db.Delete(it.Key()); err != nil {
+		if err := db.dbp.ldb.Delete(it.Key(), nil); err != nil {
 			return err
 		}
 		count += 1
